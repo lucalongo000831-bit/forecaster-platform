@@ -44,6 +44,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
   const launcherItems = [
     ["/watchlists", "Watchlists", Star], ["/calendar", "Calendar", CalendarDays],
     [instrumentPath(data.primaryInstrument, "signal"), "Signals", Sparkles],
+    [instrumentPath(data.primaryInstrument, "forecast"), "Forecast", TrendingUp],
     [instrumentPath(data.primaryInstrument, "targets"), "Targets & risk", CircleDollarSign],
     [instrumentPath(data.primaryInstrument, "seasonality"), "Seasonality", TrendingUp],
     [instrumentPath(data.primaryInstrument, "pattern"), "Patterns", BarChart3],

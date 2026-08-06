@@ -49,6 +49,13 @@ export function AnnualPerformanceChart({ data }: { data: AnnualPerformancePoint[
   </BarChart></ResponsiveContainer></div>;
 }
 
+export function ForecastDistributionChart({ data, currentPrice }: { data: Array<{ label: string; price: number }>; currentPrice: number }) {
+  return <div className="chart-wrap chart-short"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data}>
+    <CartesianGrid stroke={grid} vertical={false}/><XAxis dataKey="label" tick={axis}/><YAxis tick={axis} domain={["auto", "auto"]}/><Tooltip/>
+    <Bar dataKey="price" fill="#6576ed" radius={[6,6,0,0]} name="Forecast percentile"/><ReferenceLine y={currentPrice} stroke="#172033" strokeDasharray="4 4" label="Current"/>
+  </ComposedChart></ResponsiveContainer></div>;
+}
+
 export function DividendChart({ data }: { data: TimePoint[] }) {
   return <div className="chart-wrap chart-short"><ResponsiveContainer width="100%" height="100%"><BarChart data={data}>
     <CartesianGrid stroke={grid} vertical={false}/><XAxis dataKey="label" tick={axis} minTickGap={70}/><YAxis tick={axis}/><Tooltip/>

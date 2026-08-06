@@ -45,6 +45,8 @@ export const riskRequestSchema = z.object({
   customAtrMultiplier: z.number().min(0.5).max(6).nullable().optional(),
   customStopPercent: z.number().min(0.005).max(0.25).nullable().optional(),
 });
+export const forecastHorizonSchema = z.enum(["1d", "5d", "10d", "20d", "1m", "3m", "6m", "12m"]);
+export const forecastRequestSchema = z.object({ symbol: symbolSchema, horizon: forecastHorizonSchema.default("1m"), target: z.coerce.number().positive().max(100_000_000).optional(), stop: z.coerce.number().positive().max(100_000_000).optional() });
 
 export function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());
