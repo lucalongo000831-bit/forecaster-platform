@@ -6,6 +6,7 @@ import { financialProviderRouter } from "@/providers";
 import { analyticalClose, annualPerformance, drawdowns, periodReturns, relativeStrengthIndex, simpleMovingAverage, toTimeSeries } from "./yahoo/analytics";
 import { instrumentHref, marketSlug, normalizeSymbol } from "./yahoo/symbol-resolver";
 import { canFallback, safeServerLog } from "./yahoo/errors";
+import { analyzeTechnical } from "@/engines/technical";
 import type {
   DashboardData,
   FundamentalsData,
@@ -243,18 +244,18 @@ export class YahooFinanceProvider implements FinancialDataProvider {
     return this.fallback<MomentumData>("momentum", symbol, async () => {
       const points = (await financialProviderRouter.chart(symbol, "5Y", "1d")).data.points;
       const values = points.map(analyticalClose);
+      const analysis = analyzeTechnical(symbol, points);
       const rsi = relativeStrengthIndex(values);
       const sma20 = simpleMovingAverage(values, 20);
       const sma50 = simpleMovingAverage(values, 50);
       const latest = values.at(-1) ?? 0;
-      const latestRsi = rsi.at(-1) ?? 50;
+      const latestRsi = analysis.momentum.rsi14.value ?? 50;
       const distance20 = sma20.at(-1) ? (latest / sma20.at(-1)! - 1) * 100 : 0;
-      const speed = values.length > 20 ? (latest / values.at(-21)! - 1) * 100 : 0;
       const mood = latestRsi >= 70 ? "Overbought" : latestRsi <= 30 ? "Oversold" : "Neutral";
       return {
         mood,
-        assessment: `RSI(14) ${latestRsi.toFixed(1)}; indicators are calculated from real closes.`,
-        metrics: [{ label: "RSI (14)", value: latestRsi }, { label: "vs SMA 20", value: distance20 }, { label: "20D speed", value: speed }],
+        assessment: `Technical score ${analysis.score.toFixed(1)}/100 · ${analysis.modelVersion} · ${analysis.observations} observations.`,
+        metrics: [{ label: "RSI (14)", value: latestRsi }, { label: "vs SMA 20", value: distance20 }, { label: "ATR (14)", value: analysis.volatility.atr14.value ?? 0 }],
         dpoSeries: points.map((point, index) => ({ label: point.timestamp.slice(0, 10), value: analyticalClose(point) - sma20[index], comparison: analyticalClose(point) - sma50[index] })),
         oscillatorSeries: points.map((point, index) => ({ label: point.timestamp.slice(0, 10), value: (rsi[index] - 50) * 2 })),
         source: "calculated",

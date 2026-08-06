@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const symbolSchema = z.string().trim().min(1).max(32).regex(/^(?:\^[A-Za-z0-9][A-Za-z0-9.-]{0,29}|[A-Za-z0-9][A-Za-z0-9.^=-]{0,30})$/);
 export const searchQuerySchema = z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N}\s.'’&+^=:_-]+$/u);
-export const chartRangeSchema = z.enum(["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"]);
+export const chartRangeSchema = z.enum(["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "10Y", "MAX"]);
 export const chartIntervalSchema = z.enum(["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]);
 
 export const searchRequestSchema = z.object({ q: searchQuerySchema });
@@ -27,6 +27,8 @@ export const earningsRequestSchema = z.object({
   to: z.iso.date(),
   symbol: symbolSchema.optional(),
 }).refine((value) => value.from <= value.to, { message: "Intervallo date non valido" });
+export const analysisHorizonSchema = z.enum(["intraday", "1d", "1w", "1m", "3m", "6m", "12m", "long"]);
+export const technicalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m"), benchmark: symbolSchema.default("^GSPC") });
 
 export function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());

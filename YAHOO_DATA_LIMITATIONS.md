@@ -81,10 +81,12 @@ Default mappings are:
 | 1D | 5m |
 | 5D | 15m |
 | 1M | 1h |
+| 3M | 1d |
 | 6M | 1d |
 | YTD | 1d |
 | 1Y | 1d |
 | 5Y | 1wk |
+| 10Y | 1wk |
 | MAX | 1mo |
 
 The API rejects incompatible explicit intervals. Null, invalid, or non-finite OHLCV points are removed. A range with no valid point returns an unavailable state or an explicitly labelled demo fallback.

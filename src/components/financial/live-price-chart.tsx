@@ -7,7 +7,7 @@ import type { ChartRange, ChartResponse, TimePoint } from "@/types";
 import { DataError, DataUnavailable } from "./data-state";
 import { formatDataSource } from "@/lib";
 
-const ranges: ChartRange[] = ["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"];
+const ranges: ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "10Y", "MAX"];
 
 export function LivePriceChart({ symbol, initialData, referenceValue, initialSource = "calculated" }: { symbol: string; initialData: TimePoint[]; referenceValue: number; initialSource?: string }) {
   const [range, setRange] = useState<ChartRange>("MAX");

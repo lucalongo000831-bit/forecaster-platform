@@ -28,10 +28,12 @@ const chartDefaults: Record<ChartRange, { days?: number; startOfYear?: boolean; 
   "1D": { days: 1, interval: "5m" },
   "5D": { days: 5, interval: "15m" },
   "1M": { days: 31, interval: "1h" },
+  "3M": { days: 92, interval: "1d" },
   "6M": { days: 183, interval: "1d" },
   YTD: { startOfYear: true, interval: "1d" },
   "1Y": { days: 366, interval: "1d" },
   "5Y": { days: 365 * 5 + 2, interval: "1wk" },
+  "10Y": { days: 365 * 10 + 3, interval: "1wk" },
   MAX: { max: true, interval: "1mo" },
 };
 
@@ -39,10 +41,12 @@ const intervalCompatibility: Record<ChartRange, ChartInterval[]> = {
   "1D": ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"],
   "5D": ["5m", "15m", "30m", "60m", "90m", "1h"],
   "1M": ["30m", "60m", "1h", "1d"],
+  "3M": ["1d", "5d", "1wk"],
   "6M": ["1d", "5d", "1wk"],
   YTD: ["1d", "5d", "1wk"],
   "1Y": ["1d", "5d", "1wk"],
   "5Y": ["1d", "5d", "1wk", "1mo"],
+  "10Y": ["1d", "5d", "1wk", "1mo"],
   MAX: ["1wk", "1mo", "3mo"],
 };
 

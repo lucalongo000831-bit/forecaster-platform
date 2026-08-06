@@ -45,7 +45,7 @@ export function fallbackChart(symbolInput: string, range: ChartRange): MarketCha
     currency: mockFinancialDataset.instrument.currency,
     exchange: mockFinancialDataset.instrument.market,
     range,
-    interval: range === "1D" ? "5m" : range === "5D" ? "15m" : range === "1M" ? "1h" : range === "5Y" ? "1wk" : range === "MAX" ? "1mo" : "1d",
+    interval: range === "1D" ? "5m" : range === "5D" ? "15m" : range === "1M" ? "1h" : range === "5Y" || range === "10Y" ? "1wk" : range === "MAX" ? "1mo" : "1d",
     previousClose: null,
     isDelayed: true,
     asOf: null,

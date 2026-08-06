@@ -12,11 +12,11 @@ const DAY = 86_400_000;
 const intervalMap: Record<ChartInterval, { multiplier: number; timespan: string }> = {
   "1m": { multiplier: 1, timespan: "minute" }, "2m": { multiplier: 2, timespan: "minute" }, "5m": { multiplier: 5, timespan: "minute" }, "15m": { multiplier: 15, timespan: "minute" }, "30m": { multiplier: 30, timespan: "minute" }, "60m": { multiplier: 1, timespan: "hour" }, "90m": { multiplier: 90, timespan: "minute" }, "1h": { multiplier: 1, timespan: "hour" }, "1d": { multiplier: 1, timespan: "day" }, "5d": { multiplier: 5, timespan: "day" }, "1wk": { multiplier: 1, timespan: "week" }, "1mo": { multiplier: 1, timespan: "month" }, "3mo": { multiplier: 3, timespan: "month" },
 };
-const defaultIntervals: Record<ChartRange, ChartInterval> = { "1D": "5m", "5D": "15m", "1M": "1h", "6M": "1d", YTD: "1d", "1Y": "1d", "5Y": "1wk", MAX: "1mo" };
+const defaultIntervals: Record<ChartRange, ChartInterval> = { "1D": "5m", "5D": "15m", "1M": "1h", "3M": "1d", "6M": "1d", YTD: "1d", "1Y": "1d", "5Y": "1wk", "10Y": "1wk", MAX: "1mo" };
 
 function fromDate(range: ChartRange) {
   const now = new Date();
-  const days: Record<ChartRange, number> = { "1D": 2, "5D": 7, "1M": 32, "6M": 185, YTD: 370, "1Y": 367, "5Y": 1_830, MAX: 18_250 };
+  const days: Record<ChartRange, number> = { "1D": 2, "5D": 7, "1M": 32, "3M": 95, "6M": 185, YTD: 370, "1Y": 367, "5Y": 1_830, "10Y": 3_660, MAX: 18_250 };
   const start = range === "YTD" ? new Date(Date.UTC(now.getUTCFullYear(), 0, 1)) : new Date(now.getTime() - days[range] * DAY);
   return start.toISOString().slice(0, 10);
 }
