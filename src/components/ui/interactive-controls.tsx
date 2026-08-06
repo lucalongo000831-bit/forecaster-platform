@@ -3,9 +3,11 @@
 import { ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { useState } from "react";
 
-export function RangeControls({ ranges = ["1D","5D","1M","6M","YTD","1Y","5Y","MAX"], initial = "5Y" }: { ranges?: string[]; initial?: string }) {
-  const [active, setActive] = useState(initial);
-  return <div className="flex flex-wrap items-center gap-2">{ranges.map((range)=><button key={range} onClick={()=>setActive(range)} className={`icon-button !w-auto !rounded-full px-4 ${active===range ? "!bg-[var(--navy)] !text-white" : ""}`}>{range}</button>)}<button className="icon-button" onClick={()=>setActive(initial)} aria-label="Reset range"><RotateCcw/></button></div>;
+export function RangeControls({ ranges = ["1D","5D","1M","6M","YTD","1Y","5Y","MAX"], initial = "5Y", value, onChange, disabled = false }: { ranges?: string[]; initial?: string; value?: string; onChange?: (range: string) => void; disabled?: boolean }) {
+  const [localActive, setLocalActive] = useState(initial);
+  const active = value ?? localActive;
+  const select = (range: string) => { if (value === undefined) setLocalActive(range); onChange?.(range); };
+  return <div className="flex flex-wrap items-center gap-2">{ranges.map((range)=><button disabled={disabled} key={range} onClick={()=>select(range)} className={`icon-button !w-auto !rounded-full px-4 ${active===range ? "!bg-[var(--navy)] !text-white" : ""}`}>{range}</button>)}<button disabled={disabled} className="icon-button" onClick={()=>select(initial)} aria-label="Reset range"><RotateCcw/></button></div>;
 }
 
 export function PeriodToggle() {

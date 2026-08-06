@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { instrumentPath } from "@/lib";
-import type { ShellData } from "@/types";
+import { useMarketSearch } from "@/lib/use-market-search";
+import type { SearchInstrument, ShellData } from "@/types";
 
 const railItems = [
   ["/dashboard", "Control room", LayoutDashboard], ["/search", "Discover", Search],
@@ -37,7 +38,9 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     return () => window.removeEventListener("keydown", handleKeys);
   }, []);
 
-  const matches = useMemo(() => data.searchResults.filter(({ name, meta }) => `${name} ${meta}`.toLowerCase().includes(query.toLowerCase())), [data.searchResults, query]);
+  const initialSearch = useMemo<SearchInstrument[]>(() => data.searchResults.map((item) => ({ symbol: item.meta.split(" · ")[0] || item.name, name: item.name, type: "Stock", venue: item.meta, price: 0, href: item.href, source: data.source, currency: "USD" })), [data.searchResults, data.source]);
+  const { results: marketMatches, loading: searchLoading, error: searchError } = useMarketSearch(query, initialSearch);
+  const matches = marketMatches.map((item) => ({ name: item.name, meta: `${item.symbol} · ${item.venue}`, href: item.href, source: item.source }));
   const launcherItems = [
     ["/watchlists", "Watchlists", Star], ["/calendar", "Calendar", CalendarDays],
     [instrumentPath(data.primaryInstrument, "seasonality"), "Seasonality", TrendingUp],
@@ -94,14 +97,15 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
         <div className="search-popover" role="dialog" aria-label="Instrument search">
           <div className="popover-title"><span>Jump to market</span><kbd>ESC</kbd></div>
           <label className="popover-input"><Search size={20}/><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Symbol, company or asset class"/></label>
-          <div className="popover-label">Suggested results</div>
+          <div className="popover-label">{searchLoading ? "Searching markets…" : "Suggested results"}</div>
           {matches.map(({ name, meta, href }, index) => <Link href={href} onClick={() => setSearchOpen(false)} className="result-row" key={`${name}-${index}`}>
             <span className="result-symbol">{name.slice(0, 2).toUpperCase()}</span>
             <div className="result-meta"><strong>{name}</strong><span>{meta}</span></div>
             <div className="result-tags"><b>SZN</b><b>PTN</b><b>MOM</b></div>
             <span className="result-arrow">↗</span>
           </Link>)}
-          {!matches.length && <div className="p-8 text-center muted">No mock instruments found.</div>}
+          {searchError && <div className="p-5 text-center negative">{searchError}</div>}
+          {!matches.length && !searchLoading && <div className="p-8 text-center muted">No instruments found.</div>}
         </div>
       </>}
 
@@ -112,7 +116,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
           {launcherItems.map(([href, label, Icon]) => <Link key={href + label} href={href} onClick={() => setLauncherOpen(false)}><Icon size={22}/><span>{label}</span></Link>)}
         </nav>
       </>}
-      <button className="chat" aria-label="Open Kairo assistant" onClick={() => alert("Kairo Lens is running in demo mode with static data.")}><MessageCircle size={22}/><span>Ask Kairo</span></button>
+      <button className="chat" aria-label="Open Kairo assistant" onClick={() => alert("Kairo Lens remains a demo assistant; market prices are loaded through the server-side provider.")}><MessageCircle size={22}/><span>Ask Kairo</span></button>
     </div>
   );
 }

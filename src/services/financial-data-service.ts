@@ -1,6 +1,6 @@
 import type { FinancialDataProvider } from "./financial-data-provider";
-import { MockFinancialDataProvider } from "./mock-financial-data-provider";
+import { YahooFinanceProvider } from "./yahoo-finance-provider";
 
-// This is the only provider selection point. Replace this instance with a
-// YahooFinanceProvider later without changing pages or visual components.
-export const financialDataService: FinancialDataProvider = new MockFinancialDataProvider();
+// Single provider selection point. Yahoo is server-only and every method owns a
+// clearly identified mock/unavailable fallback so presentation components stay stable.
+export const financialDataService: FinancialDataProvider = new YahooFinanceProvider();

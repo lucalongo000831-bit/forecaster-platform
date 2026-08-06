@@ -30,7 +30,7 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
           <div className="classification-row">{instrument.classifications.map((item, index) => <span key={item}>{index === 0 && <Cpu size={14}/>} {item}</span>)}</div>
         </div>
         <div className="quote-panel">
-          <div className="quote-top"><span>Last price</span><span className="live-indicator"><i/>LIVE MOCK</span></div>
+          <div className="quote-top"><span>Last price</span><span className="live-indicator"><i/>{instrument.source === "mock" ? "DEMO" : instrument.quote.isDelayed ? "DELAYED" : "YAHOO"}</span></div>
           <div className="quote-value">{formatCurrency(instrument.quote.price, instrument.quote.currency)}</div>
           <div className="quote-change"><strong>{instrument.quote.change > 0 ? "+" : ""}{formatCurrency(instrument.quote.change, instrument.quote.currency)}</strong><span>{formatPercent(instrument.quote.changePercent, true)} today</span></div>
           <div className="quote-stats"><span><small>Day range</small><strong>{formatCurrency(instrument.quote.dayLow, instrument.quote.currency)} — {formatCurrency(instrument.quote.dayHigh, instrument.quote.currency)}</strong></span><span><small>Volume</small><strong>{formatCompactNumber(instrument.quote.volume)}</strong></span></div>
@@ -45,9 +45,9 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
           })}
         </nav>
         <button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => setFavorite(!favorite)} aria-pressed={favorite} aria-label="Toggle favorite"><Star size={18} fill={favorite ? "currentColor" : "none"}/><span>{favorite ? "Watching" : "Watch"}</span></button>
-        <button className="agent-cta" onClick={() => alert("Kairo Lens uses static mock context in this prototype.")}><Sparkles size={17}/>Ask Lens</button>
+        <button className="agent-cta" onClick={() => alert("Kairo Lens is a demo assistant. Live prices come from the server-side financial provider.")}><Sparkles size={17}/>Ask Lens</button>
       </div>
-      <div className="event-strip"><span className="event-icon"><BellRing size={17}/></span><span><strong>Earnings in {instrument.earnings.daysUntil} days</strong><small>Consensus EPS {formatCurrency(instrument.earnings.consensusEps, instrument.currency)} · {instrument.earnings.dateLabel}</small></span><button><Bot size={16}/>View event brief <ArrowUpRight size={15}/></button></div>
+      <div className="event-strip"><span className="event-icon"><BellRing size={17}/></span><span>{instrument.earnings.daysUntil > 0 ? <><strong>Earnings in {instrument.earnings.daysUntil} days</strong><small>Consensus EPS {formatCurrency(instrument.earnings.consensusEps, instrument.currency)} · {instrument.earnings.dateLabel}</small></> : <><strong>Earnings data unavailable</strong><small>Yahoo Finance does not currently provide a verified event for this instrument.</small></>}</span><button><Bot size={16}/>View event brief <ArrowUpRight size={15}/></button></div>
     </section>
     {children}
   </>;

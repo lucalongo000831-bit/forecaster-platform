@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Kairo — Market Intelligence",
-  description: "A responsive static market analysis terminal powered by realistic mock data.",
+  description: "A responsive market analysis terminal with server-side financial data and explicit demo fallbacks.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

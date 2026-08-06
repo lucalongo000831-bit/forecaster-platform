@@ -4,12 +4,13 @@ import { Footer } from "@/components/shell/footer";
 import { RangeControls } from "@/components/ui/interactive-controls";
 import { formatPercent } from "@/lib";
 import { financialDataService } from "@/services";
+import { DataSourceNotice, DataUnavailable } from "@/components/financial/data-state";
 
 export default async function OverviewPage({ params }: { params: Promise<{ market: string; symbol: string }> }) {
   const ref = await params;
   const [data, instrument] = await Promise.all([financialDataService.getOverview(ref), financialDataService.getInstrument(ref)]);
   return <>
-    <div className="container-shell page-stack">
+    <div className="container-shell page-stack"><DataSourceNotice source={data.source}/>
       <section>
         <div className="section-row"><span className="section-pill">Price &amp; financial trend</span><RangeControls ranges={["Sales","Net Income","Free Cash Flow","P/E (ttm)","Dividends"]} initial="Net Income"/></div>
         <MainPriceChart data={data.priceSeries} referenceValue={instrument.quote.price}/>
@@ -19,8 +20,8 @@ export default async function OverviewPage({ params }: { params: Promise<{ marke
       </section>
       <section><div className="section-row"><span className="section-pill">Drawdown</span></div><DrawdownChart data={data.drawdownSeries}/></section>
       <section><div className="section-row"><span className="section-pill">Years Performance</span></div><AnnualPerformanceChart data={data.annualPerformance}/></section>
-      <section><div className="section-row"><span className="section-pill">Dividends</span><span className="badge badge-buy px-6 py-3">↗ INCREASING</span></div><DividendChart data={data.dividendSeries}/></section>
-      <section><div className="section-row"><div><span className="section-pill">Insiders Transactions</span><div className="mt-4 flex gap-3"><span className="section-pill !min-h-10 !text-base">Total Activity: {data.insiderTotalActivity}</span><span className="section-pill !min-h-10 !text-base">1/36</span></div></div></div><InsiderTable transactions={data.insiderTransactions}/></section>
+      <section><div className="section-row"><span className="section-pill">Dividends</span></div>{data.dividendSeries.length ? <DividendChart data={data.dividendSeries}/> : <DataUnavailable detail="A normalized dividend event series is not available from the current provider response."/>}</section>
+      <section><div className="section-row"><div><span className="section-pill">Insiders Transactions</span>{data.insiderTransactions.length > 0 && <div className="mt-4 flex gap-3"><span className="section-pill !min-h-10 !text-base">Total Activity: {data.insiderTotalActivity}</span></div>}</div></div>{data.insiderTransactions.length ? <InsiderTable transactions={data.insiderTransactions}/> : <DataUnavailable detail="Yahoo Finance does not consistently expose normalized insider transaction history for this component."/>}</section>
     </div>
     <Footer/>
   </>;

@@ -1,129 +1,128 @@
 # Kairo Market Intelligence
 
-Kairo is a polished, responsive market-intelligence frontend built as an independent static product concept. It combines price action, seasonality, pattern analysis, momentum, company fundamentals, political trading activity, news, watchlists, portfolio allocation, and an event calendar in one coherent workspace.
+Kairo is a responsive financial-research frontend built with Next.js App Router. Market search, quotations, OHLCV charts, company profiles, selected fundamentals, and news metadata are loaded through `yahoo-finance2` exclusively on the server. The original visual system and routing remain independent of the source provider.
 
-All financial information is realistic mock data. The application does not call Yahoo Finance or any other external market-data API and does not require a backend.
+This project is an independent product concept. It does not scrape Yahoo pages, call the original reference site, embed iframes, or contain credentials.
 
-## Highlights
+## Stack
 
-- Original Kairo visual identity with responsive desktop, tablet, and mobile layouts
-- Next.js App Router architecture with TypeScript
-- Interactive navigation, global search, quick-tools launcher, filters, tabs, modals, and watchlist controls
-- Recharts visualizations for price history, drawdown, annual performance, seasonality, patterns, momentum, fundamentals, revenue mix, political activity, and portfolio allocation
-- Centralized, typed mock financial dataset
-- Provider-based data boundary prepared for a future Yahoo Finance integration
-- No iframe, copied production bundle, backend dependency, credential, or live API request
+- Next.js 16, React 19, TypeScript, Tailwind CSS 4
+- Recharts for visualizations
+- `yahoo-finance2` 4.x for server-side financial data
+- `FinancialDataProvider` as the stable UI/data contract
+- `MockFinancialDataProvider` as a clearly labelled resilience fallback
 
-## Technology
+## Run locally
 
-- [Next.js](https://nextjs.org/) 16 with App Router
-- [React](https://react.dev/) 19
-- [TypeScript](https://www.typescriptlang.org/)
-- [Tailwind CSS](https://tailwindcss.com/) 4
-- [Recharts](https://recharts.org/)
-- [Lucide React](https://lucide.dev/)
-
-## Getting started
-
-Requirements:
-
-- Node.js 20 or newer
-- pnpm 10 or newer
-
-Install dependencies and start the development server:
+Requirements: Node.js 20+ and npm 10+.
 
 ```bash
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-To run the optimized production build locally:
+Production verification:
 
 ```bash
-pnpm build
-pnpm start
+npm run lint
+npm run typecheck
+npm run build
+npm run start
 ```
 
-No environment variables are required for the current mock implementation.
-
-## Available scripts
-
-```bash
-pnpm dev        # Start the local development server
-pnpm lint       # Run ESLint
-pnpm typecheck  # Run the TypeScript compiler without emitting files
-pnpm build      # Create the production build
-pnpm start      # Serve the production build
-```
-
-## Main routes
-
-| Route | Purpose |
-| --- | --- |
-| `/dashboard` | Personal control room and daily market overview |
-| `/search` | Searchable multi-asset instrument universe |
-| `/calendar` | Signal and market-event calendar |
-| `/watchlists` | Interactive watchlist management |
-| `/portfolio` | Portfolio metrics, allocation, and positions |
-| `/settings` | Local profile and notification preferences |
-| `/instrument/nasdaq/hlio/overview` | Instrument overview, returns, drawdown, dividends, and insiders |
-| `/instrument/nasdaq/hlio/seasonality` | Multi-year seasonality analysis |
-| `/instrument/nasdaq/hlio/pattern` | Pattern projection and historical cases |
-| `/instrument/nasdaq/hlio/overbought-oversold` | Momentum, DPO, and oscillator analysis |
-| `/instrument/nasdaq/hlio/fundamentals/analysis` | Fundamental summary and valuation analysis |
-| `/instrument/nasdaq/hlio/fundamentals/statements` | Financial statements |
-| `/instrument/nasdaq/hlio/fundamentals/ratios` | Valuation and profitability ratios |
-| `/instrument/nasdaq/hlio/fundamentals/transcripts` | Mock earnings-call transcripts |
-| `/instrument/nasdaq/hlio/political` | Political transaction activity |
-| `/instrument/nasdaq/hlio/news` | Curated market-news briefing |
+No environment variable or API key is required. Yahoo access is outbound server traffic and is never initiated by a browser component.
 
 ## Data architecture
 
-The presentation layer is intentionally independent from the data source:
+```text
+Server Component / internal API route
+              │
+              ▼
+     FinancialDataProvider
+              │
+      YahooFinanceProvider
+        │             │
+        ▼             ▼
+ yahoo-finance2   explicit mock /
+  server only     unavailable fallback
+```
+
+Key locations:
 
 ```text
 src/
-├── app/                    Route composition and server-side data loading
-├── components/
-│   ├── charts/             Pure chart components receiving data through props
-│   └── financial/          Financial views and tables receiving typed props
-├── data/mock/              Centralized mock dataset
-├── lib/                    Formatters and route utilities
-├── services/               Provider contract, implementation, and selector
-└── types/                  Shared financial domain types
+├── app/api/market/                 Normalized Node.js API routes
+├── components/charts/              Charts receiving typed props
+├── components/financial/           Financial views and state UI
+├── data/mock/                       Central demo/fallback dataset
+├── lib/                             Formatting, routing, client API hooks
+├── services/
+│   ├── financial-data-provider.ts  Stable provider contract
+│   ├── yahoo-finance-provider.ts   UI-facing Yahoo implementation
+│   └── yahoo/                       Client, cache, retry, validation, analytics
+└── types/                           Domain and API DTO types
 ```
 
-[`FinancialDataProvider`](src/services/financial-data-provider.ts) is the stable boundary used by the pages. The active implementation is [`MockFinancialDataProvider`](src/services/mock-financial-data-provider.ts), selected in [`financial-data-service.ts`](src/services/financial-data-service.ts).
+`financial-data-service.ts` is the only provider-selection point. Components do not import Yahoo or raw mock datasets, and client components communicate only with same-origin `/api/market/*` routes.
 
-To add Yahoo Finance later:
+## Server endpoints
 
-1. Create `YahooFinanceProvider` implementing `FinancialDataProvider`.
-2. Normalize Yahoo responses into the existing domain types in `src/types`.
-3. Replace the provider instance in `src/services/financial-data-service.ts`.
+All market routes use the Node.js runtime, validate inputs, return normalized DTOs, rate-limit per IP, and hide Yahoo cookies, headers, and endpoint details.
 
-Charts, financial components, tables, and layouts will not need to change.
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/market/search?q=` | Stocks, ETFs/funds, indices, currencies, crypto |
+| `GET /api/market/quote?symbol=` | Current quote, daily change, OHLC, volume, market cap |
+| `GET /api/market/chart?symbol=&range=&interval=` | Valid OHLCV points for 1D, 5D, 1M, 6M, YTD, 1Y, 5Y, MAX |
+| `GET /api/market/profile?symbol=` | Company/instrument profile |
+| `GET /api/market/fundamentals?symbol=` | Available normalized fundamental fields |
+| `GET /api/market/news?symbol=` | Supported Yahoo news metadata and source links |
 
-## Quality checks
+Symbols support dots, dashes, `^`, `=`, and exchange suffixes, including `BRK-B`, `^GSPC`, `BTC-USD`, `EURUSD=X`, `ENI.MI`, and `STLAM.MI`. Dynamic links URL-encode both market and symbol.
 
-Before opening a pull request, run:
+## Reliability
 
-```bash
-pnpm lint
-pnpm typecheck
-pnpm build
+- Request timeouts range from 12 to 18 seconds, allowing Yahoo’s initial cookie handshake.
+- One controlled retry is used only for timeouts, rate limits, and transient upstream failures.
+- In-memory request coalescing prevents duplicate concurrent calls.
+- Fresh/stale caches vary by data class: quotes 20s + 2m stale, search 5m + 30m stale, intraday charts 1m + 5m stale, long charts 15m + 6h stale, profiles 24h + 7d stale, fundamentals 6h + 48h stale, news 10m + 1h stale.
+- API responses add `s-maxage`, `stale-while-revalidate`, and `stale-if-error` directives where live data is returned.
+- Rate limits are per server instance: search 12/minute; other routes 20–30/minute per IP.
+- Logs contain only operation, normalized symbol, and error category—never cookies, headers, IPs, or raw provider URLs.
+- Fallback responses include `meta.source: "mock"` and `meta.fallback: true`; UI states label demo data.
+
+For multi-instance production deployments, replace the in-memory cache and limiter with Redis/KV while retaining the same interfaces.
+
+## Pages
+
+Core routes include `/dashboard`, `/search`, `/calendar`, `/watchlists`, `/portfolio`, `/settings`, authentication screens, and every dynamic instrument workspace under:
+
+```text
+/instrument/[market]/[symbol]/overview
+/instrument/[market]/[symbol]/chart
+/instrument/[market]/[symbol]/seasonality
+/instrument/[market]/[symbol]/pattern
+/instrument/[market]/[symbol]/overbought-oversold
+/instrument/[market]/[symbol]/fundamentals/{analysis,statements,ratios,transcripts}
+/instrument/[market]/[symbol]/political
+/instrument/[market]/[symbol]/news
 ```
 
-The current implementation passes all three checks.
+## Real, calculated, demo, and unavailable data
 
-## Security and data policy
+- Real Yahoo data: search, quote, current OHLC/volume/market cap, historical OHLCV, profile fields, supported summary fundamentals, news metadata.
+- Calculated from real closes: returns, drawdown, annual performance, seasonality, rolling pattern statistics, RSI/SMA momentum, and the watchlist signal.
+- Explicit demo: personal portfolio, composite calendar, account/workspace preferences, editorial assistant content.
+- Unavailable without another provider: political disclosures, full transcripts, proprietary fair values/scores, normalized product-segment revenue, complete macro calendar, and licensed article bodies.
 
-- `.env`, `.env.local`, credentials, certificates, private keys, build output, and dependency folders are excluded from Git.
-- The repository contains no passwords, API tokens, or service credentials.
-- The current provider performs no network requests.
-- If a future provider requires secrets, store them only in ignored environment files and document placeholders in `.env.example` without real values.
+Exact formulas and limitations are documented in [YAHOO_DATA_LIMITATIONS.md](YAHOO_DATA_LIMITATIONS.md). The implementation design is in [YAHOO_INTEGRATION_PLAN.md](YAHOO_INTEGRATION_PLAN.md).
+
+## Security
+
+`.gitignore` excludes `.env`, `.env.local`, dependency folders, build output, private keys, certificates, and common credential files. Do not commit secrets. Yahoo access currently requires none.
 
 ## Disclaimer
 
-Kairo and Helio Systems are replaceable fictional identities. All prices, transactions, company information, articles, political activity, signals, and analytics are mock data for interface demonstration only and are not financial advice.
+Market information may be delayed, incomplete, or unavailable. Demo data is explicitly marked and is not real market data. Calculated signals are descriptive statistics, not forecasts or financial advice.

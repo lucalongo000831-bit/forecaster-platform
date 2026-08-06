@@ -1,4 +1,5 @@
 export type Signal = "BUY" | "HOLD" | "SELL";
+export type DataSource = "yahoo" | "calculated" | "mock" | "unavailable";
 
 export interface InstrumentRef {
   market: string;
@@ -20,6 +21,12 @@ export interface QuoteSnapshot {
   volume: number;
   currency: string;
   marketStatus: string;
+  open?: number;
+  previousClose?: number;
+  marketCap?: number;
+  asOf?: string;
+  isDelayed?: boolean;
+  source?: DataSource;
 }
 
 export interface InstrumentProfile extends InstrumentRef {
@@ -35,6 +42,10 @@ export interface InstrumentProfile extends InstrumentRef {
     dateLabel: string;
     consensusEps: number;
   };
+  description?: string;
+  exchange?: string;
+  quoteType?: string;
+  source?: DataSource;
 }
 
 export interface TimePoint {
@@ -97,6 +108,7 @@ export interface NewsArticle {
   title: string;
   source: string;
   date: string;
+  url?: string;
 }
 
 export interface CalendarDay {
@@ -111,6 +123,9 @@ export interface WatchlistEntry {
   price: number;
   changePercent: number;
   signal: Signal;
+  currency?: string;
+  market?: string;
+  source?: DataSource;
 }
 
 export interface PortfolioPosition {
@@ -118,6 +133,7 @@ export interface PortfolioPosition {
   quantity: number;
   averagePrice: number;
   currentPrice: number;
+  currency?: string;
 }
 
 export interface SearchInstrument {
@@ -127,6 +143,8 @@ export interface SearchInstrument {
   venue: string;
   price: number;
   href: string;
+  currency?: string;
+  source?: DataSource;
 }
 
 export interface ShellSearchResult {
@@ -141,6 +159,7 @@ export interface ShellData {
   searchResults: ShellSearchResult[];
   marketStatus: string;
   marketClosesIn: string;
+  source?: DataSource;
 }
 
 export interface MarketPulseItem {
@@ -162,6 +181,8 @@ export interface DashboardData {
   upcomingEvents: number;
   briefTitle: string;
   briefBody: string;
+  source?: DataSource;
+  demoSections?: string[];
 }
 
 export interface ReturnPeriod {
@@ -177,6 +198,8 @@ export interface OverviewData {
   returns: ReturnPeriod[];
   insiderTransactions: InsiderTransaction[];
   insiderTotalActivity: number;
+  source?: DataSource;
+  unavailableSections?: string[];
 }
 
 export interface SeasonalityData {
@@ -185,6 +208,7 @@ export interface SeasonalityData {
   positiveYearsPercent: number;
   averageReturn: number;
   bias: string;
+  source?: DataSource;
 }
 
 export interface PatternCase {
@@ -210,6 +234,7 @@ export interface PatternData {
     maxDrop: number;
   };
   cases: PatternCase[];
+  source?: DataSource;
 }
 
 export interface MomentumMetric {
@@ -223,6 +248,7 @@ export interface MomentumData {
   metrics: MomentumMetric[];
   dpoSeries: TimePoint[];
   oscillatorSeries: TimePoint[];
+  source?: DataSource;
 }
 
 export interface SummaryMetric {
@@ -283,16 +309,20 @@ export interface FundamentalsData {
   statementPeriods: Array<number | string>;
   statementRows: StatementRow[];
   transcripts: Transcript[];
+  source?: DataSource;
+  unavailableSections?: string[];
 }
 
 export interface PoliticalData {
   chartSeries: TimePoint[];
   trades: PoliticalTrade[];
+  source?: DataSource;
 }
 
 export interface NewsData {
   recaps: string[];
   articles: NewsArticle[];
+  source?: DataSource;
 }
 
 export interface CalendarData {
