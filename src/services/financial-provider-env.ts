@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getServerEnvironment } from "@/schemas/env";
+
 export type FinancialProviderConfiguration = {
   fmpConfigured: boolean;
   alphaVantageConfigured: boolean;
@@ -27,7 +29,8 @@ export function getFinancialProviderConfiguration(): FinancialProviderConfigurat
 }
 
 export function requireFinancialProviderCredential(provider: FinancialProviderName): string {
-  const value = process.env[environmentVariableByProvider[provider]]?.trim();
+  const env = getServerEnvironment();
+  const value = provider === "fmp" ? env.FMP_API_KEY : provider === "alphaVantage" ? env.ALPHA_VANTAGE_API_KEY : env.MASSIVE_API_KEY;
 
   if (!value) {
     throw new Error("Variabile mancante");
