@@ -5,6 +5,7 @@ import { MainPriceChart } from "@/components/charts/market-charts";
 import { RangeControls } from "@/components/ui/interactive-controls";
 import type { ChartRange, ChartResponse, TimePoint } from "@/types";
 import { DataError, DataUnavailable } from "./data-state";
+import { formatDataSource } from "@/lib";
 
 const ranges: ChartRange[] = ["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"];
 
@@ -34,5 +35,5 @@ export function LivePriceChart({ symbol, initialData, referenceValue, initialSou
     setLoading(false);
   }
 
-  return <section><div className="section-row"><div><span className="section-pill">Interactive Price Chart</span><p className="muted mt-3">OHLCV history · <strong>{source === "mock" ? "DEMO" : delayed ? "DELAYED" : "YAHOO FINANCE"}</strong></p></div><RangeControls ranges={ranges} initial="MAX" value={range} onChange={changeRange} disabled={loading}/></div>{error && <DataError message={error}/>} {!error && !data.length ? <DataUnavailable detail="No valid OHLCV points were returned for this period."/> : <div className={loading ? "opacity-50 transition-opacity" : "transition-opacity"}><MainPriceChart data={data} referenceValue={referenceValue}/></div>}</section>;
+  return <section><div className="section-row"><div><span className="section-pill">Interactive Price Chart</span><p className="muted mt-3">OHLCV history · <strong>{formatDataSource(source, delayed)}</strong></p></div><RangeControls ranges={ranges} initial="MAX" value={range} onChange={changeRange} disabled={loading}/></div>{error && <DataError message={error}/>} {!error && !data.length ? <DataUnavailable detail="No valid OHLCV points were returned for this period."/> : <div className={loading ? "opacity-50 transition-opacity" : "transition-opacity"}><MainPriceChart data={data} referenceValue={referenceValue}/></div>}</section>;
 }

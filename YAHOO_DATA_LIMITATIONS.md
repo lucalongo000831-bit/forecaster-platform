@@ -110,6 +110,6 @@ Political data needs an official disclosure dataset or specialist provider. Tran
 
 Yahoo Finance is an external, unofficial market-data dependency with no uptime or schema guarantee for this application. Data can be delayed, corrected, throttled, regionally unavailable, or removed. Exchange suffixes and currencies must be preserved; prices from different currencies must never be aggregated without FX conversion.
 
-The current cache and rate limiter are process-local. Serverless instances do not share state. Production scale should use a shared Redis/KV cache and distributed limiter. No cookie, crumb, internal header, raw Yahoo endpoint, or IP address is returned to the browser or written to application logs.
+The provider router uses shared Upstash Redis cache/rate limiting when configured and a bounded process-local fallback during development. No cookie, crumb, internal header, raw Yahoo endpoint, or IP address is returned to the browser or written to application logs.
 
-When Yahoo fails, the application may use centralized mock data only with an explicit `mock` source and visible demo label. Unsupported real-world facts are never synthesized.
+When Yahoo fails, the application first attempts an entitled alternative provider. Centralized mock data is used only with an explicit `mock` source and visible demo label. Unsupported real-world facts are never synthesized.

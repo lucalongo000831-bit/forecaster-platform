@@ -31,21 +31,25 @@ const marketAdapters = {
 } satisfies Record<"massive" | "yahoo" | "fmp", MarketDataProvider>;
 const fundamentalAdapters = { fmp: new FmpFundamentalsAdapter(), yahoo: new YahooFundamentalsAdapter() } satisfies Record<"fmp" | "yahoo", FundamentalsProvider>;
 const newsAdapters = { "alpha-vantage": new AlphaVantageNewsAdapter(), yahoo: new YahooNewsAdapter() } satisfies Record<"alpha-vantage" | "yahoo", NewsProvider>;
+const capabilityBlocks = new Map<string, number>();
 
 function unique<T>(values: T[]) { return [...new Set(values)]; }
 
 async function firstAvailable<T>(operation: string, symbol: string | undefined, candidates: Array<{ name: ProviderName; configured: boolean; supported: boolean; task: () => Promise<ProviderResult<T>> }>) {
   const errors: ProviderError[] = [];
-  let attempted = 0;
-  for (const candidate of candidates) {
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
     if (!candidate.configured || !candidate.supported) continue;
-    attempted += 1;
+    const capabilityKey = `${candidate.name}:${operation}`;
+    if ((capabilityBlocks.get(capabilityKey) ?? 0) > Date.now()) continue;
     try {
       const result = await candidate.task();
-      return { ...result, meta: { ...result.meta, isFallback: attempted > 1 } };
+      capabilityBlocks.delete(capabilityKey);
+      return { ...result, meta: { ...result.meta, isFallback: index > 0 } };
     } catch (error) {
       const normalized = error instanceof ProviderError ? error : new ProviderError(candidate.name, "UPSTREAM_UNAVAILABLE", "Provider non disponibile.", true, 502, { cause: error });
       errors.push(normalized);
+      if (normalized.code === "UNAUTHORIZED" || normalized.code === "PLAN_RESTRICTED") capabilityBlocks.set(capabilityKey, Date.now() + 60 * 60_000);
       structuredLog("warn", "provider.router.fallback", { provider: candidate.name, operation, symbol, code: normalized.code });
     }
   }
@@ -81,7 +85,7 @@ export class FinancialProviderRouter {
 
   quotes(symbolInputs: string[]) {
     const symbols = unique(symbolInputs.map(normalizeSymbol)).slice(0, 50);
-    const order = this.marketOrder();
+    const order = [marketAdapters.yahoo, ...this.marketOrder().filter((adapter) => adapter.name !== "yahoo")];
     return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 20, staleSeconds: 120 }, () => firstAvailable("quotes", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: symbols.every((symbol) => adapter.supportsSymbol(symbol)), task: () => adapter.getQuotes(symbols) }))));
   }
 

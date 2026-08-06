@@ -24,3 +24,16 @@ export function formatCompactNumber(value: number) {
   if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return formatNumber(value);
 }
+
+export function formatDataSource(source?: DataSource | string, delayed = false) {
+  if (source === "mock") return "DEMO";
+  if (source === "unavailable") return "UNAVAILABLE";
+  if (delayed) return "DELAYED";
+  if (source === "alpha-vantage") return "ALPHA VANTAGE";
+  if (source === "massive") return "MASSIVE";
+  if (source === "fmp") return "FMP";
+  if (source === "yahoo") return "YAHOO FINANCE";
+  if (source === "calculated") return "CALCULATED";
+  return "SERVER DATA";
+}
+import type { DataSource } from "@/types";

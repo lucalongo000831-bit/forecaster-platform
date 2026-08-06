@@ -1,5 +1,7 @@
 import "server-only";
 
+import { ProviderError } from "@/providers/errors";
+
 export type FinancialErrorCode = "INVALID_QUERY" | "INVALID_SYMBOL" | "NOT_FOUND" | "RATE_LIMITED" | "TIMEOUT" | "UPSTREAM";
 
 export class FinancialDataError extends Error {
@@ -30,6 +32,9 @@ export function toFinancialDataError(error: unknown): FinancialDataError {
 }
 
 export function canFallback(error: unknown): boolean {
+  if (error instanceof ProviderError) {
+    return error.retryable || error.code === "NOT_CONFIGURED" || error.code === "PLAN_RESTRICTED" || error.code === "UNSUPPORTED_SYMBOL";
+  }
   const normalized = toFinancialDataError(error);
   return normalized.code === "TIMEOUT" || normalized.code === "RATE_LIMITED" || normalized.code === "UPSTREAM";
 }
