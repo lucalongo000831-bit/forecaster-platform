@@ -8,7 +8,7 @@ import { formatCompactNumber, formatCurrency, formatDataSource, formatPercent, i
 import type { InstrumentProfile, InstrumentRef } from "@/types";
 
 const tabs = [
-  ["overview", "Overview"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
+  ["overview", "Overview"], ["signal", "Signals"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
   ["overbought-oversold", "Momentum"], ["fundamentals/analysis", "Fundamentals"],
   ["political", "Policy"], ["news", "Newsroom"],
 ] as const;

@@ -1,5 +1,4 @@
-import { analyzeTechnical } from "@/engines/technical";
-import { financialProviderRouter } from "@/providers";
+import { getTechnicalAnalysis } from "@/services/analysis/technical-service";
 import { queryObject, technicalRequestSchema } from "@/schemas";
 import { createRequestContext } from "@/lib/server/request-context";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
@@ -13,13 +12,10 @@ export async function GET(request: Request) {
   try {
     await enforceRateLimit(context.ip, { scope: "analysis:technical", limit: 15 });
     const { symbol, horizon, benchmark } = technicalRequestSchema.parse(queryObject(request));
-    const [chart, benchmarkChart] = await Promise.all([
-      financialProviderRouter.chart(symbol, "5Y", "1d"),
-      symbol.toUpperCase() === benchmark.toUpperCase() ? Promise.resolve(null) : financialProviderRouter.chart(benchmark, "5Y", "1d").catch(() => null),
-    ]);
-    const analysis = analyzeTechnical(symbol.toUpperCase(), chart.data.points, benchmarkChart ? { symbol: benchmark.toUpperCase(), bars: benchmarkChart.data.points } : undefined);
+    const result = await getTechnicalAnalysis(symbol, horizon, benchmark);
+    const analysis = result.analysis;
     const { input: _input, ...payload } = analysis;
     void _input;
-    return jsonSuccess({ ...payload, horizon }, context, { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=1800" }, meta: { provider: chart.meta.provider, sourceTimestamp: chart.meta.sourceTimestamp, modelVersion: analysis.modelVersion, dataQuality: analysis.completeness >= 80 ? "HIGH" : analysis.completeness >= 55 ? "MEDIUM" : "LOW" } });
+    return jsonSuccess({ ...payload, horizon }, context, { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=1800" }, meta: { provider: result.provider, sourceTimestamp: result.sourceTimestamp, modelVersion: analysis.modelVersion, dataQuality: analysis.completeness >= 80 ? "HIGH" : analysis.completeness >= 55 ? "MEDIUM" : "LOW" } });
   } catch (error) { return jsonFailure(error, context); }
 }

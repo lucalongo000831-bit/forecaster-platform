@@ -43,6 +43,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
   const matches = marketMatches.map((item) => ({ name: item.name, meta: `${item.symbol} · ${item.venue}`, href: item.href, source: item.source }));
   const launcherItems = [
     ["/watchlists", "Watchlists", Star], ["/calendar", "Calendar", CalendarDays],
+    [instrumentPath(data.primaryInstrument, "signal"), "Signals", Sparkles],
     [instrumentPath(data.primaryInstrument, "seasonality"), "Seasonality", TrendingUp],
     [instrumentPath(data.primaryInstrument, "pattern"), "Patterns", BarChart3],
     [instrumentPath(data.primaryInstrument, "overbought-oversold"), "Momentum", Gauge],
