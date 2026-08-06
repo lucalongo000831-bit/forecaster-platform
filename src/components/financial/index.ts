@@ -6,3 +6,6 @@ export * from "./political-view";
 export * from "./search-view";
 export * from "./transcripts-view";
 export * from "./watchlist-view";
+export * from "./portfolio-view";
+export * from "./alerts-view";
+export * from "./settings-view";

@@ -1,0 +1,3 @@
+import { createRequestContext } from "@/lib/server/request-context"; import { requireAccount } from "@/lib/server/account-route"; import { jsonFailure, jsonSuccess } from "@/lib/server/api-response"; import { listNotifications } from "@/services/account";
+export const runtime = "nodejs"; export const dynamic = "force-dynamic";
+export async function GET(request: Request) { const context = createRequestContext(request); try { const user = await requireAccount(request, context); return jsonSuccess(await listNotifications(user.id), context, { headers: { "Cache-Control": "private, no-store" } }); } catch (error) { return jsonFailure(error, context); } }

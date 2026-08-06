@@ -16,7 +16,7 @@ import type { SearchInstrument, ShellData } from "@/types";
 const railItems = [
   ["/dashboard", "Control room", LayoutDashboard], ["/search", "Discover", Search],
   ["/calendar", "Calendar", CalendarDays], ["/watchlists", "Watchlists", Star],
-  ["/portfolio", "Portfolio", PieChart], ["/backtest", "Backtest lab", FlaskConical], ["/settings", "Preferences", Settings],
+  ["/portfolio", "Portfolio", PieChart], ["/alerts", "Alerts", Bell], ["/backtest", "Backtest lab", FlaskConical], ["/settings", "Preferences", Settings],
 ] as const;
 
 export function AppShell({ children, data }: { children: React.ReactNode; data: ShellData }) {
@@ -88,7 +88,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
             <Search size={19}/><span>Search markets</span><kbd><Command size={12}/>K</kbd>
           </button>
           <div className="header-actions">
-            <button className="header-icon" aria-label="Notifications"><Bell size={19}/><i/></button>
+            <Link href="/alerts" className="header-icon" aria-label="Notifications"><Bell size={19}/><i/></Link>
             <button className="header-icon" aria-label="Open tools" onClick={() => { setLauncherOpen(!launcherOpen); setSearchOpen(false); }}><Grid3X3 size={19}/></button>
             <button className="avatar" aria-label="Profile">SD</button>
           </div>
