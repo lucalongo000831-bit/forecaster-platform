@@ -209,6 +209,10 @@ export interface SeasonalityData {
   averageReturn: number;
   bias: string;
   source?: DataSource;
+  window?: string;
+  quality?: string;
+  sampleSize?: number;
+  disclaimer?: string;
 }
 
 export interface PatternCase {

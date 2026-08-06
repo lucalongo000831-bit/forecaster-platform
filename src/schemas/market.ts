@@ -29,6 +29,8 @@ export const earningsRequestSchema = z.object({
 }).refine((value) => value.from <= value.to, { message: "Intervallo date non valido" });
 export const analysisHorizonSchema = z.enum(["intraday", "1d", "1w", "1m", "3m", "6m", "12m", "long"]);
 export const technicalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m"), benchmark: symbolSchema.default("^GSPC") });
+export const seasonalityWindowSchema = z.enum(["1Y", "5Y", "10Y", "15Y", "20Y", "MAX"]);
+export const seasonalityRequestSchema = z.object({ symbol: symbolSchema, window: seasonalityWindowSchema.default("20Y") });
 
 export function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());

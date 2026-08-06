@@ -47,7 +47,7 @@ const intervalCompatibility: Record<ChartRange, ChartInterval[]> = {
   "1Y": ["1d", "5d", "1wk"],
   "5Y": ["1d", "5d", "1wk", "1mo"],
   "10Y": ["1d", "5d", "1wk", "1mo"],
-  MAX: ["1wk", "1mo", "3mo"],
+  MAX: ["1d", "5d", "1wk", "1mo", "3mo"],
 };
 
 function moduleOptions(timeoutMs: number) {

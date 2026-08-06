@@ -8,6 +8,7 @@ import { instrumentHref, marketSlug, normalizeSymbol } from "./yahoo/symbol-reso
 import { canFallback, safeServerLog } from "./yahoo/errors";
 import { analyzeTechnical } from "@/engines/technical";
 import { analyzeFundamentals, statementValue } from "@/engines/fundamental";
+import { getSeasonalityAnalysis } from "@/services/analysis/seasonality-service";
 import type {
   DashboardData,
   FundamentalsData,
@@ -182,28 +183,21 @@ export class YahooFinanceProvider implements FinancialDataProvider {
   async getSeasonality(ref: InstrumentRef): Promise<SeasonalityData> {
     const symbol = refSymbol(ref);
     return this.fallback<SeasonalityData>("seasonality", symbol, async () => {
-      const points = (await this.longChart(symbol)).points;
-      const monthly = Array.from({ length: 12 }, () => [] as number[]);
-      const annual = new Map<string, { first: number; last: number }>();
-      for (let index = 1; index < points.length; index += 1) {
-        const month = new Date(points[index].timestamp).getUTCMonth();
-        monthly[month].push(((analyticalClose(points[index]) / analyticalClose(points[index - 1])) - 1) * 100);
-        const year = points[index].timestamp.slice(0, 4);
-        const existing = annual.get(year);
-        const close = analyticalClose(points[index]);
-        if (existing) existing.last = close; else annual.set(year, { first: close, last: close });
-      }
-      const averages = monthly.map((values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0);
-      const bestIndex = averages.indexOf(Math.max(...averages));
-      const annualReturns = [...annual.values()].map(({ first, last }) => ((last / first) - 1) * 100);
+      const analysis = await getSeasonalityAnalysis(symbol, "20Y");
+      const best = [...analysis.monthly].filter((item) => item.mean !== null).sort((a, b) => (b.mean as number) - (a.mean as number))[0];
+      const annualReturns = analysis.annualReturns;
       const averageReturn = annualReturns.length ? annualReturns.reduce((sum, value) => sum + value, 0) / annualReturns.length : 0;
       return {
-        series: averages.map((average, index) => ({ week: index + 1, current: average, average, analogue: average })),
-        bestMonth: new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2020, bestIndex, 1))),
+        series: analysis.monthly.map((item) => ({ week: (item.key - 1) * 4 + 1, current: analysis.currentYearMonthlyReturns[item.key] ?? item.mean ?? 0, average: item.mean ?? 0, analogue: item.median ?? 0 })),
+        bestMonth: best?.label ?? "Dato non disponibile",
         positiveYearsPercent: annualReturns.length ? annualReturns.filter((value) => value > 0).length / annualReturns.length * 100 : 0,
         averageReturn,
         bias: averageReturn > 1 ? "Bullish" : averageReturn < -1 ? "Bearish" : "Neutral",
         source: "calculated",
+        window: analysis.window,
+        quality: analysis.quality,
+        sampleSize: analysis.observations,
+        disclaimer: analysis.disclaimer,
       };
     }, async () => ({ ...(await this.mock.getSeasonality(ref)), source: "mock" as const }));
   }

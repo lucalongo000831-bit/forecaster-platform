@@ -96,6 +96,12 @@ export class FinancialProviderRouter {
     return providerCached(`chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: intraday ? 60 : 900, staleSeconds: intraday ? 300 : 21_600 }, () => firstAvailable("chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
   }
 
+  analyticsChart(symbolInput: string, range: ChartRange = "MAX", interval: string | null = "1d") {
+    const symbol = normalizeSymbol(symbolInput);
+    const order = [marketAdapters.yahoo, ...this.marketOrder().filter((adapter) => adapter.name !== "yahoo")];
+    return providerCached(`analytics-chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, () => firstAvailable("analytics-chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
+  }
+
   marketStatus(market = "US") {
     const order = this.marketOrder();
     return providerCached(`market-status:${market}`, { freshSeconds: 30, staleSeconds: 300 }, () => firstAvailable("market-status", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getMarketStatus(market) }))));
