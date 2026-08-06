@@ -100,7 +100,7 @@ export class AlphaVantageNewsAdapter implements NewsProvider {
     const symbol = normalizeSymbol(symbolInput);
     const alphaSymbol = symbol.endsWith("-USD") ? `CRYPTO:${symbol.slice(0, -4)}` : symbol;
     const feed = await this.request({ tickers: alphaSymbol }, limit);
-    const data = feed.map(mapAlphaNewsItem);
+    const data = feed.slice(0, Math.min(50, Math.max(1, limit))).map(mapAlphaNewsItem);
     return providerResult(this.name, data, { sourceTimestamp: data[0]?.publishedAt ?? null, freshness: "cached", quality: data.length ? "verified" : "partial" });
   }
 
@@ -108,7 +108,7 @@ export class AlphaVantageNewsAdapter implements NewsProvider {
     const topics = [...new Set(topicInputs.map((topic) => topic.trim().toLowerCase()).filter((topic) => ALLOWED_TOPICS.has(topic)))].slice(0, 5);
     if (!topics.length) throw new ProviderError(this.name, "NOT_FOUND", "Nessun topic news supportato.", false, 400);
     const feed = await this.request({ topics: topics.join(",") }, limit);
-    const data = feed.map(mapAlphaNewsItem);
+    const data = feed.slice(0, Math.min(50, Math.max(1, limit))).map(mapAlphaNewsItem);
     return providerResult(this.name, data, { sourceTimestamp: data[0]?.publishedAt ?? null, freshness: "cached", quality: data.length ? "verified" : "partial" });
   }
 }
