@@ -8,6 +8,8 @@ import { fmpGet, numberValue, stringValue } from "../fmp/client";
 import { providerResult } from "../metadata";
 import type {
   AnalystConsensus,
+  DividendEvent,
+  EconomicEvent,
   EarningsEvent,
   FinancialStatement,
   FundamentalRatios,
@@ -156,6 +158,27 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
       const date = stringValue(row, "date");
       if (!eventSymbol || !date) return [];
       return [{ symbol: eventSymbol, date, time: stringValue(row, "time"), estimatedEps: numberValue(row, "epsEstimated"), actualEps: numberValue(row, "epsActual"), estimatedRevenue: numberValue(row, "revenueEstimated"), actualRevenue: numberValue(row, "revenueActual"), currency: stringValue(row, "currency") }];
+    });
+    return providerResult(this.name, data, { sourceTimestamp: new Date().toISOString(), freshness: "cached", quality: data.length ? "verified" : "partial" });
+  }
+
+  async getDividendCalendar(from: string, to: string, symbolInput?: string) {
+    const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
+    const rows = await fmpGet("dividends-calendar", { from, to, symbol }, "dividends-calendar");
+    const data = rows.flatMap((row): DividendEvent[] => {
+      const eventSymbol = stringValue(row, "symbol"); const date = stringValue(row, "date");
+      if (!eventSymbol || !date) return [];
+      return [{ symbol: eventSymbol, date, recordDate: stringValue(row, "recordDate"), paymentDate: stringValue(row, "paymentDate"), declarationDate: stringValue(row, "declarationDate"), amount: numberValue(row, "dividend"), adjustedAmount: numberValue(row, "adjDividend", "adjustedDividend"), yield: numberValue(row, "yield"), frequency: stringValue(row, "frequency"), currency: stringValue(row, "currency") }];
+    });
+    return providerResult(this.name, data, { sourceTimestamp: new Date().toISOString(), freshness: "cached", quality: data.length ? "verified" : "partial" });
+  }
+
+  async getEconomicCalendar(from: string, to: string) {
+    const rows = await fmpGet("economic-calendar", { from, to }, "economic-calendar");
+    const data = rows.flatMap((row): EconomicEvent[] => {
+      const date = stringValue(row, "date"); const event = stringValue(row, "event", "name");
+      if (!date || !event) return [];
+      return [{ date, event, country: stringValue(row, "country"), currency: stringValue(row, "currency"), previous: numberValue(row, "previous"), estimate: numberValue(row, "estimate"), actual: numberValue(row, "actual"), impact: stringValue(row, "impact"), unit: stringValue(row, "unit") }];
     });
     return providerResult(this.name, data, { sourceTimestamp: new Date().toISOString(), freshness: "cached", quality: data.length ? "verified" : "partial" });
   }

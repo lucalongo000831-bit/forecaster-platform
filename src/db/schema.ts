@@ -272,6 +272,22 @@ export const macroEvents = pgTable("macro_events", {
   ...createdUpdated(),
 }, (table) => [index("macro_event_time_idx").on(table.startsAt, table.countryCode)]);
 
+export const calendarEvents = pgTable("calendar_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventType: varchar("event_type", { length: 40 }).notNull(),
+  symbol: varchar("symbol", { length: 64 }),
+  title: text("title").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  providerRecordId: varchar("provider_record_id", { length: 220 }).notNull(),
+  sourceTimestamp: timestamp("source_timestamp", { withTimezone: true }),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  quality: dataQuality("data_quality").default("PARTIAL").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("calendar_provider_record_unique").on(table.provider, table.providerRecordId), index("calendar_event_time_idx").on(table.startsAt, table.eventType), index("calendar_event_symbol_idx").on(table.symbol, table.startsAt)]);
+
 export const modelVersions = pgTable("model_versions", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),

@@ -67,6 +67,31 @@ export interface EarningsEvent {
   currency: string | null;
 }
 
+export interface DividendEvent {
+  symbol: string;
+  date: string;
+  recordDate: string | null;
+  paymentDate: string | null;
+  declarationDate: string | null;
+  amount: number | null;
+  adjustedAmount: number | null;
+  yield: number | null;
+  frequency: string | null;
+  currency: string | null;
+}
+
+export interface EconomicEvent {
+  date: string;
+  country: string | null;
+  event: string;
+  currency: string | null;
+  previous: number | null;
+  estimate: number | null;
+  actual: number | null;
+  impact: string | null;
+  unit: string | null;
+}
+
 export interface ProviderNewsItem extends MarketNewsDto {
   summary: string | null;
   overallSentimentScore: number | null;
@@ -109,6 +134,8 @@ export interface FundamentalsProvider {
   getRatios(symbol: string, period: StatementPeriod, limit?: number): Promise<ProviderResult<FundamentalRatios[]>>;
   getAnalystConsensus(symbol: string): Promise<ProviderResult<AnalystConsensus>>;
   getEarningsCalendar(from: string, to: string, symbol?: string): Promise<ProviderResult<EarningsEvent[]>>;
+  getDividendCalendar(from: string, to: string, symbol?: string): Promise<ProviderResult<DividendEvent[]>>;
+  getEconomicCalendar(from: string, to: string): Promise<ProviderResult<EconomicEvent[]>>;
 }
 
 export interface NewsProvider {

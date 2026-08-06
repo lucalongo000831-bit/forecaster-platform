@@ -8,6 +8,13 @@
       "when": 1786048590783,
       "tag": "0000_initial_platform",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786054687841,
+      "tag": "0001_narrow_magdalene",
+      "breakpoints": true
     }
   ]
 }

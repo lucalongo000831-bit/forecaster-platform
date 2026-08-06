@@ -143,6 +143,17 @@ export class FinancialProviderRouter {
     return providerCached(`earnings:${from}:${to}:${normalized ?? "all"}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("earnings-calendar", normalized, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: !normalized || adapter.supportsSymbol(normalized), task: () => adapter.getEarningsCalendar(from, to, normalized) }))));
   }
 
+  dividendCalendar(from: string, to: string, symbol?: string) {
+    const normalized = symbol ? normalizeSymbol(symbol) : undefined;
+    const order = this.fundamentalOrder();
+    return providerCached(`dividends:${from}:${to}:${normalized ?? "all"}`, { freshSeconds: 7_200, staleSeconds: 86_400 }, () => firstAvailable("dividends-calendar", normalized, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: !normalized || adapter.supportsSymbol(normalized), task: () => adapter.getDividendCalendar(from, to, normalized) }))));
+  }
+
+  economicCalendar(from: string, to: string) {
+    const order = this.fundamentalOrder();
+    return providerCached(`economic-calendar:${from}:${to}`, { freshSeconds: 600, staleSeconds: 3_600 }, () => firstAvailable("economic-calendar", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getEconomicCalendar(from, to) }))));
+  }
+
   news(symbolInput: string, limit = 20) {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.newsOrder();
@@ -157,7 +168,7 @@ export class FinancialProviderRouter {
   capabilities(): ProviderCapability[] {
     return [
       { provider: "yahoo", configured: marketAdapters.yahoo.isConfigured(), capabilities: ["search", "quote", "historical-bars", "profile", "summary-fundamentals", "ticker-news", "global-symbols"], limitations: ["non-official API", "no historical statements in adapter", "quotes may be delayed"] },
-      { provider: "fmp", configured: marketAdapters.fmp.isConfigured(), capabilities: ["profile", "statements", "ratios", "analyst-consensus", "earnings-calendar", "quote-fallback"], limitations: ["endpoint availability depends on subscription", "daily fallback bars"] },
+      { provider: "fmp", configured: marketAdapters.fmp.isConfigured(), capabilities: ["profile", "statements", "ratios", "analyst-consensus", "earnings-calendar", "dividends-calendar", "economic-calendar", "quote-fallback"], limitations: ["endpoint availability depends on subscription", "daily fallback bars"] },
       { provider: "alpha-vantage", configured: newsAdapters["alpha-vantage"].isConfigured(), capabilities: ["ticker-news", "topic-news", "sentiment"], limitations: ["strict free-tier quotas", "coverage varies by symbol"] },
       { provider: "massive", configured: marketAdapters.massive.isConfigured(), capabilities: ["US snapshots", "US aggregate bars", "US market status", "US search"], limitations: ["US adapter only", "realtime depends on subscription", "5 calls/minute conservative limit"] },
     ];

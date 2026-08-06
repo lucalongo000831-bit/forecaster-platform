@@ -37,4 +37,12 @@ export class YahooFundamentalsAdapter implements FundamentalsProvider {
     void [_from, _to, _symbol];
     throw new ProviderError(this.name, "PLAN_RESTRICTED", "Calendario earnings non esposto dall'adapter Yahoo.", false, 501);
   }
+  async getDividendCalendar(_from: string, _to: string, _symbol?: string): Promise<never> {
+    void [_from, _to, _symbol];
+    throw new ProviderError(this.name, "PLAN_RESTRICTED", "Calendario dividendi non esposto dall'adapter Yahoo.", false, 501);
+  }
+  async getEconomicCalendar(_from: string, _to: string): Promise<never> {
+    void [_from, _to];
+    throw new ProviderError(this.name, "PLAN_RESTRICTED", "Calendario macro non esposto dall'adapter Yahoo.", false, 501);
+  }
 }

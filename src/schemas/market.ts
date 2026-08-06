@@ -48,6 +48,7 @@ export const riskRequestSchema = z.object({
 export const forecastHorizonSchema = z.enum(["1d", "5d", "10d", "20d", "1m", "3m", "6m", "12m"]);
 export const forecastRequestSchema = z.object({ symbol: symbolSchema, horizon: forecastHorizonSchema.default("1m"), target: z.coerce.number().positive().max(100_000_000).optional(), stop: z.coerce.number().positive().max(100_000_000).optional() });
 export const newsIntelligenceRequestSchema = z.object({ symbol: symbolSchema, limit: z.coerce.number().int().min(1).max(50).default(30) });
+export const calendarRequestSchema = z.object({ from: z.iso.date(), to: z.iso.date(), symbol: symbolSchema.optional() }).refine((value) => value.from <= value.to && (new Date(value.to).getTime() - new Date(value.from).getTime()) / 86_400_000 <= 93, { message: "Intervallo calendario non valido o superiore a 93 giorni" });
 
 export function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());
