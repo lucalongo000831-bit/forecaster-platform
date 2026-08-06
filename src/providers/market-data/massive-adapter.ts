@@ -56,6 +56,7 @@ export class MassiveMarketDataAdapter implements MarketDataProvider {
   async getQuote(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
     if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Massive adapter limitato ai ticker USA.", false, 422);
+    if (!getServerEnvironment().MASSIVE_SNAPSHOT_ENABLED) throw new ProviderError(this.name, "PLAN_RESTRICTED", "Snapshot Massive disabilitato perché non incluso nel piano verificato.", false, 501);
     const response = await massiveGet(`/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(symbol)}`, {}, "quote");
     const ticker = recordValue(response, "ticker");
     const day = recordValue(ticker, "day");

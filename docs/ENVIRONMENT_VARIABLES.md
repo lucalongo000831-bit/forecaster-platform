@@ -30,6 +30,8 @@ Provider secrets must never have a `NEXT_PUBLIC_` prefix. Base URLs are validate
 
 `YAHOO_FINANCE_ENABLED`, provider routing variables and `ENABLE_*` flags accept explicit documented values. Defaults keep optional paid/AI/realtime/backtest features disabled. `ENABLE_MOCK_FALLBACK` defaults to false so fictional data cannot silently enter production.
 
+Plan-gated feature flags default to false: `MASSIVE_SNAPSHOT_ENABLED`, `FMP_STATEMENTS_ENABLED` and `FMP_HISTORICAL_RATIOS_ENABLED`. Enable one only after its endpoint succeeds for the configured subscription; aggregate bars and other provider capabilities remain independently routable.
+
 ## Validation behavior
 
 `src/schemas/env.ts` validates values centrally. The base app can build without optional external resources, but database/auth/Redis/provider services expose controlled `NOT_CONFIGURED` states when their feature dependencies are missing. Status functions return booleans only.

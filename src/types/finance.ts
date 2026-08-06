@@ -71,12 +71,12 @@ export interface AnnualPerformancePoint {
 
 export interface FinancialPoint {
   year: string;
-  sales: number;
-  income: number;
-  cashFlow: number;
-  roe: number;
-  debt: number;
-  margin: number;
+  sales: number | null;
+  income: number | null;
+  cashFlow: number | null;
+  roe: number | null;
+  debt: number | null;
+  margin: number | null;
 }
 
 export interface InsiderTransaction {
@@ -269,7 +269,7 @@ export interface RatioMetric {
 
 export interface StatementRow {
   label: string;
-  values: number[];
+  values: Array<number | null>;
 }
 
 export interface Transcript {

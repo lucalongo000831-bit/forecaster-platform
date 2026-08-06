@@ -100,6 +100,7 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
   }
 
   async getStatements(symbolInput: string, kind: StatementKind, period: StatementPeriod, limit = 5) {
+    if (!getServerEnvironment().FMP_STATEMENTS_ENABLED) throw new ProviderError(this.name, "PLAN_RESTRICTED", "Bilanci FMP disabilitati perché non inclusi nel piano verificato.", false, 501);
     const symbol = normalizeSymbol(symbolInput);
     const rows = await fmpGet(statementEndpoint(kind), { symbol, period, limit: Math.min(20, Math.max(1, limit)) }, `statement:${kind}`);
     const data = rows.flatMap((row): FinancialStatement[] => {
@@ -119,6 +120,7 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
   }
 
   async getRatios(symbolInput: string, period: StatementPeriod, limit = 5) {
+    if (!getServerEnvironment().FMP_HISTORICAL_RATIOS_ENABLED) throw new ProviderError(this.name, "PLAN_RESTRICTED", "Ratio storici FMP disabilitati perché non inclusi nel piano verificato.", false, 501);
     const symbol = normalizeSymbol(symbolInput);
     const rows = await fmpGet("ratios", { symbol, period, limit: Math.min(20, Math.max(1, limit)) }, "ratios");
     const data: FundamentalRatios[] = rows.map((row) => ({

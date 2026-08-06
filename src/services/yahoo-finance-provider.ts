@@ -7,6 +7,7 @@ import { analyticalClose, annualPerformance, drawdowns, periodReturns, relativeS
 import { instrumentHref, marketSlug, normalizeSymbol } from "./yahoo/symbol-resolver";
 import { canFallback, safeServerLog } from "./yahoo/errors";
 import { analyzeTechnical } from "@/engines/technical";
+import { analyzeFundamentals, statementValue } from "@/engines/fundamental";
 import type {
   DashboardData,
   FundamentalsData,
@@ -266,9 +267,18 @@ export class YahooFinanceProvider implements FinancialDataProvider {
   async getFundamentals(ref: InstrumentRef): Promise<FundamentalsData> {
     const symbol = refSymbol(ref);
     return this.fallback<FundamentalsData>("fundamentals", symbol, async () => {
-      const [fundamentalsResult, quoteResult] = await Promise.all([financialProviderRouter.fundamentals(symbol), financialProviderRouter.quote(symbol)]);
+      const [fundamentalsResult, quoteResult, incomeResult, balanceResult, cashFlowResult, ratiosResult, analystResult] = await Promise.all([
+        financialProviderRouter.fundamentals(symbol),
+        financialProviderRouter.quote(symbol),
+        financialProviderRouter.statements(symbol, "income", "annual", 6).catch(() => null),
+        financialProviderRouter.statements(symbol, "balance-sheet", "annual", 6).catch(() => null),
+        financialProviderRouter.statements(symbol, "cash-flow", "annual", 6).catch(() => null),
+        financialProviderRouter.ratios(symbol, "annual", 6).catch(() => null),
+        financialProviderRouter.analystConsensus(symbol).catch(() => null),
+      ]);
       const fundamentals = fundamentalsResult.data;
       const quote = quoteResult.data;
+      const analysis = analyzeFundamentals({ symbol, summary: fundamentals, income: incomeResult?.data, balanceSheet: balanceResult?.data, cashFlow: cashFlowResult?.data, ratios: ratiosResult?.data, analyst: analystResult?.data, source: fundamentalsResult.meta.provider });
       const summaryColumns: SummaryMetric[][] = [[
         { label: "Annual Dividend", value: fundamentals.dividendRate === null ? "Dato non disponibile" : `${fundamentals.dividendRate.toFixed(2)} ${quote.currency}` },
         { label: "Dividend Yield", value: numberText(fundamentals.dividendYield === null ? null : fundamentals.dividendYield * 100, "%") },
@@ -279,30 +289,42 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         { label: "P/E (TTM)", value: numberText(fundamentals.trailingPe) },
         { label: "Last Price", value: `${quote.price.toFixed(2)} ${quote.currency}` },
       ]];
-      const revenueB = (fundamentals.revenue ?? 0) / 1e9;
-      const cashFlowB = (fundamentals.freeCashflow ?? 0) / 1e9;
-      const financials: FinancialPoint[] = [{ year: "TTM", sales: revenueB, income: 0, cashFlow: cashFlowB, roe: (fundamentals.returnOnEquity ?? 0) * 100, debt: fundamentals.debtToEquity ?? 0, margin: (fundamentals.profitMargins ?? 0) * 100 }];
+      const revenueB = fundamentals.revenue === null ? null : fundamentals.revenue / 1e9;
+      const cashFlowB = fundamentals.freeCashflow === null ? null : fundamentals.freeCashflow / 1e9;
+      const incomeStatements = analysis.inputs.income;
+      const cashStatements = analysis.inputs.cashFlow;
+      const financials: FinancialPoint[] = [...incomeStatements].reverse().map((statement) => {
+        const revenue = statementValue(statement, ["revenue", "totalRevenue"]);
+        const income = statementValue(statement, ["netIncome", "netIncomeCommonStockholders"]);
+        const matchingCash = cashStatements.find((item) => item.fiscalDate === statement.fiscalDate);
+        const cashFlow = statementValue(matchingCash, ["freeCashFlow"]);
+        return { year: statement.fiscalDate.slice(0, 4), sales: revenue === null ? null : revenue / 1e9, income: income === null ? null : income / 1e9, cashFlow: cashFlow === null ? null : cashFlow / 1e9, roe: null, debt: null, margin: revenue && income !== null ? income / revenue * 100 : null };
+      });
+      if (!financials.length && (revenueB !== null || cashFlowB !== null)) financials.push({ year: "TTM", sales: revenueB, income: null, cashFlow: cashFlowB, roe: fundamentals.returnOnEquity === null ? null : fundamentals.returnOnEquity * 100, debt: fundamentals.debtToEquity, margin: fundamentals.profitMargins === null ? null : fundamentals.profitMargins * 100 });
       const providerLabel = fundamentalsResult.meta.provider === "fmp" ? "FMP" : "Yahoo Finance";
-      const statementRows = [
-        { label: "Revenue", values: fundamentals.revenue === null ? [] : [revenueB] },
-        { label: "Free cash flow", values: fundamentals.freeCashflow === null ? [] : [cashFlowB] },
-      ].filter((row) => row.values.length);
+      const statementDefinitions = [
+        ["Revenue", ["revenue", "totalRevenue"]], ["Cost of revenue", ["costOfRevenue"]], ["Gross profit", ["grossProfit"]], ["Operating income", ["operatingIncome"]], ["Net income", ["netIncome", "netIncomeCommonStockholders"]], ["EPS diluted", ["epsDiluted", "eps"]],
+      ] as const;
+      const statementRows = statementDefinitions.map(([label, fields]) => ({ label, values: incomeStatements.map((statement) => { const value = statementValue(statement, fields); return value === null ? null : label.includes("EPS") ? value : value / 1e9; }) })).filter((row) => row.values.some((value) => value !== null));
+      const ratioMetrics = [
+        { label: "Revenue growth YoY", value: analysis.metrics.revenueGrowthYoY, percent: true },
+        { label: "Net margin", value: analysis.metrics.netMargin, percent: true },
+        { label: "Return on equity", value: analysis.metrics.returnOnEquity, percent: true },
+        { label: "Debt / equity", value: analysis.metrics.debtToEquity, percent: false },
+        { label: "Free cash flow margin", value: analysis.metrics.freeCashFlowMargin, percent: true },
+        { label: "P/E", value: analysis.metrics.trailingPe, percent: false },
+      ].filter((metric) => metric.value !== null);
       return {
         summaryColumns,
         financials,
         fairValues: [], averageFairValue: 0, fairValueUpsidePercent: 0,
-        scoreSeries: [], solidityScore: 0,
+        scoreSeries: analysis.confidence === "INSUFFICIENT" ? [] : [
+          ["Growth", analysis.growthScore], ["Profitability", analysis.profitabilityScore], ["Balance sheet", analysis.balanceSheetScore], ["Cash flow", analysis.cashFlowScore], ["Valuation", analysis.valuationScore], ["Quality", analysis.qualityScore],
+        ].flatMap(([label, value]) => typeof value === "number" ? [{ label: String(label), value }] : []), solidityScore: analysis.fundamentalScore ?? 0,
         sharesSeries: fundamentals.sharesOutstanding === null ? [] : [{ label: "TTM", value: fundamentals.sharesOutstanding / 1e9 }],
-        valueSignals: [], products: [], revenueByYear: [],
-        ratios: [
-          { label: "P/E", value: numberText(fundamentals.trailingPe), comparison: providerLabel },
-          { label: "Forward P/E", value: numberText(fundamentals.forwardPe), comparison: providerLabel },
-          { label: "Price / Book", value: numberText(fundamentals.priceToBook), comparison: providerLabel },
-          { label: "Profit Margin", value: numberText(fundamentals.profitMargins === null ? null : fundamentals.profitMargins * 100, "%"), comparison: providerLabel },
-          { label: "Return on Equity", value: numberText(fundamentals.returnOnEquity === null ? null : fundamentals.returnOnEquity * 100, "%"), comparison: providerLabel },
-          { label: "Debt / Equity", value: numberText(fundamentals.debtToEquity), comparison: providerLabel },
-        ],
-        statementPeriods: statementRows.length ? ["TTM"] : [],
+        valueSignals: analysis.confidence === "INSUFFICIENT" ? [] : [{ label: "Data completeness", value: `${analysis.dataCompleteness.toFixed(0)}%` }, { label: "Confidence", value: analysis.confidence }, ...analysis.reasons.slice(0, 1).map((reason) => ({ label: "Latest observation", value: reason }))], products: [], revenueByYear: [],
+        ratios: ratioMetrics.map((metric) => ({ label: metric.label, value: metric.percent ? numberText((metric.value as number) * 100, "%") : numberText(metric.value), comparison: `${providerLabel} · ${analysis.modelVersion}` })),
+        statementPeriods: statementRows.length ? incomeStatements.map((statement) => statement.fiscalDate.slice(0, 4)) : [],
         statementRows,
         transcripts: [],
         source: fundamentalsResult.meta.provider,
