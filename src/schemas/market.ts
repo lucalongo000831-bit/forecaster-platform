@@ -32,6 +32,19 @@ export const technicalRequestSchema = z.object({ symbol: symbolSchema, horizon: 
 export const seasonalityWindowSchema = z.enum(["1Y", "5Y", "10Y", "15Y", "20Y", "MAX"]);
 export const seasonalityRequestSchema = z.object({ symbol: symbolSchema, window: seasonalityWindowSchema.default("20Y") });
 export const signalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m") });
+export const targetHorizonSchema = z.enum(["3m", "6m", "12m", "long"]);
+export const targetRequestSchema = z.object({ symbol: symbolSchema, horizon: targetHorizonSchema.default("12m") });
+export const riskRequestSchema = z.object({
+  symbol: symbolSchema,
+  side: z.enum(["LONG", "SHORT"]),
+  entryPrice: z.number().positive().max(100_000_000),
+  horizon: analysisHorizonSchema,
+  riskProfile: z.enum(["CONSERVATIVE", "MODERATE", "AGGRESSIVE", "CUSTOM"]),
+  accountSize: z.number().positive().max(10_000_000_000).nullable().optional(),
+  maximumRiskPercent: z.number().min(0.1).max(10).nullable().optional(),
+  customAtrMultiplier: z.number().min(0.5).max(6).nullable().optional(),
+  customStopPercent: z.number().min(0.005).max(0.25).nullable().optional(),
+});
 
 export function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());
