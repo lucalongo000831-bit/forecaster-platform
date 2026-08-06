@@ -1,0 +1,23 @@
+{
+  "items": "1",
+  "feed": [
+    {
+      "title": "Acme publishes a quarterly update",
+      "url": "https://example.invalid/news/acme-update",
+      "time_published": "20260115T143000",
+      "summary": "Sanitized provider contract fixture.",
+      "source": "Example Wire",
+      "topics": [{ "topic": "earnings", "relevance_score": "0.8" }],
+      "overall_sentiment_score": "0.21",
+      "overall_sentiment_label": "Somewhat-Bullish",
+      "ticker_sentiment": [
+        {
+          "ticker": "ACME",
+          "relevance_score": "0.95",
+          "ticker_sentiment_score": "0.18",
+          "ticker_sentiment_label": "Somewhat-Bullish"
+        }
+      ]
+    }
+  ]
+}

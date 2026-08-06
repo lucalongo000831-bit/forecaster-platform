@@ -1,20 +1,23 @@
-import { apiFailure, apiSuccess } from "@/services/yahoo/api-response";
+import { financialProviderRouter } from "@/providers";
+import { searchRequestSchema, queryObject } from "@/schemas";
+import { createRequestContext } from "@/lib/server/request-context";
+import { enforceRateLimit } from "@/lib/server/rate-limit";
+import { jsonFailure } from "@/lib/server/api-response";
 import { fallbackSearch } from "@/services/yahoo/mock-fallback";
-import { clientKey, enforceRateLimit } from "@/services/yahoo/rate-limit";
-import { normalizeSearchQuery } from "@/services/yahoo/symbol-resolver";
-import { yahooFinanceClient } from "@/services/yahoo/yahoo-finance-client";
+import { mockApiSuccess, providerApiSuccess } from "@/services/market/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const context = createRequestContext(request);
   try {
-    enforceRateLimit(clientKey(request), "search", 12);
-    const query = normalizeSearchQuery(new URL(request.url).searchParams.get("q") ?? "");
+    await enforceRateLimit(context.ip, { scope: "market:search", limit: 15 });
+    const { q } = searchRequestSchema.parse(queryObject(request));
     try {
-      return apiSuccess(await yahooFinanceClient.search(query), "yahoo");
+      return providerApiSuccess(await financialProviderRouter.search(q), context, "public, s-maxage=300, stale-while-revalidate=1800");
     } catch {
-      return apiSuccess(fallbackSearch(), "mock", true, "Yahoo Finance non raggiungibile: risultati demo chiaramente identificati.");
+      return mockApiSuccess(fallbackSearch(), context, "Provider non raggiungibile: risultati demo chiaramente identificati.");
     }
-  } catch (error) { return apiFailure(error); }
+  } catch (error) { return jsonFailure(error, context); }
 }

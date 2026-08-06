@@ -1,0 +1,12 @@
+{
+  "status": "OK",
+  "ticker": {
+    "ticker": "ACME",
+    "todaysChange": 1.5,
+    "todaysChangePerc": 1.2,
+    "updated": 1768487400000000000,
+    "day": { "o": 124, "h": 127, "l": 123, "c": 126, "v": 250000 },
+    "prevDay": { "c": 124.5 },
+    "lastTrade": { "p": 126, "t": 1768487400000000000 }
+  }
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "symbol": "ACME",
+    "companyName": "Acme Corporation",
+    "currency": "USD",
+    "exchangeFullName": "NASDAQ",
+    "industry": "Software",
+    "sector": "Technology",
+    "country": "US",
+    "fullTimeEmployees": 1200,
+    "website": "https://example.invalid",
+    "description": "Sanitized provider contract fixture."
+  }
+]

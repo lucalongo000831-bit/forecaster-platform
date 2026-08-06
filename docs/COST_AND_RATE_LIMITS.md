@@ -18,6 +18,7 @@ Exact quotas depend on provider plans and must be read from account dashboards; 
 - quotes: 15–60 seconds; intraday: 1–5 minutes; daily charts: 15–60 minutes.
 - profiles: 24 hours; fundamentals/analysts: 12–24 hours; news: 5–15 minutes.
 - anonymous search and quote routes use conservative per-minute limits.
+- Alpha Vantage and Massive outbound adapters default to four calls per minute until plan-specific quotas are configured.
 - backtests, AI classification and bulk jobs require authentication and explicit concurrency caps.
 
 Provider 429 responses propagate a retryable category and `Retry-After` without automatic retry storms. Cache keys include provider, instrument, market, timeframe/range, schema and model version.
