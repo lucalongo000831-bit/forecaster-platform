@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity, BarChart3, Bell, BookOpen, CalendarDays, ChevronLeft,
   CircleDollarSign, Command, Gauge, Grid3X3, Landmark, LayoutDashboard, Menu,
-  MessageCircle, Newspaper, PieChart, Search, Settings, Sparkles, Star,
+  FlaskConical, MessageCircle, Newspaper, PieChart, Search, Settings, Sparkles, Star,
   TrendingUp, UserRound,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -16,7 +16,7 @@ import type { SearchInstrument, ShellData } from "@/types";
 const railItems = [
   ["/dashboard", "Control room", LayoutDashboard], ["/search", "Discover", Search],
   ["/calendar", "Calendar", CalendarDays], ["/watchlists", "Watchlists", Star],
-  ["/portfolio", "Portfolio", PieChart], ["/settings", "Preferences", Settings],
+  ["/portfolio", "Portfolio", PieChart], ["/backtest", "Backtest lab", FlaskConical], ["/settings", "Preferences", Settings],
 ] as const;
 
 export function AppShell({ children, data }: { children: React.ReactNode; data: ShellData }) {
@@ -54,6 +54,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     [instrumentPath(data.primaryInstrument, "news"), "Briefings", Newspaper],
     [instrumentPath(data.primaryInstrument, "fundamentals/transcripts"), "Transcripts", BookOpen],
     ["/portfolio", "Portfolio", CircleDollarSign], ["/search", "Discover", Search],
+    ["/backtest", "Backtest lab", FlaskConical],
     ["/settings", "Profile", UserRound],
   ] as const;
   const currentArea = pathname.startsWith("/instrument") ? "Equity workspace" : railItems.find(([href]) => pathname === href)?.[1] ?? "Market workspace";

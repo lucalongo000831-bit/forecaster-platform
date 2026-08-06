@@ -56,6 +56,11 @@ export function ForecastDistributionChart({ data, currentPrice }: { data: Array<
   </ComposedChart></ResponsiveContainer></div>;
 }
 
+export function BacktestEquityChart({ equity, benchmark }: { equity: Array<{ timestamp: string; value: number }>; benchmark: Array<{ timestamp: string; value: number }> }) {
+  const benchmarkByDate = new Map(benchmark.map((point) => [point.timestamp.slice(0, 10), point.value])); const data = equity.map((point) => ({ label: point.timestamp.slice(0, 10), equity: point.value, benchmark: benchmarkByDate.get(point.timestamp.slice(0, 10)) }));
+  return <div className="chart-wrap chart-tall"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><CartesianGrid stroke={grid} strokeDasharray="2 2"/><XAxis dataKey="label" tick={axis} minTickGap={80}/><YAxis tick={axis}/><Tooltip/><Legend/><Line dataKey="equity" stroke="#6576ed" strokeWidth={3} dot={false} name="Strategy"/><Line dataKey="benchmark" stroke="#25b98a" strokeWidth={2} dot={false} connectNulls name="Benchmark"/></LineChart></ResponsiveContainer></div>;
+}
+
 export function DividendChart({ data }: { data: TimePoint[] }) {
   return <div className="chart-wrap chart-short"><ResponsiveContainer width="100%" height="100%"><BarChart data={data}>
     <CartesianGrid stroke={grid} vertical={false}/><XAxis dataKey="label" tick={axis} minTickGap={70}/><YAxis tick={axis}/><Tooltip/>

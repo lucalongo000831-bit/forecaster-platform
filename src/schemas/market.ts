@@ -49,6 +49,23 @@ export const forecastHorizonSchema = z.enum(["1d", "5d", "10d", "20d", "1m", "3m
 export const forecastRequestSchema = z.object({ symbol: symbolSchema, horizon: forecastHorizonSchema.default("1m"), target: z.coerce.number().positive().max(100_000_000).optional(), stop: z.coerce.number().positive().max(100_000_000).optional() });
 export const newsIntelligenceRequestSchema = z.object({ symbol: symbolSchema, limit: z.coerce.number().int().min(1).max(50).default(30) });
 export const calendarRequestSchema = z.object({ from: z.iso.date(), to: z.iso.date(), symbol: symbolSchema.optional() }).refine((value) => value.from <= value.to && (new Date(value.to).getTime() - new Date(value.from).getTime()) / 86_400_000 <= 93, { message: "Intervallo calendario non valido o superiore a 93 giorni" });
+export const backtestRequestSchema = z.object({
+  symbol: symbolSchema,
+  benchmark: symbolSchema.default("^GSPC"),
+  from: z.iso.date(), to: z.iso.date(),
+  strategy: z.enum(["TREND_MOMENTUM", "SMA_CROSS", "BREAKOUT"]),
+  direction: z.enum(["LONG", "SHORT", "BOTH"]),
+  entryTiming: z.enum(["NEXT_OPEN", "NEXT_CLOSE"]).default("NEXT_OPEN"),
+  initialCapital: z.number().min(100).max(100_000_000),
+  stopPercent: z.number().min(0.005).max(0.5),
+  targetPercent: z.number().min(0.005).max(2),
+  trailingPercent: z.number().min(0.005).max(0.5),
+  maximumHoldingDays: z.number().int().min(1).max(1_260),
+  commission: z.number().min(0).max(10_000),
+  spreadBps: z.number().min(0).max(500),
+  slippageBps: z.number().min(0).max(500),
+  reinvest: z.boolean().default(true),
+}).refine((value) => value.from < value.to && (new Date(value.to).getTime() - new Date(value.from).getTime()) / 86_400_000 <= 5_500, { message: "Intervallo backtest non valido o superiore a 15 anni" });
 
 export function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());
