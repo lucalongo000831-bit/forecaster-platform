@@ -6,3 +6,4 @@ export * from "./qualitative";
 export * from "./valuation";
 export * from "./horizons";
 export * from "./outlook";
+export * from "./risk-register";
