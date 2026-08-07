@@ -65,3 +65,37 @@ test("global symbol matrix never exposes an unhandled server crash", async ({ re
     const body = await response.json(); expect(body).toMatchObject(response.ok() ? { data: expect.any(Object) } : { error: expect.any(Object) });
   }
 });
+
+test("company intelligence renders a complete cached flow or a controlled provider state", async ({ page, request }) => {
+  const analysis = await request.get("/api/company/AAPL/analysis", { headers: { "x-forwarded-for": "198.51.100.200" }, timeout: 60_000 });
+  expect([200, 404, 429, 502, 503, 504]).toContain(analysis.status());
+  const payload = await analysis.json();
+
+  if (!analysis.ok()) {
+    expect(payload).toMatchObject({ error: { code: expect.any(String), message: expect.any(String) } });
+    return;
+  }
+
+  expect(payload).toMatchObject({ data: { symbol: "AAPL", applicable: true, modelVersion: expect.any(String), reportVersion: expect.any(String) } });
+  await page.goto("/instrument/nasdaq/aapl/analysis", { waitUntil: "domcontentloaded", timeout: 60_000 });
+  await expect(page.getByText("Company Intelligence").first()).toBeVisible();
+  await expect(page.getByText("Downside prima dell’upside")).toBeVisible();
+  await expect(page.getByText("Multipli, reverse DCF e DCF")).toBeVisible();
+  await expect(page.getByText("Rischi, red flag e tesi short")).toBeVisible();
+  await expect(page.getByText("Fonti, metodologia e limiti")).toBeVisible();
+
+  const pdf = await request.get("/api/company/AAPL/report?format=pdf", { headers: { "x-forwarded-for": "198.51.100.201" }, timeout: 60_000 });
+  expect(pdf.status()).toBe(200);
+  expect(pdf.headers()["content-type"]).toContain("application/pdf");
+  expect((await pdf.body()).subarray(0, 8).toString()).toContain("%PDF-1.4");
+});
+
+test("non-company instruments never receive fabricated corporate analysis", async ({ request }) => {
+  for (const symbol of ["SPY", "^GSPC", "BTC-USD"]) {
+    const response = await request.get(`/api/company/${encodeURIComponent(symbol)}/analysis`, { headers: { "x-forwarded-for": `198.51.100.${210 + symbol.length}` }, timeout: 60_000 });
+    expect([200, 404, 429, 502, 503, 504]).toContain(response.status());
+    const payload = await response.json();
+    if (response.ok()) expect(payload).toMatchObject({ data: { applicable: false, verdict: "INSUFFICIENT_DATA" } });
+    else expect(payload).toMatchObject({ error: { code: expect.any(String) } });
+  }
+});

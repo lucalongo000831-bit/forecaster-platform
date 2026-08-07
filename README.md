@@ -13,6 +13,7 @@ The product identity and assets are replaceable. The project does not scrape the
 - Secure credentials authentication, HttpOnly sessions and per-user watchlists, portfolio ledgers, alerts and internal notifications.
 - Multi-provider routing across Yahoo Finance, Financial Modeling Prep, Alpha Vantage and Massive, with typed adapters, timeout, retry, caching and fallback.
 - Protected health endpoints, cron jobs, structured logs, request IDs, rate limiting and data provenance.
+- Buy-side Company Intelligence with historical statement validation, earnings/FCF quality, evidence-based company scoring, moat and management analysis, reverse DCF, bear/base/bull DCF, downside-first risks, horizons through 20 years, operational calendar, PDF/CSV reports and point-in-time decision validation.
 
 ## Technology
 
@@ -60,6 +61,7 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run db:generate` | generate a migration from schema changes |
 | `npm run db:migrate` | apply committed PostgreSQL migrations |
 | `npm run test:providers` | optional live provider smoke test |
+| `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |
 
 ## Architecture
 
@@ -93,6 +95,8 @@ Core boundaries:
 ## API surface
 
 Public market APIs include `/api/market/{search,quote,quotes,chart,profile,fundamentals,statements,analyst,news,status,events}`, `/api/analysis/{technical,fundamental,seasonality,signal,targets,risk,forecast}`, `/api/intelligence/news`, `/api/calendar` and `/api/backtests`.
+
+Company Intelligence is available at `/instrument/[market]/[symbol]/analysis` and through `/api/company/resolve`, the section endpoints under `/api/company/[symbol]/**`, report export, refresh, custom DCF and decision backtesting. Public sections share one aggregate abuse budget and one cached report pipeline; costly mutations and production exports use tighter authentication/limit controls.
 
 Private APIs include:
 
@@ -149,6 +153,7 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Quant models](docs/QUANT_MODELS.md), [forecast](docs/FORECAST_ENGINE.md), [backtest](docs/BACKTEST_ENGINE.md)
 - [Account features and alerts](docs/ACCOUNT_FEATURES.md)
 - [Operations and cron](docs/OPERATIONS.md)
+- [Company Intelligence operations](docs/COMPANY_INTELLIGENCE_OPERATIONS.md), [architecture](docs/COMPANY_INTELLIGENCE_ARCHITECTURE.md), [methodology](docs/COMPANY_ANALYSIS_METHODOLOGY.md) and [acceptance tests](docs/COMPANY_ANALYSIS_ACCEPTANCE_TESTS.md)
 - [Acceptance tests](docs/ACCEPTANCE_TESTS.md)
 - [Known data limits](docs/DATA_LIMITATIONS.md) and [Yahoo limits](YAHOO_DATA_LIMITATIONS.md)
 

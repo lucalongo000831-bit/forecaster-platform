@@ -1,0 +1,91 @@
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, BookOpen, Building2, CalendarDays, CheckCircle2, CircleDollarSign, Compass, Gauge, Landmark, Scale, ShieldAlert, Sparkles, Target } from "lucide-react";
+import { formatCompactNumber, formatCurrency } from "@/lib";
+import type { CompanyConfidence, CompanyIntelligenceReport, ScoreDetail } from "@/types";
+import { CompanyReportActions } from "./company-report-actions";
+
+const na = "DATO NON DISPONIBILE";
+const money = (value: number | null | undefined, currency: string) => value === null || value === undefined ? na : formatCurrency(value, currency);
+const percent = (value: number | null | undefined) => value === null || value === undefined ? na : `${(value * 100).toFixed(1)}%`;
+const score = (value: number | null | undefined) => value === null || value === undefined ? "—" : value.toFixed(0);
+const verdictLabel = (value: string) => value.replaceAll("_", " ");
+
+function Metric({ label, value, note }: { label: string; value: React.ReactNode; note?: string }) { return <div className="ci-metric"><span>{label}</span><strong>{value}</strong>{note && <small>{note}</small>}</div>; }
+function ScoreCard({ label, detail }: { label: string; detail: ScoreDetail }) { return <div className="ci-score-card"><div><span>{label}</span><strong>{score(detail.score)}</strong></div><div className="ci-progress"><i style={{ width: `${detail.score ?? 0}%` }}/></div><small>{detail.positives[0] ?? detail.negatives[0] ?? detail.missing[0] ?? na}</small></div>; }
+function Section({ id, title, icon, children, open = false }: { id: string; title: string; icon: React.ReactNode; children: React.ReactNode; open?: boolean }) { return <details className="ci-section" id={id} open={open}><summary><span className="ci-section-icon">{icon}</span><strong>{title}</strong><span className="ci-expand">Espandi</span></summary><div className="ci-section-body">{children}</div></details>; }
+function Confidence({ value }: { value: CompanyConfidence }) { return <span className={`ci-confidence ci-${value.toLowerCase()}`}>{value.replaceAll("_", " ")}</span>; }
+
+export function CompanyIntelligenceView({ report }: { report: CompanyIntelligenceReport }) {
+  if (!report.applicable) return <div className="container-shell page-stack"><div className="card p-8"><span className="page-kicker">Company Intelligence</span><h1 className="page-title mt-3">NON APPLICABILE</h1><p className="muted mt-4">L’analisi aziendale non è applicabile allo strumento {report.instrumentType}. Nessun bilancio o valore societario è stato inventato.</p></div></div>;
+  const annual = report.historical.filter((row) => row.period === "annual").slice(0, 10);
+  const valuation = report.valuation; const risks = report.risks; const quality = report.quality;
+  const nav = [["summary","Sintesi"],["quality","Qualità"],["financials","Bilanci"],["valuation","Valutazione"],["horizons","Orizzonti"],["risk","Rischi"],["sources","Fonti"]];
+  return <div className="container-shell ci-page">
+    <section className="ci-summary" id="summary">
+      <div className="ci-summary-copy"><span className="insight-badge"><Sparkles size={14}/>Company Intelligence</span><h1>{verdictLabel(report.verdict)}</h1><p>{report.thesis.verdict}. Analisi buy-side non personalizzata, costruita sui dati disponibili con priorità al downside.</p><div className="ci-summary-meta"><span>{report.symbol}</span><span>{report.exchange}</span><span>{report.sector ?? na}</span><Confidence value={report.confidence}/></div></div>
+      <div className="ci-gauge" style={{ "--score": `${report.overallScore ?? 0}%` } as React.CSSProperties}><div><strong>{score(report.overallScore)}</strong><span>/100</span></div><small>{verdictLabel(report.assessment)}</small></div>
+      <div className="ci-summary-side"><Metric label="Prezzo" value={money(report.currentPrice, report.currency)}/><Metric label="Fair value" value={money(valuation?.fairValue, report.currency)}/><Metric label="Margin of safety" value={percent(valuation?.marginOfSafety)}/><Metric label="Qualità dati" value={`${report.dataQuality.score.toFixed(0)}/100`} note={report.dataTimestamp ?? na}/></div>
+    </section>
+    <div className="ci-toolbar"><nav>{nav.map(([id,label]) => <a href={`#${id}`} key={id}>{label}</a>)}</nav><CompanyReportActions symbol={report.symbol}/></div>
+
+    <section className="ci-decision-grid">
+      <div className="card p-6"><span className="small-label">Cosa può andare storto</span><h2 className="mt-2 text-xl font-bold">Downside prima dell’upside</h2><ul className="ci-list negative-list">{report.thesis.whyItMayFail.length ? report.thesis.whyItMayFail.slice(0, 5).map((item) => <li key={item}>{item}</li>) : <li>{na}</li>}</ul></div>
+      <div className="card p-6"><span className="small-label">Tesi costruttiva</span><h2 className="mt-2 text-xl font-bold">Perché potrebbe funzionare</h2><ul className="ci-list positive-list">{report.thesis.whyItMayWork.length ? report.thesis.whyItMayWork.slice(0, 5).map((item) => <li key={item}>{item}</li>) : <li>{na}</li>}</ul></div>
+    </section>
+
+    <Section id="price" title="Prezzo e valutazione corrente" icon={<CircleDollarSign size={18}/>} open>
+      <div className="ci-metric-grid"><Metric label="Prezzo attuale" value={money(report.currentPrice, report.currency)} note={`${report.dailyChangePercent === null ? na : `${report.dailyChangePercent.toFixed(2)}%`} oggi`}/><Metric label="Market cap" value={report.marketCap === null ? na : formatCompactNumber(report.marketCap)}/><Metric label="Scenario bear" value={money(valuation?.scenarios.find((item) => item.name === "BEAR")?.fairValuePerShare, report.currency)}/><Metric label="Scenario base" value={money(valuation?.scenarios.find((item) => item.name === "BASE")?.fairValuePerShare, report.currency)}/><Metric label="Scenario bull" value={money(valuation?.scenarios.find((item) => item.name === "BULL")?.fairValuePerShare, report.currency)}/><Metric label="Reverse DCF" value={valuation?.reverseDcf.classification ?? na} note={valuation?.reverseDcf.explanation}/></div>
+    </Section>
+    <Section id="quality" title="Qualità aziendale, crescita e redditività" icon={<Gauge size={18}/>} open>
+      {quality ? <div className="ci-score-grid"><ScoreCard label="Crescita" detail={quality.growth}/><ScoreCard label="Redditività" detail={quality.profitability}/><ScoreCard label="Efficienza capitale" detail={quality.capitalEfficiency}/><ScoreCard label="Bilancio" detail={quality.balanceSheet}/><ScoreCard label="Cash flow" detail={quality.cashFlow}/><ScoreCard label="Qualità utili" detail={quality.earningsQuality}/><ScoreCard label="Moat" detail={quality.moat}/><ScoreCard label="Management" detail={quality.management}/><ScoreCard label="Prevedibilità" detail={quality.predictability}/></div> : <p>{na}</p>}
+    </Section>
+    <Section id="financials" title="Bilanci storici: crescita, margini e solidità" icon={<Landmark size={18}/>}>
+      {annual.length ? <div className="ci-table-wrap"><table className="ci-table"><thead><tr><th>Periodo</th><th>Ricavi</th><th>Utile netto</th><th>FCF</th><th>Debito netto</th><th>Azioni diluite</th></tr></thead><tbody>{annual.map((row) => <tr key={row.fiscalDate}><td>{row.fiscalDate}</td><td>{money(row.revenue, row.currency ?? report.currency)}</td><td>{money(row.netIncome, row.currency ?? report.currency)}</td><td>{money(row.freeCashFlow, row.currency ?? report.currency)}</td><td>{money(row.netDebt, row.currency ?? report.currency)}</td><td>{row.dilutedShares === null ? na : formatCompactNumber(row.dilutedShares)}</td></tr>)}</tbody></table></div> : <p>{na}</p>}
+      <div className="ci-checks">{report.dataQuality.checks.map((check) => <span className={check.status.toLowerCase()} key={check.code}>{check.status === "PASS" ? <CheckCircle2 size={15}/> : <AlertTriangle size={15}/>} {check.message}</span>)}</div>
+    </Section>
+    <Section id="cash-flow" title="Cash flow e qualità degli utili" icon={<Scale size={18}/>}>
+      {report.earningsQuality ? <><div className="ci-metric-grid"><Metric label="Earnings quality" value={`${score(report.earningsQuality.score)}/100`}/><Metric label="Cash conversion" value={percent(report.earningsQuality.cashConversion)}/><Metric label="FCF / utile" value={percent(report.earningsQuality.fcfToNetIncome)}/><Metric label="FCF margin" value={percent(report.earningsQuality.fcfMargin)}/><Metric label="FCF yield" value={percent(report.earningsQuality.fcfYield)}/><Metric label="Classificazione" value={report.earningsQuality.classification}/></div><ul className="ci-list negative-list">{report.earningsQuality.redFlags.map((flag) => <li key={flag}>{flag}</li>)}</ul></> : <p>{na}</p>}
+    </Section>
+    <Section id="moat" title="Vantaggio competitivo" icon={<Building2 size={18}/>}>
+      {report.moat ? <><div className="ci-inline-title"><strong>{report.moat.classification}</strong><span>{score(report.moat.score)}/100</span><Confidence value={report.moat.confidence}/></div><div className="ci-category-grid">{report.moat.categories.map((item) => <div key={item.category}><strong>{item.category}</strong><span>{item.strength}</span><small>{item.quantitativeEvidence[0] ?? item.threats[0]}</small></div>)}</div></> : <p>{na}</p>}
+    </Section>
+    <Section id="peers" title="Settore e competitor" icon={<Compass size={18}/>}>
+      {report.peers.length ? <div className="ci-table-wrap"><table className="ci-table"><thead><tr><th>Società</th><th>Ticker</th><th>Provider</th></tr></thead><tbody>{report.peers.map((peer) => <tr key={peer.symbol}><td>{peer.name}</td><td>{peer.symbol}</td><td>{peer.provider}</td></tr>)}</tbody></table></div> : <p>{na}. Il sistema non crea automaticamente peer non verificati.</p>}
+    </Section>
+    <Section id="management" title="Management e allocazione del capitale" icon={<BookOpen size={18}/>}>
+      {report.management ? <><div className="ci-metric-grid"><Metric label="Execution" value={`${score(report.management.executionScore)}/100`}/><Metric label="Capital allocation" value={`${score(report.management.capitalAllocationScore)}/100`}/><Metric label="Allineamento azionisti" value={`${score(report.management.shareholderAlignmentScore)}/100`}/><Metric label="Credibilità" value={`${score(report.management.credibilityScore)}/100`}/></div><ul className="ci-list">{[...report.management.evidence, ...report.management.warnings].map((item) => <li key={item}>{item}</li>)}</ul></> : <p>{na}</p>}
+    </Section>
+    <Section id="valuation" title="Multipli, reverse DCF e DCF" icon={<Target size={18}/>} open>
+      {valuation ? <><div className="ci-metric-grid">{valuation.multiples.map((item) => <Metric key={item.key} label={item.label} value={item.value === null ? na : `${item.value.toFixed(2)}${item.unit === "%" ? "%" : "x"}`} note={item.kind}/>)}</div><div className="ci-scenarios">{valuation.scenarios.map((item) => <div key={item.name} className={item.name.toLowerCase()}><span>{item.name}</span><strong>{money(item.fairValuePerShare, report.currency)}</strong><small>{item.upsideDownside === null ? na : percent(item.upsideDownside)}</small></div>)}</div><h3 className="mt-7 font-bold">Sensitivity WACC / terminal growth</h3><div className="ci-sensitivity">{valuation.sensitivity.map((item) => <div key={`${item.discountRate}-${item.terminalGrowth}`}><small>{(item.discountRate * 100).toFixed(1)}% / {(item.terminalGrowth * 100).toFixed(1)}%</small><strong>{money(item.fairValue, report.currency)}</strong></div>)}</div></> : <p>{na}</p>}
+    </Section>
+    <Section id="prices" title="Prezzi operativi e margine di sicurezza" icon={<ArrowDownRight size={18}/>}>
+      {valuation ? <div className="ci-price-ladder">{Object.entries(valuation.operationalPrices).map(([key, value]) => <div key={key}><span>{verdictLabel(key)}</span><strong>{value ? `${money(value[0], report.currency)} — ${money(value[1], report.currency)}` : na}</strong></div>)}</div> : <p>{na}</p>}
+    </Section>
+    <Section id="horizons" title="Giudizio per orizzonte" icon={<ArrowUpRight size={18}/>}>
+      <div className="ci-horizons">{report.horizons.map((item) => <div key={item.horizon}><strong>{item.horizon}</strong><span className={`ci-orientation ${item.orientation.toLowerCase()}`}>{item.orientation}</span><span>{item.centralTarget === null ? `Range ${money(item.bear, report.currency)} – ${money(item.bull, report.currency)}` : money(item.centralTarget, report.currency)}</span><Confidence value={item.confidence}/><small>{item.risk}</small></div>)}</div>
+    </Section>
+    <Section id="technical" title="Analisi tecnica e daily outlook" icon={<Gauge size={18}/>}>
+      {report.dailyOutlook ? <div className="ci-metric-grid"><Metric label="Fase mercato" value={report.dailyOutlook.marketPhase}/><Metric label="ATR" value={money(report.dailyOutlook.atr, report.currency)}/><Metric label="Range atteso" value={report.dailyOutlook.expectedRange ? `${money(report.dailyOutlook.expectedRange[0], report.currency)} — ${money(report.dailyOutlook.expectedRange[1], report.currency)}` : na}/><Metric label="Supporto" value={money(report.dailyOutlook.support1, report.currency)}/><Metric label="Resistenza" value={money(report.dailyOutlook.resistance1, report.currency)}/><Metric label="Target centrale" value={money(report.dailyOutlook.centralTarget, report.currency)} note={report.dailyOutlook.note}/></div> : <p>{na}</p>}
+    </Section>
+    <Section id="seasonality" title="Stagionalità 1/5/10/15/20 anni" icon={<CalendarDays size={18}/>}>
+      <div className="ci-seasonality">{report.seasonality.map((item) => <div key={item.window}><strong>{item.window}</strong><span>{item.direction}</span><small>Media {percent(item.mean)} · Hit rate {percent(item.hitRate)} · n={item.observations} · {item.quality}</small></div>)}</div><p className="muted mt-4 text-xs">La stagionalità descrive correlazioni storiche e non implica causalità.</p>
+    </Section>
+    <Section id="risk" title="Rischi, red flag e tesi short" icon={<ShieldAlert size={18}/>} open>
+      {risks ? <><div className="ci-metric-grid"><Metric label="Rischio complessivo" value={`${score(risks.overallRiskScore)}/100`}/><Metric label="Perdita permanente" value={`${score(risks.permanentCapitalLossRisk)}/100`}/><Metric label="Rischio valutazione" value={`${score(risks.valuationRisk)}/100`}/><Metric label="Rischio bilancio" value={`${score(risks.balanceSheetRisk)}/100`}/><Metric label="Short thesis" value={risks.shortEligible ? "SUPPORTATA" : "NON SUPPORTATA"}/><Metric label="Squeeze risk" value={`${score(risks.squeezeRisk)}/100`}/></div><div className="ci-risk-grid">{risks.items.map((item) => <article key={item.id}><span>{item.category}</span><strong>{item.probability} / {item.impact}</strong><p>{item.description}</p></article>)}</div><div className="ci-redflags">{risks.redFlags.map((flag) => <article key={flag.code}><AlertTriangle size={17}/><div><strong>{flag.severity} · {flag.code}</strong><p>{flag.evidence}</p><small>{flag.alternativeExplanation}</small></div></article>)}</div></> : <p>{na}</p>}
+    </Section>
+    <Section id="catalysts" title="Catalizzatori positivi e negativi" icon={<Sparkles size={18}/>}>
+      <div className="ci-catalysts">{risks?.catalysts.length ? risks.catalysts.map((item) => <article className={item.direction.toLowerCase()} key={`${item.title}-${item.expectedDate}`}><strong>{item.title}</strong><span>{item.direction} · {item.impact} · {item.probability}</span><small>{item.expectedDate ?? item.horizon} · {item.source ?? na}</small></article>) : <p>{na}</p>}</div>
+    </Section>
+    <Section id="macro" title="Macroeconomia e geopolitica" icon={<Landmark size={18}/>}>
+      {report.macro ? <><div className="ci-metric-grid"><Metric label="Sensibilità macro" value={`${score(report.macro.macroSensitivityScore)}/100`}/><Metric label="Rischio geopolitico" value={`${score(report.macro.geopoliticalRiskScore)}/100`}/><Metric label="Tassi" value={report.macro.rateSensitivity}/><Metric label="Inflazione" value={report.macro.inflationSensitivity}/><Metric label="Valuta" value={report.macro.currencySensitivity}/><Metric label="Commodity" value={report.macro.commoditySensitivity}/></div><p className="muted mt-4 text-sm">{report.macro.limitations.join(" ")}</p></> : <p>{na}</p>}
+    </Section>
+    <Section id="calendar" title="Calendario operativo" icon={<CalendarDays size={18}/>}>
+      <div className="ci-calendar">{report.operationalCalendar.slice(0, 31).map((day) => <div className={day.elevatedRisk ? "risk" : ""} key={day.date}><strong>{day.date.slice(8)}</strong><span>{day.orientation}</span><small>{day.events[0]?.title ?? "Modello / nessun evento certo"}</small></div>)}</div>
+    </Section>
+    <Section id="decision" title="Decisione finale e cosa monitorare" icon={<CheckCircle2 size={18}/>} open>
+      <div className="ci-final"><div><span>Decisione</span><strong>{verdictLabel(report.verdict)}</strong><p>{report.thesis.verdict}</p></div><ul className="ci-list">{report.thesis.monitor.length ? report.thesis.monitor.map((item) => <li key={item}>{item}</li>) : <li>{na}</li>}</ul></div>
+    </Section>
+    <Section id="sources" title="Fonti, metodologia e limiti" icon={<BookOpen size={18}/>}>
+      <div className="ci-sources">{report.sources.length ? report.sources.map((source, index) => <div key={`${source.label}-${index}`}><span>{source.kind}</span><strong>{source.label}</strong><small>{source.provider} · {source.timestamp ?? na}</small>{source.url && <a href={source.url} target="_blank" rel="noopener noreferrer">Apri fonte</a>}</div>) : <p>{na}</p>}</div><div className="ci-limitations"><h3>Limiti</h3>{report.limitations.map((item) => <p key={item}>{item}</p>)}</div><p className="muted mt-5 text-xs">Versioni: {report.modelVersion} · {report.scoringVersion} · {report.valuationVersion} · {report.signalVersion} · {report.reportVersion} · {Object.values(report.providerVersions).join(" · ")}</p>
+    </Section>
+  </div>;
+}

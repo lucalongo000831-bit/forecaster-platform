@@ -1,0 +1,15 @@
+import { createRequestContext } from "@/lib/server/request-context";
+import { enforceRateLimit } from "@/lib/server/rate-limit";
+import { jsonFailure, jsonSuccess } from "@/lib/server/api-response";
+import { symbolSchema } from "@/schemas";
+import { companyMetricsCsv, companyReportPdf } from "@/services/company/company-export";
+import { getCompanyIntelligence } from "@/services/company";
+import { requireUser } from "@/lib/server/auth";
+import { assertSameOrigin } from "@/lib/server/csrf";
+import { saveCompanyReport } from "@/services/company/company-analysis-repository";
+import { enforceCompanyAnalysisRateLimit } from "@/services/company/company-analysis-access";
+import { getServerEnvironment } from "@/schemas/env";
+
+export const runtime = "nodejs"; export const dynamic = "force-dynamic"; export const maxDuration = 30;
+export async function GET(request: Request, route: { params: Promise<{ symbol: string }> }) { const context = createRequestContext(request); try { await enforceRateLimit(context.ip, { scope: "company:report", limit: 5, windowSeconds: 300 }); await enforceCompanyAnalysisRateLimit(context.ip); const symbol = symbolSchema.parse(decodeURIComponent((await route.params).symbol)); const format = new URL(request.url).searchParams.get("format") ?? "json"; if ((format === "csv" || format === "pdf") && getServerEnvironment().NODE_ENV === "production") await requireUser(); const report = await getCompanyIntelligence(symbol); if (format === "csv") return new Response(companyMetricsCsv(report), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${symbol}-company-intelligence.csv"`, "Cache-Control": "private, max-age=300", "X-Request-Id": context.requestId } }); if (format === "pdf") return new Response(companyReportPdf(report), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${symbol}-company-intelligence.pdf"`, "Cache-Control": "private, max-age=300", "X-Request-Id": context.requestId } }); return jsonSuccess(report, context, { headers: { "Cache-Control": "private, max-age=300" }, meta: { modelVersion: report.modelVersion } }); } catch (error) { return jsonFailure(error, context); } }
+export async function POST(request: Request, route: { params: Promise<{ symbol: string }> }) { const context = createRequestContext(request); try { await enforceRateLimit(context.ip, { scope: "company:report:save", limit: 3, windowSeconds: 300 }); assertSameOrigin(request); const user = await requireUser(); const symbol = symbolSchema.parse(decodeURIComponent((await route.params).symbol)); const report = await getCompanyIntelligence(symbol); const reportId = await saveCompanyReport(user.id, report); if (!reportId) throw new Error("Report persistence unavailable"); return jsonSuccess({ reportId }, context, { headers: { "Cache-Control": "no-store" } }); } catch (error) { return jsonFailure(error, context); } }

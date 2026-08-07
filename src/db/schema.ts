@@ -458,3 +458,60 @@ export const providerHealthSnapshots = pgTable("provider_health_snapshots", {
   errorCode: varchar("error_code", { length: 80 }),
   checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("provider_health_time_idx").on(table.provider, table.checkedAt)]);
+
+const companyResultColumns = () => ({
+  id: uuid("id").defaultRandom().primaryKey(),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "cascade" }).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  modelVersion: varchar("model_version", { length: 80 }).notNull(),
+  dataTimestamp: timestamp("data_timestamp", { withTimezone: true }),
+  calculatedAt: timestamp("calculated_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  providerMetadata: jsonb("provider_metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  methodologyMetadata: jsonb("methodology_metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const companyAnalysisSnapshots = pgTable("company_analysis_snapshots", {
+  ...companyResultColumns(),
+  symbol: varchar("symbol", { length: 64 }).notNull(),
+  market: varchar("market", { length: 80 }).notNull(),
+  score: numeric("score", { precision: 8, scale: 4 }),
+  verdict: varchar("verdict", { length: 40 }).notNull(),
+  shortVerdict: varchar("short_verdict", { length: 40 }),
+  qualityScore: numeric("quality_score", { precision: 8, scale: 4 }),
+  growthScore: numeric("growth_score", { precision: 8, scale: 4 }),
+  valuationScore: numeric("valuation_score", { precision: 8, scale: 4 }),
+  riskScore: numeric("risk_score", { precision: 8, scale: 4 }),
+  moatScore: numeric("moat_score", { precision: 8, scale: 4 }),
+  managementScore: numeric("management_score", { precision: 8, scale: 4 }),
+  earningsQualityScore: numeric("earnings_quality_score", { precision: 8, scale: 4 }),
+  fairValue: numeric("fair_value", { precision: 30, scale: 10 }),
+  bearValue: numeric("bear_value", { precision: 30, scale: 10 }),
+  baseValue: numeric("base_value", { precision: 30, scale: 10 }),
+  bullValue: numeric("bull_value", { precision: 30, scale: 10 }),
+  attractivePriceLow: numeric("attractive_price_low", { precision: 30, scale: 10 }),
+  attractivePriceHigh: numeric("attractive_price_high", { precision: 30, scale: 10 }),
+  avoidPrice: numeric("avoid_price", { precision: 30, scale: 10 }),
+  marginOfSafety: numeric("margin_of_safety", { precision: 18, scale: 8 }),
+  confidence: varchar("confidence", { length: 24 }).notNull(),
+}, (table) => [index("company_analysis_instrument_time_idx").on(table.instrumentId, table.calculatedAt), index("company_analysis_symbol_time_idx").on(table.symbol, table.calculatedAt)]);
+
+export const companyQualitySnapshots = pgTable("company_quality_snapshots", companyResultColumns(), (table) => [index("company_quality_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const earningsQualitySnapshots = pgTable("earnings_quality_snapshots", companyResultColumns(), (table) => [index("earnings_quality_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const moatAssessments = pgTable("moat_assessments", companyResultColumns(), (table) => [index("moat_assessment_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const managementAssessments = pgTable("management_assessments", companyResultColumns(), (table) => [index("management_assessment_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const peerGroups = pgTable("peer_groups", companyResultColumns(), (table) => [index("peer_group_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const peerComparisonSnapshots = pgTable("peer_comparison_snapshots", companyResultColumns(), (table) => [index("peer_comparison_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const valuationSnapshots = pgTable("valuation_snapshots", companyResultColumns(), (table) => [index("valuation_snapshot_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const reverseDcfRuns = pgTable("reverse_dcf_runs", companyResultColumns(), (table) => [index("reverse_dcf_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const dcfRuns = pgTable("dcf_runs", companyResultColumns(), (table) => [index("dcf_run_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const investmentScenarios = pgTable("investment_scenarios", companyResultColumns(), (table) => [index("investment_scenario_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const investmentTheses = pgTable("investment_theses", companyResultColumns(), (table) => [index("investment_thesis_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const riskRegisterItems = pgTable("risk_register_items", companyResultColumns(), (table) => [index("risk_register_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const companyRedFlags = pgTable("company_red_flags", companyResultColumns(), (table) => [index("company_red_flag_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const companyCatalysts = pgTable("company_catalysts", companyResultColumns(), (table) => [index("company_catalyst_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const timeHorizonAssessments = pgTable("time_horizon_assessments", { ...companyResultColumns(), horizon: varchar("horizon", { length: 32 }).notNull() }, (table) => [index("company_horizon_time_idx").on(table.instrumentId, table.horizon, table.calculatedAt)]);
+export const dailyOutlooks = pgTable("daily_outlooks", companyResultColumns(), (table) => [index("daily_outlook_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const operationalCalendarSnapshots = pgTable("operational_calendar_snapshots", companyResultColumns(), (table) => [index("operational_calendar_time_idx").on(table.instrumentId, table.calculatedAt)]);
+export const companyAnalysisReports = pgTable("company_analysis_reports", { ...companyResultColumns(), userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }) }, (table) => [index("company_report_time_idx").on(table.instrumentId, table.calculatedAt), index("company_report_user_time_idx").on(table.userId, table.calculatedAt)]);

@@ -15,6 +15,20 @@
       "when": 1786054687841,
       "tag": "0001_narrow_magdalene",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786090930084,
+      "tag": "0002_fluffy_felicia_hardy",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786092974834,
+      "tag": "0003_odd_agent_zero",
+      "breakpoints": true
     }
   ]
 }

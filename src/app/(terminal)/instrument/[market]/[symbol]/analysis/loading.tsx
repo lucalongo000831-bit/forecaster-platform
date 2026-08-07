@@ -1,0 +1,1 @@
+export default function CompanyAnalysisLoading() { return <div className="container-shell ci-page"><div className="ci-loading"/><div className="ci-loading short"/><div className="ci-loading"/></div>; }
