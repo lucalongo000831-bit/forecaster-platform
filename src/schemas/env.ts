@@ -40,6 +40,7 @@ const serverEnvironmentSchema = z.object({
   MASSIVE_WEBSOCKET_URL: trustedProviderUrl("wss://socket.massive.com", ["wss:"], ["socket.massive.com"]),
   OPENAI_API_KEY: optionalSecret,
   OPENAI_MODEL: optionalString,
+  ENABLE_KAIRO_AI: booleanFlag,
   UPSTASH_REDIS_REST_URL: optionalUrl,
   UPSTASH_REDIS_REST_TOKEN: optionalSecret,
   CRON_SECRET: optionalSecret,
@@ -54,6 +55,7 @@ const serverEnvironmentSchema = z.object({
   FMP_STATEMENTS_ENABLED: booleanFlag,
   FMP_HISTORICAL_RATIOS_ENABLED: booleanFlag,
   ENABLE_AI_NEWS_ANALYSIS: booleanFlag,
+  ENABLE_DEMO_DATA: booleanFlag,
   ENABLE_MOCK_FALLBACK: booleanFlag,
   ENABLE_BACKTEST_API: booleanFlag,
 });

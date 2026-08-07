@@ -35,7 +35,7 @@ function decodeLine(line: string): KairoStreamEvent | null {
   try { return JSON.parse(line) as KairoStreamEvent; } catch { return null; }
 }
 
-export function KairoChatProvider({ children }: { children: React.ReactNode }) {
+export function KairoChatProvider({ children, enabled }: { children: React.ReactNode; enabled: boolean }) {
   const pathname = usePathname();
   const context = useMemo(() => pageContext(pathname), [pathname]);
   const [open, setOpen] = useState(false);
@@ -52,11 +52,12 @@ export function KairoChatProvider({ children }: { children: React.ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const refreshHistory = useCallback(async () => {
+    if (!enabled) return;
     const response = await fetch("/api/ai/conversations", { cache: "no-store" });
     if (!response.ok) return;
     const payload = await response.json() as { data: ConversationSummary[] };
     setConversations(payload.data);
-  }, []);
+  }, [enabled]);
 
   const openKairo = useCallback((seed = "") => {
     setOpen(true);
@@ -82,6 +83,7 @@ export function KairoChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const sendMessage = async (messageInput?: string) => {
+    if (!enabled) { setOpen(true); setError("Kairo AI sarà disponibile prossimamente"); return; }
     const message = (messageInput ?? draft).trim();
     if (!message || generating) return;
     setDraft(""); setLastMessage(message); setError(undefined); setGenerating(true); setStatus("Analyzing market data...");
@@ -139,7 +141,7 @@ export function KairoChatProvider({ children }: { children: React.ReactNode }) {
           <button onClick={() => setOpen(false)} aria-label="Close"><X size={19}/></button>
         </header>
 
-        {showHistory ? <div className="kairo-history">
+        {!enabled ? <div className="kairo-messages"><div className="kairo-empty"><span><Bot size={24}/></span><h3>Kairo AI sarà disponibile prossimamente</h3><p>Il modulo è temporaneamente disabilitato. Tutte le funzioni finanziarie restano operative senza richieste OpenAI.</p></div></div> : showHistory ? <div className="kairo-history">
           <div className="kairo-section-label">Recent conversations</div>
           {conversations.map((item) => <button key={item.id} onClick={() => void loadConversation(item.id)}><Clock3 size={15}/><span><strong>{item.title}</strong><small>{item.symbol ?? "Market"}</small></span></button>)}
           {!conversations.length && <p>No conversations yet.</p>}
@@ -157,9 +159,9 @@ export function KairoChatProvider({ children }: { children: React.ReactNode }) {
         </div>}
 
         <form className="kairo-composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
-          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={context.symbol ? `Ask about ${context.symbol}…` : "Ask Kairo about a market…"} maxLength={4000}/>
+          <textarea disabled={!enabled} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } }} placeholder={enabled ? (context.symbol ? `Ask about ${context.symbol}…` : "Ask Kairo about a market…") : "Kairo AI sarà disponibile prossimamente"} maxLength={4000}/>
           {generating ? <button type="button" aria-label="Stop generation" onClick={() => abortRef.current?.abort()}><Square size={17}/></button> : <button type="submit" aria-label="Send message" disabled={!draft.trim()}><Send size={18}/></button>}
-          <small>Data-backed analysis · not financial advice</small>
+          <small>{enabled ? "Data-backed analysis · not financial advice" : "AI disabled · financial workspace available"}</small>
         </form>
       </aside>
     </>}

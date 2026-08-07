@@ -12,8 +12,15 @@ export const KAIRO_LIMITS = {
   requestsPerMinute: 10,
 } as const;
 
+export function assertKairoAiEnabled() {
+  if (!getServerEnvironment().ENABLE_KAIRO_AI) {
+    throw new AppError("NOT_CONFIGURED", "Kairo AI sarà disponibile prossimamente", 503);
+  }
+}
+
 export function getKairoConfig() {
   const environment = getServerEnvironment();
+  assertKairoAiEnabled();
   if (!environment.OPENAI_API_KEY) {
     throw new AppError("NOT_CONFIGURED", "Ask Kairo non è ancora configurato", 503);
   }

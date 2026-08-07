@@ -60,6 +60,11 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     ["/settings", "Profile", UserRound],
   ] as const;
   const currentArea = pathname.startsWith("/instrument") ? "Equity workspace" : railItems.find(([href]) => pathname === href)?.[1] ?? "Market workspace";
+  const currentDate = useMemo(() => {
+    const parts = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long", timeZone: "Europe/Rome" }).formatToParts(new Date());
+    const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+    return `${value("weekday")} · ${value("day")} ${value("month")}`;
+  }, []);
 
   return (
     <div className={`app-frame ${railCollapsed ? "is-collapsed" : ""}`}>
@@ -85,7 +90,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
       <div className="app-workspace">
         <header className="app-header">
           <button className="mobile-menu-button" aria-label="Open navigation" onClick={() => setMobileRail(true)}><Menu size={21}/></button>
-          <div className="workspace-context"><small>Thursday · 06 August</small><strong>{currentArea}</strong></div>
+          <div className="workspace-context"><small>{currentDate}</small><strong>{currentArea}</strong></div>
           <button className="search-trigger" onClick={() => { setSearchOpen(true); setLauncherOpen(false); }} aria-expanded={searchOpen}>
             <Search size={19}/><span>Search markets</span><kbd><Command size={12}/>K</kbd>
           </button>

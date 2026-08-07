@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assertKairoAiEnabled } from "@/ai/config";
 import { loadKairoConversation } from "@/ai/memory";
 import { jsonFailure, jsonSuccess } from "@/lib/server/api-response";
 import { requireUser } from "@/lib/server/auth";
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = createRequestContext(request);
   try {
+    assertKairoAiEnabled();
     const user = await requireUser();
     const { id } = await params;
     return jsonSuccess(await loadKairoConversation(user.id, z.uuid().parse(id)), context, { headers: { "Cache-Control": "no-store" } });
