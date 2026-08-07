@@ -236,6 +236,33 @@ export interface DailyOutlook {
   note: string;
 }
 
+export interface CompanySeasonalityWindow {
+  window: "1Y" | "5Y" | "10Y" | "15Y" | "20Y";
+  mean: number | null;
+  median: number | null;
+  hitRate: number | null;
+  standardDeviation: number | null;
+  best: number | null;
+  worst: number | null;
+  observations: number;
+  quality: string;
+  direction: "FAVORABLE" | "NEUTRAL" | "UNFAVORABLE" | "INSUFFICIENT";
+  provider: string;
+}
+
+export interface OperationalCalendarDay {
+  date: string;
+  orientation: "LONG" | "NEUTRAL" | "SHORT";
+  action: "BUY" | "HOLD" | "SELL";
+  confidence: CompanyConfidence;
+  expectedRange: [number, number] | null;
+  target: number | null;
+  support: number | null;
+  resistance: number | null;
+  events: Array<{ title: string; type: string; status: "CONFIRMED" | "ESTIMATE" | "MODEL"; provider: string }>;
+  elevatedRisk: boolean;
+}
+
 export interface CompanyRiskItem {
   id: string;
   category: string;
@@ -323,6 +350,8 @@ export interface CompanyIntelligenceReport {
   valuation: CompanyValuation | null;
   horizons: TimeHorizonAssessment[];
   dailyOutlook: DailyOutlook | null;
+  seasonality: CompanySeasonalityWindow[];
+  operationalCalendar: OperationalCalendarDay[];
   risks: CompanyRiskRegister | null;
   thesis: { verdict: string; whyItMayWork: string[]; whyItMayFail: string[]; monitor: string[] };
   sources: CompanySource[];
