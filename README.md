@@ -14,6 +14,7 @@ The product identity and assets are replaceable. The project does not scrape the
 - Multi-provider routing across Yahoo Finance, Financial Modeling Prep, Alpha Vantage and Massive, with typed adapters, timeout, retry, caching and fallback.
 - Protected health endpoints, cron jobs, structured logs, request IDs, rate limiting and data provenance.
 - Buy-side Company Intelligence with historical statement validation, earnings/FCF quality, evidence-based company scoring, moat and management analysis, reverse DCF, bear/base/bull DCF, downside-first risks, horizons through 20 years, operational calendar, PDF/CSV reports and point-in-time decision validation.
+- Ask Kairo, a persistent OpenAI Responses API market-intelligence agent with page-aware context, server-side function calling, progressive streaming, operational tool status, explicit provenance, cancellation and conversation history.
 
 ## Technology
 
@@ -22,12 +23,13 @@ The product identity and assets are replaceable. The project does not scrape the
 - Drizzle ORM and PostgreSQL
 - Upstash Redis for distributed cache, locks and rate limiting
 - `yahoo-finance2` used only in server-only modules
+- Official `openai` SDK and Responses API used only in server-only modules
 - Zod validation, bcrypt password hashes and HMAC-protected opaque sessions
 - Vitest and Playwright
 
 ## Quick start
 
-Requirements: Node.js 20+ and npm 10+.
+Requirements: Node.js 22+ and npm 10+.
 
 ```bash
 npm install
@@ -62,6 +64,7 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run db:migrate` | apply committed PostgreSQL migrations |
 | `npm run test:providers` | optional live provider smoke test |
 | `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |
+| `npm run test:openai` | minimal live Responses API authentication check; never prints the key or model output |
 
 ## Architecture
 
@@ -77,6 +80,10 @@ Next.js server components + Node.js route handlers
         │     ├── FMP          fundamentals and calendars
         │     └── Alpha        attributed news sentiment
         ├── deterministic quant engines
+        ├── Ask Kairo Responses API agent
+        │     ├── strict internal financial tools only
+        │     ├── normalized context and provenance
+        │     └── PostgreSQL conversation memory
         └── account services / job runner
               ├── PostgreSQL durable state
               └── Redis cache, locks and distributed limits
@@ -90,7 +97,8 @@ Core boundaries:
 - `src/app/api`: normalized same-origin APIs; no raw upstream payloads.
 - `src/components`: presentation receives typed props or calls only internal APIs.
 - `src/data/mock`: explicit, centralized demo fallback only; never personal data.
-- `src/db`: 43-table PostgreSQL schema and migrations.
+- `src/ai`: server-only OpenAI client, versioned prompt, context, tool registry, cost controls and agent loop.
+- `src/db`: PostgreSQL schema and migrations, including private Kairo conversation memory.
 
 ## API surface
 
@@ -105,6 +113,20 @@ Private APIs include:
 - `/api/account/portfolios/**`
 - `/api/account/alerts/**`
 - `/api/account/notifications`
+- `POST /api/ai/chat` (streamed NDJSON), `GET /api/ai/conversations` and `GET /api/ai/conversations/[id]`
+
+## Ask Kairo setup
+
+Never paste the API key into source code or the chat. Configure it locally through hidden terminal input, then select a model through the environment:
+
+```bash
+./scripts/configure-openai-key.sh
+./scripts/configure-openai-model.sh gpt-5.6-sol
+npm run db:migrate
+npm run test:openai
+```
+
+Set `OPENAI_API_KEY` as Sensitive for Vercel Preview and Production. Vercel does not permit Sensitive variables in Development, so local development uses the ignored, mode-600 `.env.local` instead of weakening key visibility. Configure `OPENAI_MODEL` in each required environment. Ask Kairo requires an authenticated Kairo user and PostgreSQL because messages and tool audit records are user-owned. It sends only bounded conversation excerpts and normalized financial tool results to OpenAI; provider keys, session tokens, raw IPs, internal prompts, tool credentials and private chain-of-thought are never persisted or returned to the browser. See [Ask Kairo architecture](docs/KAIRO_AI.md).
 
 Operational APIs:
 
@@ -156,6 +178,7 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Company Intelligence operations](docs/COMPANY_INTELLIGENCE_OPERATIONS.md), [architecture](docs/COMPANY_INTELLIGENCE_ARCHITECTURE.md), [methodology](docs/COMPANY_ANALYSIS_METHODOLOGY.md) and [acceptance tests](docs/COMPANY_ANALYSIS_ACCEPTANCE_TESTS.md)
 - [Acceptance tests](docs/ACCEPTANCE_TESTS.md)
 - [Known data limits](docs/DATA_LIMITATIONS.md) and [Yahoo limits](YAHOO_DATA_LIMITATIONS.md)
+- [Ask Kairo architecture, tools and operating limits](docs/KAIRO_AI.md)
 
 ## Disclaimer
 

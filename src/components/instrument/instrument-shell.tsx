@@ -6,6 +6,7 @@ import { ArrowUpRight, BellRing, Bot, Cpu, Sparkles, Star } from "lucide-react";
 import { useState } from "react";
 import { formatCompactNumber, formatCurrency, formatDataSource, formatPercent, instrumentPath } from "@/lib";
 import type { InstrumentProfile, InstrumentRef } from "@/types";
+import { useKairoChat } from "@/components/ai/kairo-chat-provider";
 
 const tabs = [
   ["overview", "Overview"], ["analysis", "Analisi completa"], ["signal", "Signals"], ["forecast", "Forecast"], ["targets", "Targets"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
@@ -14,6 +15,7 @@ const tabs = [
 ] as const;
 
 export function InstrumentShell({ children, instrument }: { children: React.ReactNode; instrument: InstrumentProfile }) {
+  const { openKairo } = useKairoChat();
   const pathname = usePathname();
   const [favorite, setFavorite] = useState(false);
   const compact = !pathname.endsWith("/overview");
@@ -45,7 +47,7 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
           })}
         </nav>
         <button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => setFavorite(!favorite)} aria-pressed={favorite} aria-label="Toggle favorite"><Star size={18} fill={favorite ? "currentColor" : "none"}/><span>{favorite ? "Watching" : "Watch"}</span></button>
-        <button className="agent-cta" onClick={() => alert("Kairo Lens is a demo assistant. Live prices come from the server-side financial provider.")}><Sparkles size={17}/>Ask Lens</button>
+        <button className="agent-cta" onClick={() => openKairo()}><Sparkles size={17}/>Ask Lens</button>
       </div>
       <div className="event-strip"><span className="event-icon"><BellRing size={17}/></span><span>{instrument.earnings.daysUntil > 0 ? <><strong>Earnings in {instrument.earnings.daysUntil} days</strong><small>Consensus EPS {formatCurrency(instrument.earnings.consensusEps, instrument.currency)} · {instrument.earnings.dateLabel}</small></> : <><strong>Earnings data unavailable</strong><small>No verified event is currently available from the configured providers.</small></>}</span><button><Bot size={16}/>View event brief <ArrowUpRight size={15}/></button></div>
     </section>

@@ -2,6 +2,9 @@
   "name": "kairo-market-intelligence",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
@@ -14,6 +17,7 @@
     "test:e2e": "playwright test",
     "test:providers": "node scripts/test-financial-providers.mjs",
     "test:company-smoke": "node scripts/test-company-intelligence.mjs",
+    "test:openai": "node --env-file-if-exists=.env.local scripts/verify-openai.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"
@@ -28,6 +32,7 @@
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.28.0",
     "next": "16.3.0",
+    "openai": "^7.4.0",
     "postgres": "^3.4.9",
     "react": "19.2.8",
     "react-dom": "19.2.8",
