@@ -9,3 +9,4 @@ export * from "./outlook";
 export * from "./risk-register";
 export * from "./macro-news";
 export * from "./verdict";
+export * from "./decision-validation";

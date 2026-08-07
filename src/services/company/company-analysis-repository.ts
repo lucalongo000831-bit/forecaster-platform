@@ -1,6 +1,8 @@
 import "server-only";
 
+import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { companyAnalysisReports, companyAnalysisSnapshots, getDatabase, instruments, isDatabaseConfigured } from "@/db";
+import type { CompanyDecisionSnapshot } from "@/engines/company";
 import { structuredLog } from "@/lib/server/logger";
 import type { CompanyIntelligenceReport } from "@/types";
 
@@ -32,4 +34,14 @@ export async function saveCompanyReport(userId: string, report: CompanyIntellige
     const [saved] = await database.insert(companyAnalysisReports).values({ instrumentId: instrument.id, userId, payload: report as unknown as Record<string, unknown>, modelVersion: report.reportVersion, dataTimestamp: report.dataTimestamp ? new Date(report.dataTimestamp) : null, calculatedAt: new Date(report.calculatedAt), providerMetadata: { providers: [...new Set(report.sources.map((source) => source.provider))] }, methodologyMetadata: { modelVersion: report.modelVersion, scoringVersion: report.scoringVersion, valuationVersion: report.valuationVersion } }).returning({ id: companyAnalysisReports.id });
     return saved.id;
   } catch (error) { structuredLog("warn", "company.report.save_failed", { symbol: report.symbol, code: error instanceof Error ? error.name : "UNKNOWN" }); return null; }
+}
+
+export async function loadCompanyDecisionSnapshots(symbol: string, from: string, to: string): Promise<CompanyDecisionSnapshot[]> {
+  if (!isDatabaseConfigured()) return [];
+  const rows = await getDatabase().select({ id: companyAnalysisSnapshots.id, calculatedAt: companyAnalysisSnapshots.calculatedAt, verdict: companyAnalysisSnapshots.verdict, modelVersion: companyAnalysisSnapshots.modelVersion, payload: companyAnalysisSnapshots.payload }).from(companyAnalysisSnapshots).where(and(eq(companyAnalysisSnapshots.symbol, symbol), gte(companyAnalysisSnapshots.calculatedAt, new Date(from)), lte(companyAnalysisSnapshots.calculatedAt, new Date(to)))).orderBy(asc(companyAnalysisSnapshots.calculatedAt));
+  return rows.flatMap((row) => {
+    const price = typeof row.payload.currentPrice === "number" ? row.payload.currentPrice : null;
+    if (price === null || !Number.isFinite(price) || price <= 0) return [];
+    return [{ id: row.id, asOf: row.calculatedAt.toISOString(), verdict: row.verdict as CompanyDecisionSnapshot["verdict"], referencePrice: price, modelVersion: row.modelVersion }];
+  });
 }
