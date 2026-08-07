@@ -315,6 +315,20 @@ export interface CompanyRiskRegister {
   modelVersion: string;
 }
 
+export interface CompanyMacroAnalysis {
+  macroSensitivityScore: number | null;
+  geopoliticalRiskScore: number | null;
+  rateSensitivity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  inflationSensitivity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  currencySensitivity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  commoditySensitivity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  recessionSensitivity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  evidence: string[];
+  limitations: string[];
+  confidence: CompanyConfidence;
+  modelVersion: string;
+}
+
 export interface CompanyPipelineStage {
   name: string;
   status: PipelineStageStatus;
@@ -353,6 +367,7 @@ export interface CompanyIntelligenceReport {
   seasonality: CompanySeasonalityWindow[];
   operationalCalendar: OperationalCalendarDay[];
   risks: CompanyRiskRegister | null;
+  macro: CompanyMacroAnalysis | null;
   thesis: { verdict: string; whyItMayWork: string[]; whyItMayFail: string[]; monitor: string[] };
   sources: CompanySource[];
   limitations: string[];
