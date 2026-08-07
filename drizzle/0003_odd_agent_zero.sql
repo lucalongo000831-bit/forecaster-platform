@@ -1,0 +1,3 @@
+ALTER TABLE "company_analysis_reports" ADD COLUMN "user_id" uuid;--> statement-breakpoint
+ALTER TABLE "company_analysis_reports" ADD CONSTRAINT "company_analysis_reports_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "company_report_user_time_idx" ON "company_analysis_reports" USING btree ("user_id","calculated_at");

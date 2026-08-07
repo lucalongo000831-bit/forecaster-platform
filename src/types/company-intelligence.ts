@@ -16,7 +16,7 @@ export interface CompanySource {
 export interface SourcedMetric {
   key: string;
   label: string;
-  value: number | string | null;
+  value: number | null;
   unit: string | null;
   currency: string | null;
   period: string | null;

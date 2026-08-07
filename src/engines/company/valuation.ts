@@ -58,7 +58,7 @@ export function buildValuationMultiples(fundamental: FundamentalAnalysis | null)
   ].map((item) => ({ ...item, value: typeof item.value === "number" ? clamp(item.value, -1e9, 1e9) : item.value }));
 }
 
-function dcfScenario(input: { name: ValuationScenario["name"]; fcf: number; shares: number; netDebt: number; currentPrice: number; growth: number; discountRate: number; terminalGrowth: number; margin: number | null }): ValuationScenario {
+export function runCompanyDcfScenario(input: { name: ValuationScenario["name"]; fcf: number; shares: number; netDebt: number; currentPrice: number; growth: number; discountRate: number; terminalGrowth: number; margin: number | null }): ValuationScenario {
   if (input.discountRate <= input.terminalGrowth || input.growth < -0.5 || input.growth > 0.5) return { name: input.name, revenueGrowth: input.growth, operatingMargin: input.margin, discountRate: input.discountRate, terminalGrowth: input.terminalGrowth, enterpriseValue: null, equityValue: null, fairValuePerShare: null, upsideDownside: null, assumptions: ["Scenario rejected because growth or discount assumptions were inconsistent."] };
   const enterpriseValue = enterpriseValueFromGrowth(input.fcf, input.growth, 5, input.discountRate, input.terminalGrowth);
   const equityValue = enterpriseValue - input.netDebt;
@@ -82,9 +82,9 @@ export function buildCompanyValuation(input: { currentPrice: number; fundamental
   const historicalGrowth = input.fundamental?.metrics.freeCashFlowGrowthYoY ?? input.fundamental?.metrics.revenueCagr5Y ?? 0.04;
   const boundedGrowth = clamp(historicalGrowth ?? 0.04, -0.05, 0.14);
   const scenarios = fcf !== null && fcf > 0 && shares !== null && shares > 0 ? [
-    dcfScenario({ name: "BEAR", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: clamp(boundedGrowth - 0.05, -0.08, 0.04), discountRate: 0.12, terminalGrowth: 0.01, margin: input.fundamental?.metrics.operatingMargin ?? null }),
-    dcfScenario({ name: "BASE", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: boundedGrowth, discountRate: 0.1, terminalGrowth: 0.0225, margin: input.fundamental?.metrics.operatingMargin ?? null }),
-    dcfScenario({ name: "BULL", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: clamp(boundedGrowth + 0.04, 0, 0.18), discountRate: 0.085, terminalGrowth: 0.03, margin: input.fundamental?.metrics.operatingMargin ?? null }),
+    runCompanyDcfScenario({ name: "BEAR", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: clamp(boundedGrowth - 0.05, -0.08, 0.04), discountRate: 0.12, terminalGrowth: 0.01, margin: input.fundamental?.metrics.operatingMargin ?? null }),
+    runCompanyDcfScenario({ name: "BASE", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: boundedGrowth, discountRate: 0.1, terminalGrowth: 0.0225, margin: input.fundamental?.metrics.operatingMargin ?? null }),
+    runCompanyDcfScenario({ name: "BULL", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: clamp(boundedGrowth + 0.04, 0, 0.18), discountRate: 0.085, terminalGrowth: 0.03, margin: input.fundamental?.metrics.operatingMargin ?? null }),
   ] : [];
   const reverseDcf = calculateReverseDcf({ currentPrice: input.currentPrice, shares, netDebt, freeCashFlow: fcf, historicalFcfGrowth: historicalGrowth });
   const dcfBase = scenarios.find((scenario) => scenario.name === "BASE")?.fairValuePerShare ?? null;
@@ -96,7 +96,7 @@ export function buildCompanyValuation(input: { currentPrice: number; fundamental
   const qualityAdjustment = input.qualityScore === null || input.qualityScore === undefined ? 0.85 : clamp(0.75 + input.qualityScore / 400, 0.75, 1);
   const prudentFairValue = fairValue === null ? null : fairValue * qualityAdjustment;
   const marginOfSafety = prudentFairValue === null || prudentFairValue <= 0 ? null : (prudentFairValue - input.currentPrice) / prudentFairValue;
-  const sensitivity = fcf !== null && fcf > 0 && shares !== null && shares > 0 ? [0.085, 0.1, 0.115].flatMap((discountRate) => [0.01, 0.02, 0.03].map((terminalGrowth) => ({ discountRate, terminalGrowth, fairValue: dcfScenario({ name: "BASE", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: boundedGrowth, discountRate, terminalGrowth, margin: input.fundamental?.metrics.operatingMargin ?? null }).fairValuePerShare }))) : [];
+  const sensitivity = fcf !== null && fcf > 0 && shares !== null && shares > 0 ? [0.085, 0.1, 0.115].flatMap((discountRate) => [0.01, 0.02, 0.03].map((terminalGrowth) => ({ discountRate, terminalGrowth, fairValue: runCompanyDcfScenario({ name: "BASE", fcf, shares, netDebt, currentPrice: input.currentPrice, growth: boundedGrowth, discountRate, terminalGrowth, margin: input.fundamental?.metrics.operatingMargin ?? null }).fairValuePerShare }))) : [];
   const confidence: CompanyConfidence = weighted.length >= 3 && input.historical.length >= 5 ? "HIGH" : weighted.length >= 2 ? "MEDIUM" : weighted.length ? "LOW" : "VERY_LOW";
   return {
     multiples: buildValuationMultiples(input.fundamental), historicalPercentiles: {}, peerPercentiles: {}, reverseDcf, scenarios, fairValue, prudentFairValue, marginOfSafety,

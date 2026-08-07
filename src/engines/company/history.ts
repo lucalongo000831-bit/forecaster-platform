@@ -28,9 +28,13 @@ function confidence(completeness: number, years: number, hasWarnings: boolean): 
 export function buildHistoricalPeriods(input: { income: FinancialStatement[]; balance: FinancialStatement[]; cashFlow: FinancialStatement[] }): HistoricalCompanyPeriod[] {
   const byDate = new Map<string, { income?: FinancialStatement; balance?: FinancialStatement; cashFlow?: FinancialStatement }>();
   for (const [kind, statements] of [["income", input.income], ["balance", input.balance], ["cashFlow", input.cashFlow]] as const) {
-    for (const statement of statements) byDate.set(statement.fiscalDate, { ...byDate.get(statement.fiscalDate), [kind]: statement });
+    for (const statement of statements) {
+      const key = `${statement.period}:${statement.fiscalDate}`;
+      byDate.set(key, { ...byDate.get(key), [kind]: statement });
+    }
   }
-  return [...byDate.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([fiscalDate, row]) => {
+  return [...byDate.entries()].sort(([a], [b]) => b.localeCompare(a)).map(([, row]) => {
+    const fiscalDate = row.income?.fiscalDate ?? row.balance?.fiscalDate ?? row.cashFlow?.fiscalDate ?? "";
     const operatingCashFlow = value(row.cashFlow, fields.operatingCashFlow);
     const capex = value(row.cashFlow, fields.capex);
     const totalDebt = value(row.balance, fields.debt);
