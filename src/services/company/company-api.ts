@@ -1,9 +1,9 @@
 import "server-only";
 
 import { jsonFailure, jsonSuccess } from "@/lib/server/api-response";
-import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { createRequestContext } from "@/lib/server/request-context";
 import { symbolSchema } from "@/schemas";
+import { enforceCompanyAnalysisRateLimit } from "./company-analysis-access";
 import { getCompanyIntelligence } from "./company-intelligence-service";
 
 export type CompanySection = "analysis" | "summary" | "quality" | "earnings-quality" | "cash-flow" | "moat" | "management" | "peers" | "valuation" | "reverse-dcf" | "dcf" | "scenarios" | "targets" | "horizons" | "daily-outlook" | "calendar" | "risks" | "catalysts";
@@ -31,7 +31,7 @@ export function createCompanyGetHandler(section: CompanySection) {
   return async function GET(request: Request, context: { params: Promise<{ symbol: string }> }) {
     const requestContext = createRequestContext(request);
     try {
-      await enforceRateLimit(requestContext.ip, { scope: `company:${section}`, limit: section === "analysis" ? 6 : 20, windowSeconds: 60 });
+      await enforceCompanyAnalysisRateLimit(requestContext.ip);
       const { symbol: raw } = await context.params; const symbol = symbolSchema.parse(decodeURIComponent(raw));
       const report = await getCompanyIntelligence(symbol);
       return jsonSuccess(sectionData(report, section), requestContext, { headers: { "Cache-Control": "public, s-maxage=21600, stale-while-revalidate=86400" }, meta: { symbol: report.symbol, provider: [...new Set(report.sources.map((source) => source.provider))], sourceTimestamp: report.dataTimestamp, modelVersion: report.modelVersion, dataQuality: report.dataQuality.confidence } });

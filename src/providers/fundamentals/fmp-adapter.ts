@@ -4,7 +4,7 @@ import { getServerEnvironment } from "@/schemas/env";
 import type { MarketFundamentalsDto, MarketProfileDto } from "@/types";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import { ProviderError } from "../errors";
-import { fmpGet, numberValue, stringValue } from "../fmp/client";
+import { booleanValue, fmpGet, numberValue, stringValue } from "../fmp/client";
 import { providerResult } from "../metadata";
 import type {
   AnalystConsensus,
@@ -55,7 +55,7 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
       symbol,
       name: stringValue(row, "companyName", "name") ?? symbol,
       exchange: stringValue(row, "exchangeFullName", "exchange", "exchangeShortName") ?? "—",
-      quoteType: stringValue(row, "isEtf") === "true" ? "ETF" : "EQUITY",
+      quoteType: booleanValue(row, "isEtf") === true ? "ETF" : "EQUITY",
       currency: stringValue(row, "currency") ?? "USD",
       country: stringValue(row, "country"),
       sector: stringValue(row, "sector"),

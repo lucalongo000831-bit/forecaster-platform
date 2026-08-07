@@ -4,8 +4,11 @@ import { analyzeFundamentals } from "@/engines/fundamental";
 import { NEWS_INTELLIGENCE_MODEL_VERSION } from "@/engines/news";
 import { TECHNICAL_MODEL_VERSION } from "@/engines/technical";
 import { analyzeCompanyQuality, analyzeDailyOutlook, analyzeEarningsQuality, analyzeMacroAndNews, analyzeManagement, analyzeMoat, analyzeTimeHorizons, buildCompanyRiskRegister, buildCompanyValuation, buildHistoricalPeriods, buildOperationalCalendar, COMPANY_QUALITY_MODEL_VERSION, COMPANY_REPORT_VERSION, COMPANY_SCORE_VERSION, decideCompany, runCompanyStage, scoreCompany, summarizeSeasonality, validateCompanyData } from "@/engines/company";
-import { cacheDelete, cacheGet, cacheSet } from "@/lib/server/redis";
+import { cacheDelete, cacheGet, cacheSet, withDistributedLock } from "@/lib/server/redis";
 import { AppError } from "@/lib/server/app-error";
+import { safeExternalHttpsUrl } from "@/lib/safe-url";
+import { createSingleFlight } from "@/lib/server/single-flight";
+import { revalidateTag, unstable_cache } from "next/cache";
 import { financialProviderRouter, type FinancialStatement } from "@/providers";
 import { getSeasonalityAnalysis } from "@/services/analysis/seasonality-service";
 import { getTechnicalAnalysis } from "@/services/analysis/technical-service";
@@ -14,26 +17,68 @@ import { getNewsIntelligence } from "@/services/intelligence/news-service";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import type { CompanyDataQuality, CompanyIntelligenceReport, CompanySource, MarketProfileDto } from "@/types";
 import { persistCompanyAnalysis } from "./company-analysis-repository";
+import { classifyCompanyInstrument } from "./instrument-applicability";
 
 export const COMPANY_INTELLIGENCE_MODEL_VERSION = "company-intelligence-v1.0.0";
-const corporateTypes = new Set(["EQUITY", "STOCK"]);
 const cacheKey = (symbol: string) => `company-intelligence:${COMPANY_INTELLIGENCE_MODEL_VERSION}:${symbol}`;
+const cacheTag = (symbol: string) => `company-intelligence:${symbol}`;
+const companyAnalysisFlight = createSingleFlight<string, CompanyIntelligenceReport>();
+const DISTRIBUTED_LOCK_SECONDS = 90;
+const CACHE_WAIT_ATTEMPTS = 15;
+const PROVIDER_VERSIONS: Record<string, string> = {
+  yahoo: "yahoo-finance2@4.0.0 / adapter-v1",
+  fmp: "fmp-rest / adapter-v1",
+  "alpha-vantage": "alpha-vantage-rest / adapter-v1",
+  massive: "massive-rest / adapter-v1",
+  calculated: "kairo-deterministic-engines-v1",
+};
 
 function profileSource(profile: MarketProfileDto | null, provider: string | null): CompanySource[] {
-  return profile && provider ? [{ provider, label: `${profile.name} company profile`, url: profile.website, timestamp: null, kind: "FACT" }] : [];
+  return profile && provider ? [{ provider, label: `${profile.name} company profile`, url: safeExternalHttpsUrl(profile.website), timestamp: null, kind: "FACT" }] : [];
 }
 
-export async function invalidateCompanyAnalysis(symbolInput: string) { await cacheDelete(cacheKey(normalizeSymbol(decodeURIComponent(symbolInput)))); }
+function providerVersions(sources: CompanySource[]): Record<string, string> {
+  return Object.fromEntries(
+    [...new Set(sources.map((source) => source.provider))]
+      .sort()
+      .map((provider) => [provider, PROVIDER_VERSIONS[provider] ?? `${provider}-adapter-v1`]),
+  );
+}
 
-export async function getCompanyIntelligence(symbolInput: string, options?: { refresh?: boolean }): Promise<CompanyIntelligenceReport> {
+export async function invalidateCompanyAnalysis(symbolInput: string) {
   const symbol = normalizeSymbol(decodeURIComponent(symbolInput));
-  if (!options?.refresh) { const cached = await cacheGet<CompanyIntelligenceReport>(cacheKey(symbol)); if (cached) return cached; }
+  await cacheDelete(cacheKey(symbol));
+  revalidateTag(cacheTag(symbol), { expire: 0 });
+}
+
+async function waitForCompletedCompanyAnalysis(symbol: string): Promise<CompanyIntelligenceReport | null> {
+  for (let attempt = 0; attempt < CACHE_WAIT_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const cached = await cacheGet<CompanyIntelligenceReport>(cacheKey(symbol));
+    if (cached) return cached;
+  }
+  return null;
+}
+
+async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntelligenceReport> {
   const stages = [];
   const quoteStage = await runCompanyStage("LoadMarketData", () => financialProviderRouter.quote(symbol)); stages.push(quoteStage.stage);
-  if (!quoteStage.data) throw new AppError("NOT_FOUND", "Società o ticker non trovato", 404, false);
+  if (!quoteStage.data) {
+    if (quoteStage.error) throw quoteStage.error;
+    throw new AppError("NOT_FOUND", "Società o ticker non trovato", 404, false);
+  }
   const quote = quoteStage.data;
-  const [profileStage, summaryStage, annualIncomeStage, annualBalanceStage, annualCashStage, quarterIncomeStage, quarterBalanceStage, quarterCashStage, analystStage, technicalStage, newsStage] = await Promise.all([
-    runCompanyStage("LoadCompanyProfile", () => financialProviderRouter.profile(symbol)),
+  const profileStage = await runCompanyStage("LoadCompanyProfile", () => financialProviderRouter.profile(symbol));
+  stages.push(profileStage.stage);
+  const profile = profileStage.data?.data ?? null;
+  const { instrumentType, applicable } = classifyCompanyInstrument(symbol, profile?.quoteType, quote.data.quoteType);
+  const sources: CompanySource[] = [{ provider: quote.meta.provider, label: `${symbol} market quote`, url: null, timestamp: quote.meta.sourceTimestamp, kind: "FACT" }, ...profileSource(profile, profileStage.data?.meta.provider ?? null)];
+  if (!applicable) {
+    const unavailableQuality: CompanyDataQuality = { score: 100, confidence: "HIGH", completeness: 100, stale: false, checks: [{ code: "INSTRUMENT_APPLICABILITY", status: "PASS", message: `Corporate analysis is not applicable to ${instrumentType}.` }], missingFields: [], divergences: [] };
+    const report: CompanyIntelligenceReport = { symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: false, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap: quote.data.marketCap, marketState: quote.data.marketState, verdict: "INSUFFICIENT_DATA", assessment: "INSUFFICIENT_DATA", overallScore: null, confidence: "HIGH", dataQuality: unavailableQuality, historical: [], earningsQuality: null, quality: null, moat: null, management: null, peers: [], valuation: null, horizons: [], dailyOutlook: null, seasonality: [], operationalCalendar: [], risks: null, macro: null, thesis: { verdict: "NOT APPLICABLE", whyItMayWork: [], whyItMayFail: [], monitor: [] }, sources, limitations: [`Corporate analysis is not applicable to instrument type ${instrumentType}.`], pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: "company-valuation-v1.0.0", signalVersion: TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, providerVersions: providerVersions(sources), dataTimestamp: quote.meta.sourceTimestamp, calculatedAt: new Date().toISOString() };
+    await cacheSet(cacheKey(symbol), report, 21_600); return report;
+  }
+  const [summaryStage, annualIncomeStage, annualBalanceStage, annualCashStage, quarterIncomeStage, quarterBalanceStage, quarterCashStage, analystStage, technicalStage, newsStage] = await Promise.all([
     runCompanyStage("LoadFundamentals", () => financialProviderRouter.fundamentals(symbol)),
     runCompanyStage("LoadAnnualIncome", () => financialProviderRouter.statements(symbol, "income", "annual", 10), { empty: (value) => !value.data.length }),
     runCompanyStage("LoadAnnualBalance", () => financialProviderRouter.statements(symbol, "balance-sheet", "annual", 10), { empty: (value) => !value.data.length }),
@@ -45,14 +90,21 @@ export async function getCompanyIntelligence(symbolInput: string, options?: { re
     runCompanyStage("CalculateTechnicalOutlook", () => getTechnicalAnalysis(symbol, "1m", "^GSPC")),
     runCompanyStage("LoadNews", () => getNewsIntelligence(symbol, 30)),
   ]);
-  stages.push(profileStage.stage, summaryStage.stage, annualIncomeStage.stage, annualBalanceStage.stage, annualCashStage.stage, quarterIncomeStage.stage, quarterBalanceStage.stage, quarterCashStage.stage, analystStage.stage, technicalStage.stage, newsStage.stage);
-  const profile = profileStage.data?.data ?? null; const instrumentType = (profile?.quoteType ?? quote.data.quoteType).toUpperCase(); const applicable = corporateTypes.has(instrumentType);
-  const sources: CompanySource[] = [{ provider: quote.meta.provider, label: `${symbol} market quote`, url: null, timestamp: quote.meta.sourceTimestamp, kind: "FACT" }, ...profileSource(profile, profileStage.data?.meta.provider ?? null)];
-  if (!applicable) {
-    const unavailableQuality: CompanyDataQuality = { score: 100, confidence: "HIGH", completeness: 100, stale: false, checks: [{ code: "INSTRUMENT_APPLICABILITY", status: "PASS", message: `Corporate analysis is not applicable to ${instrumentType}.` }], missingFields: [], divergences: [] };
-    const report: CompanyIntelligenceReport = { symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: false, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap: quote.data.marketCap, marketState: quote.data.marketState, verdict: "INSUFFICIENT_DATA", assessment: "INSUFFICIENT_DATA", overallScore: null, confidence: "HIGH", dataQuality: unavailableQuality, historical: [], earningsQuality: null, quality: null, moat: null, management: null, peers: [], valuation: null, horizons: [], dailyOutlook: null, seasonality: [], operationalCalendar: [], risks: null, macro: null, thesis: { verdict: "NOT APPLICABLE", whyItMayWork: [], whyItMayFail: [], monitor: [] }, sources, limitations: [`Corporate analysis is not applicable to instrument type ${instrumentType}.`], pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: "company-valuation-v1.0.0", signalVersion: TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, dataTimestamp: quote.meta.sourceTimestamp, calculatedAt: new Date().toISOString() };
-    await cacheSet(cacheKey(symbol), report, 21_600); return report;
+  stages.push(summaryStage.stage, annualIncomeStage.stage, annualBalanceStage.stage, annualCashStage.stage, quarterIncomeStage.stage, quarterBalanceStage.stage, quarterCashStage.stage, analystStage.stage, technicalStage.stage, newsStage.stage);
+  for (const [label, result] of [
+    ["Summary fundamentals", summaryStage.data],
+    ["Annual income statements", annualIncomeStage.data],
+    ["Annual balance sheets", annualBalanceStage.data],
+    ["Annual cash-flow statements", annualCashStage.data],
+    ["Quarterly income statements", quarterIncomeStage.data],
+    ["Quarterly balance sheets", quarterBalanceStage.data],
+    ["Quarterly cash-flow statements", quarterCashStage.data],
+    ["Analyst consensus", analystStage.data],
+  ] as const) {
+    if (result) sources.push({ provider: result.meta.provider, label, url: null, timestamp: result.meta.sourceTimestamp, kind: "FACT" });
   }
+  if (technicalStage.data) sources.push({ provider: technicalStage.data.provider, label: "Historical prices and technical calculations", url: null, timestamp: technicalStage.data.sourceTimestamp, kind: "CALCULATED" });
+  if (newsStage.data) sources.push({ provider: newsStage.data.meta.provider, label: "Company news intelligence", url: null, timestamp: newsStage.data.meta.sourceTimestamp, kind: "CALCULATED" });
   const statements = (stage: typeof annualIncomeStage): FinancialStatement[] => stage.data?.data ?? [];
   const income = [...statements(annualIncomeStage), ...statements(quarterIncomeStage)]; const balance = [...statements(annualBalanceStage), ...statements(quarterBalanceStage)]; const cashFlow = [...statements(annualCashStage), ...statements(quarterCashStage)];
   const historical = buildHistoricalPeriods({ income, balance, cashFlow });
@@ -88,9 +140,37 @@ export async function getCompanyIntelligence(symbolInput: string, options?: { re
     symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: true, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap: quote.data.marketCap, marketState: quote.data.marketState,
     verdict: decision.verdict, assessment: decision.assessment, overallScore: scored.score, confidence: scored.confidence, dataQuality, historical, earningsQuality, quality, moat, management, peers: [], valuation, horizons, dailyOutlook, seasonality, operationalCalendar, risks, macro: macroNews.macro,
     thesis: { verdict: decision.verdict.replaceAll("_", " "), whyItMayWork: [...quality.growth.positives, ...quality.profitability.positives, ...macroNews.catalysts.filter((item) => item.direction === "POSITIVE").slice(0, 3).map((item) => item.title)], whyItMayFail: [...risks.redFlags.slice(0, 5).map((item) => item.evidence), ...risks.items.slice(0, 3).map((item) => item.description)], monitor: [...risks.items.flatMap((item) => item.indicators).slice(0, 5), ...macroNews.catalysts.slice(0, 3).map((item) => item.title)] },
-    sources, limitations, pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: valuation?.modelVersion ?? "company-valuation-v1.0.0", signalVersion: technicalStage.data?.analysis.modelVersion ?? TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, dataTimestamp, calculatedAt: new Date().toISOString(),
+    sources, limitations, pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: valuation?.modelVersion ?? "company-valuation-v1.0.0", signalVersion: technicalStage.data?.analysis.modelVersion ?? TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, providerVersions: providerVersions(sources), dataTimestamp, calculatedAt: new Date().toISOString(),
   };
   await cacheSet(cacheKey(symbol), report, 21_600); await persistCompanyAnalysis(report); return report;
+}
+
+export async function getCompanyIntelligence(symbolInput: string, options?: { refresh?: boolean }): Promise<CompanyIntelligenceReport> {
+  const symbol = normalizeSymbol(decodeURIComponent(symbolInput));
+  if (!options?.refresh) {
+    const cached = await cacheGet<CompanyIntelligenceReport>(cacheKey(symbol));
+    if (cached) return cached;
+  }
+  const coordinatedBuild = () => companyAnalysisFlight.run(symbol, async () => {
+    if (!options?.refresh) {
+      const cached = await cacheGet<CompanyIntelligenceReport>(cacheKey(symbol));
+      if (cached) return cached;
+    }
+    const result = await withDistributedLock(
+      `company-intelligence:${COMPANY_INTELLIGENCE_MODEL_VERSION}:${symbol}`,
+      DISTRIBUTED_LOCK_SECONDS,
+      () => buildCompanyIntelligence(symbol),
+    );
+    if (result) return result;
+    const completed = await waitForCompletedCompanyAnalysis(symbol);
+    if (completed) return completed;
+    throw new AppError("PROVIDER_UNAVAILABLE", "Analisi già in elaborazione. Riprova tra pochi secondi", 503, true, 2);
+  });
+  if (options?.refresh) return coordinatedBuild();
+  return unstable_cache(coordinatedBuild, [cacheKey(symbol)], {
+    revalidate: 21_600,
+    tags: [cacheTag(symbol)],
+  })();
 }
 
 export const companyIntelligenceVersions = { model: COMPANY_INTELLIGENCE_MODEL_VERSION, scoring: COMPANY_SCORE_VERSION, quality: COMPANY_QUALITY_MODEL_VERSION, valuation: "company-valuation-v1.0.0", signal: TECHNICAL_MODEL_VERSION, news: NEWS_INTELLIGENCE_MODEL_VERSION, report: COMPANY_REPORT_VERSION };

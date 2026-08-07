@@ -377,6 +377,7 @@ export interface CompanyIntelligenceReport {
   valuationVersion: string;
   signalVersion: string;
   reportVersion: string;
+  providerVersions: Record<string, string>;
   dataTimestamp: string | null;
   calculatedAt: string;
 }

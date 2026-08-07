@@ -20,5 +20,10 @@ Exact quotas depend on provider plans and must be read from account dashboards; 
 - anonymous search and quote routes use conservative per-minute limits.
 - Alpha Vantage and Massive outbound adapters default to four calls per minute until plan-specific quotas are configured.
 - backtests, AI classification and bulk jobs require authentication and explicit concurrency caps.
+- every public Company Intelligence page/section shares one 12 requests/minute/IP analysis budget; response sections do not receive independent provider budgets.
+- complete company reports use the persistent Next.js data cache, local single-flight and a Redis lock per normalized symbol/model version to avoid concurrent cold-cache fan-out across page, API and multi-instance execution.
+- company CSV/PDF export is limited to five requests per five minutes and requires authentication in production.
 
 Provider 429 responses propagate a retryable category and `Retry-After` without automatic retry storms. Cache keys include provider, instrument, market, timeframe/range, schema and model version.
+
+See `docs/COMPANY_INTELLIGENCE_OPERATIONS.md` for the measurable monthly-cost formula and deployment counters. Exact euro/dollar estimates require the contracted provider, Vercel, Redis and database prices and are intentionally not fabricated in the repository.
