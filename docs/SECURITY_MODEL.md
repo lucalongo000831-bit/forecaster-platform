@@ -27,3 +27,5 @@ Article text is data, never instruction. HTML is stripped, length bounded and de
 ## Residual risks
 
 Yahoo is unofficial; provider terms/entitlements may change. In-memory development fallbacks do not provide distributed guarantees. External database/Redis security depends on user-owned configuration and network controls.
+
+The production dependency audit is clean. The full development audit currently reports four moderate advisories inherited through `drizzle-kit`'s legacy `@esbuild-kit` toolchain. npm proposes a breaking downgrade rather than a safe compatible upgrade, so the issue is limited to trusted local migration tooling and remains documented pending an upstream release; it is not bundled into the production application.

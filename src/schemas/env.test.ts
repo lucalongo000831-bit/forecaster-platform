@@ -24,4 +24,10 @@ describe("server environment", () => {
     expect(status).toMatchObject({ databaseConfigured: true, fmpConfigured: true, alphaVantageConfigured: true, massiveConfigured: true });
     expect(Object.values(status).every((value) => typeof value === "boolean")).toBe(true);
   });
+
+  it("rejects provider base URLs outside the explicit HTTPS allowlist", () => {
+    expect(() => getServerEnvironment({ NODE_ENV: "test", FMP_BASE_URL: "http://financialmodelingprep.com" })).toThrow("Configurazione server non valida");
+    expect(() => getServerEnvironment({ NODE_ENV: "test", ALPHA_VANTAGE_BASE_URL: "https://attacker.test" })).toThrow("Configurazione server non valida");
+    expect(() => getServerEnvironment({ NODE_ENV: "test", MASSIVE_WEBSOCKET_URL: "ws://socket.massive.com" })).toThrow("Configurazione server non valida");
+  });
 });

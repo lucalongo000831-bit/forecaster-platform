@@ -8,6 +8,8 @@ out/
 dist/
 build/
 coverage/
+playwright-report/
+test-results/
 *.tsbuildinfo
 
 # Environment variables and local configuration

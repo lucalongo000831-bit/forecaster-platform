@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray } from "drizzle-orm";
 import { alerts, calendarEvents, getDatabase, instruments, watchlistItems, watchlists } from "@/db";
 import { AppError } from "@/lib/server/app-error";
 import { financialProviderRouter } from "@/providers";
@@ -39,6 +39,8 @@ export async function listWatchlists(userId: string): Promise<AccountWatchlist[]
 }
 
 export async function createWatchlist(userId: string, input: { name: string; description?: string | null }) {
+  const [{ value }] = await getDatabase().select({ value: count() }).from(watchlists).where(eq(watchlists.userId, userId));
+  if (value >= 25) throw new AppError("BAD_REQUEST", "Limite di 25 watchlist raggiunto", 400);
   const [created] = await getDatabase().insert(watchlists).values({ userId, name: input.name, description: input.description }).returning();
   return created;
 }
@@ -52,7 +54,7 @@ export async function updateWatchlist(userId: string, id: string, input: { name?
 export async function deleteWatchlist(userId: string, id: string) { await ownedWatchlist(userId, id); await getDatabase().delete(watchlists).where(and(eq(watchlists.id, id), eq(watchlists.userId, userId))); }
 
 export async function addWatchlistItem(userId: string, watchlistId: string, input: { symbol: string; name: string; type: "EQUITY" | "ETF" | "FUND" | "INDEX" | "CRYPTO" | "FOREX" | "COMMODITY"; currency?: string; market?: string; notes?: string | null; position: number }) {
-  await ownedWatchlist(userId, watchlistId); const instrument = await ensureInstrument(input);
+  await ownedWatchlist(userId, watchlistId); const [{ value }] = await getDatabase().select({ value: count() }).from(watchlistItems).where(eq(watchlistItems.watchlistId, watchlistId)); if (value >= 200) throw new AppError("BAD_REQUEST", "Limite di 200 strumenti per watchlist raggiunto", 400); const instrument = await ensureInstrument(input);
   const [created] = await getDatabase().insert(watchlistItems).values({ watchlistId, instrumentId: instrument.id, notes: input.notes, position: input.position }).onConflictDoUpdate({ target: [watchlistItems.watchlistId, watchlistItems.instrumentId], set: { notes: input.notes, position: input.position, updatedAt: new Date() } }).returning();
   return created;
 }

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { getDatabase, instruments, portfolioPositions, portfolioTransactions, portfolios } from "@/db";
 import { calculateLedger } from "@/engines/portfolio";
 import { AppError } from "@/lib/server/app-error";
@@ -38,7 +38,7 @@ export async function listPortfolios(userId: string): Promise<AccountPortfolio[]
   });
 }
 
-export async function createPortfolio(userId: string, input: { name: string; baseCurrency: string }) { const [created] = await getDatabase().insert(portfolios).values({ userId, ...input }).returning(); return created; }
+export async function createPortfolio(userId: string, input: { name: string; baseCurrency: string }) { const database = getDatabase(); const [{ value }] = await database.select({ value: count() }).from(portfolios).where(eq(portfolios.userId, userId)); if (value >= 25) throw new AppError("BAD_REQUEST", "Limite di 25 portafogli raggiunto", 400); const [created] = await database.insert(portfolios).values({ userId, ...input }).returning(); return created; }
 export async function updatePortfolio(userId: string, id: string, input: { name?: string; baseCurrency?: string }) { await ownedPortfolio(userId, id); const [updated] = await getDatabase().update(portfolios).set({ ...input, updatedAt: new Date() }).where(and(eq(portfolios.id, id), eq(portfolios.userId, userId))).returning(); return updated; }
 export async function deletePortfolio(userId: string, id: string) { await ownedPortfolio(userId, id); await getDatabase().delete(portfolios).where(and(eq(portfolios.id, id), eq(portfolios.userId, userId))); }
 
@@ -54,6 +54,7 @@ async function rebuildPositions(portfolioId: string) {
 
 export async function addPortfolioTransaction(userId: string, portfolioId: string, input: { type: "BUY" | "SELL" | "DEPOSIT" | "WITHDRAWAL" | "DIVIDEND" | "FEE" | "SPLIT"; symbol?: string | null; name?: string; instrumentType: "EQUITY" | "ETF" | "FUND" | "INDEX" | "CRYPTO" | "FOREX" | "COMMODITY"; executedAt: string; quantity?: number | null; price?: number | null; fees: number; currency: string; notes?: string | null }) {
   await ownedPortfolio(userId, portfolioId);
+  const [{ value }] = await getDatabase().select({ value: count() }).from(portfolioTransactions).where(eq(portfolioTransactions.portfolioId, portfolioId)); if (value >= 5_000) throw new AppError("BAD_REQUEST", "Limite di 5.000 transazioni per portafoglio raggiunto", 400);
   const instrument = input.symbol ? await ensureInstrument({ symbol: input.symbol, name: input.name ?? input.symbol, type: input.instrumentType, currency: input.currency }) : null;
   const [created] = await getDatabase().insert(portfolioTransactions).values({ portfolioId, instrumentId: instrument?.id, type: input.type, executedAt: new Date(input.executedAt), quantity: input.quantity === null || input.quantity === undefined ? null : String(input.quantity), price: input.price === null || input.price === undefined ? null : String(input.price), fees: String(input.fees), currency: input.currency, notes: input.notes }).returning();
   await rebuildPositions(portfolioId);

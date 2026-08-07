@@ -38,3 +38,5 @@ For AAPL, MSFT, NVDA, TSLA, AMZN, META, `^GSPC`, `^IXIC`, BTC-USD, ETH-USD, ENI.
 ## UI/E2E
 
 Desktop/tablet/mobile flows cover dashboard, AAPL search/workspace/range, technicals, fundamentals, seasonality, targets, forecast, watchlist, portfolio transaction, alert, backtest, calendar and nonexistent ticker. Keyboard focus, labels, tables and chart text summaries are checked.
+
+The automated Playwright acceptance suite runs the public and controlled private-state flows in both desktop and mobile Chromium projects. Route warm-up is used only against `next dev` to avoid first-compilation reloads; production builds do not require it.

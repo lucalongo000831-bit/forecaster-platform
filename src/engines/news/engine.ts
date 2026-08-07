@@ -7,6 +7,7 @@ const trackingParameters = new Set(["fbclid", "gclid", "guccounter", "guce_refer
 
 function canonicalizeUrl(value: string) {
   const url = new URL(value);
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("UNSAFE_NEWS_URL");
   for (const key of [...url.searchParams.keys()]) if (key.toLowerCase().startsWith("utm_") || trackingParameters.has(key.toLowerCase())) url.searchParams.delete(key);
   url.hash = "";
   return url.toString();

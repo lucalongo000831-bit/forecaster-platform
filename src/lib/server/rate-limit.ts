@@ -7,6 +7,7 @@ import { getRedis, privacySafeKey } from "./redis";
 interface LocalBucket { count: number; resetAt: number }
 const localBuckets = new Map<string, LocalBucket>();
 const distributedLimiters = new Map<string, Ratelimit>();
+const MAX_LOCAL_BUCKETS = 5_000;
 
 export interface RateLimitPolicy {
   scope: string;
@@ -42,6 +43,16 @@ export async function enforceRateLimit(identifier: string, policy: RateLimitPoli
   const key = `${policy.scope}:${safeIdentifier}`;
   const bucket = localBuckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
+    if (localBuckets.size >= MAX_LOCAL_BUCKETS) {
+      for (const [bucketKey, candidate] of localBuckets) {
+        if (candidate.resetAt <= now) localBuckets.delete(bucketKey);
+      }
+      while (localBuckets.size >= MAX_LOCAL_BUCKETS) {
+        const oldestKey = localBuckets.keys().next().value as string | undefined;
+        if (!oldestKey) break;
+        localBuckets.delete(oldestKey);
+      }
+    }
     localBuckets.set(key, { count: 1, resetAt: now + windowSeconds * 1_000 });
     return;
   }

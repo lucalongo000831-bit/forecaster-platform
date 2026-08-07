@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { alertEvents, alerts, getDatabase, instruments } from "@/db";
 import { AppError } from "@/lib/server/app-error";
 import type { AccountAlert, AccountNotification } from "@/types";
@@ -12,6 +12,7 @@ export async function listAlerts(userId: string): Promise<AccountAlert[]> {
 }
 
 export async function createAlert(userId: string, input: { type: string; symbol?: string | null; name?: string; threshold?: number | null; horizon?: string | null; expiresAt?: string | null }) {
+  const [{ value }] = await getDatabase().select({ value: count() }).from(alerts).where(eq(alerts.userId, userId)); if (value >= 200) throw new AppError("BAD_REQUEST", "Limite di 200 alert raggiunto", 400);
   const instrument = input.symbol ? await ensureInstrument({ symbol: input.symbol, name: input.name ?? input.symbol, type: "EQUITY" }) : null;
   const [created] = await getDatabase().insert(alerts).values({ userId, instrumentId: instrument?.id, type: input.type, configuration: { threshold: input.threshold ?? null, horizon: input.horizon ?? null }, expiresAt: input.expiresAt ? new Date(input.expiresAt) : null }).returning();
   return created;

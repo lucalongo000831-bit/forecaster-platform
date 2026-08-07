@@ -9,9 +9,18 @@ import { providerRequest } from "../http";
 import { providerResult } from "../metadata";
 import type { NewsProvider, ProviderNewsItem } from "../types";
 
+const httpsUrlSchema = z.url().refine((value) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}, "La fonte news deve utilizzare HTTPS");
+
 const feedItemSchema = z.object({
   title: z.string(),
-  url: z.url(),
+  url: httpsUrlSchema,
   time_published: z.string(),
   authors: z.array(z.string()).optional(),
   summary: z.string().optional(),

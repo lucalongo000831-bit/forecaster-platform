@@ -42,7 +42,7 @@ export async function evaluateActiveAlerts(limit = 100) {
         const news = (await financialProviderRouter.news(record.symbol, 10)).data; const relevance = Math.max(0, ...news.flatMap((item) => item.tickerSentiment.filter((entry) => entry.symbol === record.symbol).map((entry) => entry.relevance ?? 0)));
         result = { triggered: relevance >= (threshold || .7), observed: relevance, available: news.length > 0, message: `${record.symbol}: high-relevance news (${relevance.toFixed(2)})` };
       } else if (alert.type === "GEOPOLITICAL_EVENT") {
-        const news = await financialProviderRouter.topicNews(["geopolitics"], 10).then((value) => value.data).catch(() => []); result = { triggered: news.length > 0, observed: news.length, available: true, message: `${news.length} geopolitical items detected` };
+        result = { triggered: false, observed: null, available: false, message: "No verified geopolitical event provider is configured" };
       } else if (alert.type === "PORTFOLIO_RISK") {
         const portfolios = await listPortfolios(alert.userId); const concentration = Math.max(0, ...portfolios.map((portfolio) => portfolio.concentration)); result = { triggered: concentration >= (threshold || 35), observed: concentration, available: portfolios.length > 0, message: `Portfolio concentration ${concentration.toFixed(2)}%` };
       }

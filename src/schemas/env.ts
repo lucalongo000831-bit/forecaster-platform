@@ -6,6 +6,16 @@ const emptyToUndefined = (value: unknown) => value === "" ? undefined : value;
 const optionalString = z.preprocess(emptyToUndefined, z.string().trim().min(1).optional());
 const optionalUrl = z.preprocess(emptyToUndefined, z.url().optional());
 const optionalSecret = z.preprocess(emptyToUndefined, z.string().min(1).optional());
+function trustedProviderUrl(defaultValue: string, protocols: string[], hostnames: string[]) {
+  return z.preprocess(emptyToUndefined, z.url().default(defaultValue).refine((value) => {
+    try {
+      const url = new URL(value);
+      return protocols.includes(url.protocol) && hostnames.includes(url.hostname.toLowerCase()) && !url.username && !url.password;
+    } catch {
+      return false;
+    }
+  }, "URL provider non consentito"));
+}
 const booleanFlag = z.preprocess((value) => {
   if (typeof value === "boolean") return value;
   if (typeof value !== "string" || value === "") return undefined;
@@ -22,12 +32,12 @@ const serverEnvironmentSchema = z.object({
   NEXTAUTH_URL: optionalUrl,
   YAHOO_FINANCE_ENABLED: z.preprocess((value) => value === undefined || value === "" ? true : value === "true" ? true : value === "false" ? false : value, z.boolean()),
   FMP_API_KEY: optionalSecret,
-  FMP_BASE_URL: z.preprocess(emptyToUndefined, z.url().default("https://financialmodelingprep.com")),
+  FMP_BASE_URL: trustedProviderUrl("https://financialmodelingprep.com", ["https:"], ["financialmodelingprep.com", "www.financialmodelingprep.com"]),
   ALPHA_VANTAGE_API_KEY: optionalSecret,
-  ALPHA_VANTAGE_BASE_URL: z.preprocess(emptyToUndefined, z.url().default("https://www.alphavantage.co")),
+  ALPHA_VANTAGE_BASE_URL: trustedProviderUrl("https://www.alphavantage.co", ["https:"], ["www.alphavantage.co"]),
   MASSIVE_API_KEY: optionalSecret,
-  MASSIVE_BASE_URL: z.preprocess(emptyToUndefined, z.url().default("https://api.massive.com")),
-  MASSIVE_WEBSOCKET_URL: z.preprocess(emptyToUndefined, z.url().default("wss://socket.massive.com")),
+  MASSIVE_BASE_URL: trustedProviderUrl("https://api.massive.com", ["https:"], ["api.massive.com"]),
+  MASSIVE_WEBSOCKET_URL: trustedProviderUrl("wss://socket.massive.com", ["wss:"], ["socket.massive.com"]),
   OPENAI_API_KEY: optionalSecret,
   OPENAI_MODEL: optionalString,
   UPSTASH_REDIS_REST_URL: optionalUrl,

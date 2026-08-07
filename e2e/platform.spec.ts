@@ -1,0 +1,67 @@
+import { expect, test } from "@playwright/test";
+
+const mockedSearch = { data: [{ symbol: "KAIRO.MI", name: "Kairo Test Instrument", type: "Stock", venue: "Milan", price: 214.3, currency: "EUR", href: "/instrument/milan/kairo.mi/overview", source: "yahoo" }], meta: { source: "yahoo" } };
+const chartPoint = (day: number, close: number) => ({ timestamp: `2026-08-${String(day).padStart(2, "0")}T20:00:00.000Z`, open: close - 1, high: close + 2, low: close - 2, close, volume: 10_000_000 });
+
+test("dashboard, navigation and legal disclosure render", async ({ page }) => {
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: /Good afternoon/i })).toBeVisible();
+  const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
+  if (await mobileNavigation.isVisible()) await mobileNavigation.click();
+  await expect(page.getByRole("link", { name: "Watchlists", exact: true })).toBeVisible();
+  await page.goto("/legal/disclaimer");
+  await expect(page.getByRole("heading", { name: /Financial disclaimer/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Not financial advice", exact: true })).toBeVisible();
+});
+
+test("real search interaction returns encoded instrument navigation", async ({ page }) => {
+  await page.route("**/api/market/search?**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockedSearch) }));
+  await page.goto("/search");
+  const response = page.waitForResponse((candidate) => candidate.url().includes("/api/market/search?q=KAIRO"));
+  await page.getByPlaceholder("Search company, symbol or theme").fill("KAIRO");
+  await response;
+  const result = page.getByRole("row", { name: /KAIRO\.MI Kairo Test Instrument/i });
+  await expect(result.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", "/instrument/milan/kairo.mi/overview");
+});
+
+test("instrument workspace changes chart period and exposes research tabs", async ({ page }) => {
+  await page.route("**/api/market/chart?**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { symbol: "AAPL", currency: "USD", exchange: "NASDAQ", range: "1M", interval: "1d", previousClose: 210, isDelayed: true, asOf: "2026-08-06T20:00:00.000Z", points: [chartPoint(4, 211), chartPoint(5, 213), chartPoint(6, 214)] }, meta: { source: "yahoo" } }) }));
+  await page.goto("/instrument/nasdaq/aapl/chart");
+  await expect(page.getByText(/Interactive Price Chart/i)).toBeVisible();
+  await page.getByRole("button", { name: "1M", exact: true }).click();
+  await expect(page.locator("main").getByText(/OHLCV history/i)).toContainText(/Yahoo Finance|delayed/i);
+  for (const path of ["signal", "fundamentals/analysis", "seasonality", "targets", "forecast", "news"]) await expect(page.locator(`a[href$="/${path}"]`).first()).toBeAttached();
+});
+
+test("private pages expose controlled unauthenticated or empty states", async ({ page, request }) => {
+  const accountResponse = await request.get("/api/account/watchlists");
+  expect([401, 503]).toContain(accountResponse.status());
+  const pages = [
+    ["/watchlists", /Your watchlists/i, /Workspace unavailable|Create your first private watchlist/i],
+    ["/portfolio", /Your portfolio/i, /Private workspace unavailable|Create a portfolio to start/i],
+    ["/alerts", /Alerts & notifications/i, /Alert workspace unavailable|No alert rules configured/i],
+    ["/settings", /Make Kairo yours/i, /No active session|Sessione non disponibile/i],
+  ] as const;
+  for (const [path, heading, state] of pages) {
+    const warmup = await request.get(path);
+    expect(warmup.ok()).toBeTruthy();
+    await page.goto(path, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page.getByText(state).first()).toBeVisible();
+  }
+});
+
+test("calendar, backtest and invalid ticker produce controlled UI/API states", async ({ page, request }) => {
+  await page.goto("/calendar"); await expect(page.getByRole("heading", { name: /Market calendar/i })).toBeVisible();
+  await page.goto("/backtest"); await expect(page.getByRole("heading", { name: /Backtest, without hindsight/i })).toBeVisible();
+  const invalid = await request.get("/api/market/quote?symbol=%20%3Cscript%3E"); expect(invalid.status()).toBe(400);
+});
+
+test("global symbol matrix never exposes an unhandled server crash", async ({ request }) => {
+  const symbols = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "^GSPC", "^IXIC", "BTC-USD", "ETH-USD", "ENI.MI", "STLAM.MI"];
+  for (const symbol of symbols) {
+    const response = await request.get(`/api/market/quote?symbol=${encodeURIComponent(symbol)}`);
+    expect([200, 404, 429, 502, 503, 504]).toContain(response.status());
+    const body = await response.json(); expect(body).toMatchObject(response.ok() ? { data: expect.any(Object) } : { error: expect.any(Object) });
+  }
+});

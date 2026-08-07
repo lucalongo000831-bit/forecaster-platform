@@ -13,4 +13,18 @@ describe("news intelligence engine", () => {
     expect(result.items[0].canonicalUrl).toBe("https://example.com/story");
     expect(result.aiEnrichment.status).toBe("DISABLED");
   });
+
+  it("drops news links that are not safe HTTPS destinations", () => {
+    const result = analyzeNewsIntelligence({
+      symbol: "AAPL",
+      provider: "alpha-vantage",
+      items: [
+        { ...item, id: "unsafe-script", url: "javascript:alert(1)" },
+        { ...item, id: "unsafe-http", url: "http://example.com/story" },
+        { ...item, id: "safe", url: "https://example.com/safe" },
+      ],
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].canonicalUrl).toBe("https://example.com/safe");
+  });
 });
