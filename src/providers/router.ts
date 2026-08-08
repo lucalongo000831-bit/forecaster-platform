@@ -5,10 +5,16 @@ import { getServerEnvironment } from "@/schemas/env";
 import { normalizeSearchQuery, normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import { providerCached } from "./cache";
 import { ProviderError } from "./errors";
+import { providerResult } from "./metadata";
+import { recordProviderDataTimestamp } from "./health";
 import { FmpFundamentalsAdapter } from "./fundamentals/fmp-adapter";
 import { YahooFundamentalsAdapter } from "./fundamentals/yahoo-adapter";
 import { AlphaVantageNewsAdapter } from "./news/alpha-vantage-adapter";
+import { FmpNewsAdapter } from "./news/fmp-adapter";
 import { YahooNewsAdapter } from "./news/yahoo-adapter";
+import { FmpPoliticalAdapter } from "./political/fmp-adapter";
+import { FmpMacroAdapter } from "./macro/fmp-adapter";
+import { AlphaVantageMacroAdapter } from "./macro/alpha-vantage-adapter";
 import { FmpMarketDataAdapter } from "./market-data/fmp-adapter";
 import { MassiveMarketDataAdapter } from "./market-data/massive-adapter";
 import { YahooMarketDataAdapter } from "./market-data/yahoo-adapter";
@@ -16,6 +22,8 @@ import type {
   FundamentalsProvider,
   MarketDataProvider,
   NewsProvider,
+  MacroProvider,
+  PoliticalProvider,
   ProviderCapability,
   ProviderName,
   ProviderResult,
@@ -30,7 +38,9 @@ const marketAdapters = {
   fmp: new FmpMarketDataAdapter(),
 } satisfies Record<"massive" | "yahoo" | "fmp", MarketDataProvider>;
 const fundamentalAdapters = { fmp: new FmpFundamentalsAdapter(), yahoo: new YahooFundamentalsAdapter() } satisfies Record<"fmp" | "yahoo", FundamentalsProvider>;
-const newsAdapters = { "alpha-vantage": new AlphaVantageNewsAdapter(), yahoo: new YahooNewsAdapter() } satisfies Record<"alpha-vantage" | "yahoo", NewsProvider>;
+const newsAdapters = { "alpha-vantage": new AlphaVantageNewsAdapter(), fmp: new FmpNewsAdapter(), yahoo: new YahooNewsAdapter() } satisfies Record<"alpha-vantage" | "fmp" | "yahoo", NewsProvider>;
+const politicalAdapters = { fmp: new FmpPoliticalAdapter() } satisfies Record<"fmp", PoliticalProvider>;
+const macroAdapters = { fmp: new FmpMacroAdapter(), "alpha-vantage": new AlphaVantageMacroAdapter() } satisfies Record<"fmp" | "alpha-vantage", MacroProvider>;
 const capabilityBlocks = new Map<string, number>();
 
 function unique<T>(values: T[]) { return [...new Set(values)]; }
@@ -44,6 +54,7 @@ async function firstAvailable<T>(operation: string, symbol: string | undefined, 
     if ((capabilityBlocks.get(capabilityKey) ?? 0) > Date.now()) continue;
     try {
       const result = await candidate.task();
+      recordProviderDataTimestamp(result.meta.provider, result.meta.sourceTimestamp);
       capabilityBlocks.delete(capabilityKey);
       return { ...result, meta: { ...result.meta, isFallback: index > 0 } };
     } catch (error) {
@@ -68,37 +79,45 @@ export class FinancialProviderRouter {
   }
   private newsOrder(): NewsProvider[] {
     const env = getServerEnvironment();
-    return unique([env.NEWS_PRIMARY_PROVIDER, "alpha-vantage", "yahoo"] as const).map((name) => newsAdapters[name]);
+    return unique([env.NEWS_PRIMARY_PROVIDER, "alpha-vantage", "fmp", "yahoo"] as const).map((name) => newsAdapters[name]);
   }
 
   search(queryInput: string) {
     const query = normalizeSearchQuery(queryInput);
-    const order = [marketAdapters.yahoo, ...this.marketOrder().filter((adapter) => adapter.name !== "yahoo")];
+    const order = [marketAdapters.fmp, marketAdapters.massive, marketAdapters.yahoo];
     return providerCached(`search:${query.toLowerCase()}`, { freshSeconds: 300, staleSeconds: 1_800 }, () => firstAvailable("search", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.searchInstruments(query) }))));
   }
 
   quote(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.marketOrder();
-    return providerCached(`quote:${symbol}`, { freshSeconds: 20, staleSeconds: 120 }, () => firstAvailable("quote", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getQuote(symbol) }))));
+    return providerCached(`quote:${symbol}`, { freshSeconds: 3, staleSeconds: 30 }, () => firstAvailable("quote", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getQuote(symbol) }))));
   }
 
   quotes(symbolInputs: string[]) {
     const symbols = unique(symbolInputs.map(normalizeSymbol)).slice(0, 50);
-    const order = [marketAdapters.yahoo, ...this.marketOrder().filter((adapter) => adapter.name !== "yahoo")];
-    return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 20, staleSeconds: 120 }, () => firstAvailable("quotes", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: symbols.every((symbol) => adapter.supportsSymbol(symbol)), task: () => adapter.getQuotes(symbols) }))));
+    return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 15, staleSeconds: 60 }, async () => {
+      const settled = await Promise.allSettled(symbols.map((symbol) => this.quote(symbol)));
+      const results = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      if (!results.length) throw settled.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason ?? new ProviderError("yahoo", "NOT_FOUND", "Nessuna quotazione disponibile.", false, 404);
+      const providers = unique(results.map((result) => result.meta.provider));
+      const timestamps = results.map((result) => result.meta.sourceTimestamp).filter((value): value is string => Boolean(value)).sort();
+      const freshnessTypes = results.map((result) => result.meta.freshnessType);
+      const freshnessType = freshnessTypes.includes("STALE") ? "STALE" : freshnessTypes.includes("DELAYED") ? "DELAYED" : freshnessTypes.every((value) => value === "REALTIME") ? "REALTIME" : freshnessTypes.every((value) => value === "CACHED") ? "CACHED" : "NEAR_REALTIME";
+      return providerResult(results[0]!.meta.provider, results.map((result) => result.data), { sourceTimestamp: timestamps.at(-1) ?? null, freshness: freshnessType === "STALE" ? "stale" : freshnessType === "CACHED" ? "cached" : freshnessType === "REALTIME" || freshnessType === "NEAR_REALTIME" ? "realtime" : "delayed", freshnessType, quality: results.length === symbols.length ? "verified" : "partial", isFallback: providers.length > 1 || results.some((result) => result.meta.isFallback) });
+    });
   }
 
   chart(symbolInput: string, range: ChartRange, interval?: string | null) {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.marketOrder();
     const intraday = range === "1D" || range === "5D";
-    return providerCached(`chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: intraday ? 60 : 900, staleSeconds: intraday ? 300 : 21_600 }, () => firstAvailable("chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
+    return providerCached(`chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: intraday ? 10 : 900, staleSeconds: intraday ? 60 : 21_600 }, () => firstAvailable("chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
   }
 
   analyticsChart(symbolInput: string, range: ChartRange = "MAX", interval: string | null = "1d") {
     const symbol = normalizeSymbol(symbolInput);
-    const order = [marketAdapters.yahoo, ...this.marketOrder().filter((adapter) => adapter.name !== "yahoo")];
+    const order = this.marketOrder();
     return providerCached(`analytics-chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, () => firstAvailable("analytics-chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
   }
 
@@ -137,6 +156,26 @@ export class FinancialProviderRouter {
     return providerCached(`analyst:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystConsensus(symbol) }))));
   }
 
+  analystEstimates(symbolInput: string, limit = 8) {
+    const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    return providerCached(`analyst-estimates:${symbol}:${limit}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst-estimates", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystEstimates(symbol, limit) }]));
+  }
+
+  analystRatings(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    return providerCached(`analyst-ratings:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst-ratings", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystRatings(symbol) }]));
+  }
+
+  growth(symbolInput: string, period: StatementPeriod = "annual", limit = 10) {
+    const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    return providerCached(`growth:${symbol}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, () => firstAvailable("growth", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getGrowth(symbol, period, limit) }]));
+  }
+
+  peers(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    return providerCached(`peers:${symbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, () => firstAvailable("peers", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getPeers(symbol) }]));
+  }
+
   earningsCalendar(from: string, to: string, symbol?: string) {
     const normalized = symbol ? normalizeSymbol(symbol) : undefined;
     const order = this.fundamentalOrder();
@@ -161,8 +200,25 @@ export class FinancialProviderRouter {
   }
 
   topicNews(topics: string[], limit = 20) {
-    const order = this.newsOrder().filter((adapter) => adapter.name === "alpha-vantage");
+    const order = this.newsOrder().filter((adapter) => adapter.name === "alpha-vantage" || adapter.name === "fmp");
     return providerCached(`topic-news:${topics.join(",")}:${limit}`, { freshSeconds: 900, staleSeconds: 3_600 }, () => firstAvailable("topic-news", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getTopicNews(topics, limit) }))));
+  }
+
+  senateTrades(symbolInput?: string, limit = 100) {
+    const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
+    const adapter = politicalAdapters.fmp;
+    return providerCached(`political:senate:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("senate-trades", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getSenateTrades(symbol, limit) }]));
+  }
+
+  houseTrades(symbolInput?: string, limit = 100) {
+    const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
+    const adapter = politicalAdapters.fmp;
+    return providerCached(`political:house:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("house-trades", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getHouseTrades(symbol, limit) }]));
+  }
+
+  macroIndicator(indicator: "INFLATION" | "RATES" | "GDP" | "EMPLOYMENT") {
+    const order = [macroAdapters.fmp, macroAdapters["alpha-vantage"]];
+    return providerCached(`macro:${indicator}`, { freshSeconds: 21_600, staleSeconds: 86_400 }, () => firstAvailable("macro-indicator", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getIndicator(indicator) }))));
   }
 
   capabilities(): ProviderCapability[] {
@@ -176,3 +232,52 @@ export class FinancialProviderRouter {
 }
 
 export const financialProviderRouter = new FinancialProviderRouter();
+
+export class MarketDataRouter {
+  getQuote(symbol: string) { return financialProviderRouter.quote(symbol); }
+  getQuotes(symbols: string[]) { return financialProviderRouter.quotes(symbols); }
+  getIntraday(symbol: string, range: ChartRange = "1D", interval?: string) { return financialProviderRouter.chart(symbol, range, interval); }
+  getHistorical(symbol: string, range: ChartRange = "1Y", interval?: string) { return financialProviderRouter.chart(symbol, range, interval); }
+  getAggregates(symbol: string, range: ChartRange = "1M", interval?: string) { return financialProviderRouter.chart(symbol, range, interval); }
+  getMarketStatus(market?: string) { return financialProviderRouter.marketStatus(market); }
+  search(query: string) { return financialProviderRouter.search(query); }
+}
+export class FundamentalsRouter {
+  getProfile(symbol: string) { return financialProviderRouter.profile(symbol); }
+  getFinancialStatements(symbol: string, kind: StatementKind, period: StatementPeriod, limit?: number) { return financialProviderRouter.statements(symbol, kind, period, limit); }
+  getRatios(symbol: string, period: StatementPeriod, limit?: number) { return financialProviderRouter.ratios(symbol, period, limit); }
+  getMetrics(symbol: string) { return financialProviderRouter.fundamentals(symbol); }
+  getGrowth(symbol: string, period?: StatementPeriod, limit?: number) { return financialProviderRouter.growth(symbol, period, limit); }
+  getAnalystEstimates(symbol: string, limit?: number) { return financialProviderRouter.analystEstimates(symbol, limit); }
+  getAnalystRatings(symbol: string) { return financialProviderRouter.analystRatings(symbol); }
+  getPriceTargets(symbol: string) { return financialProviderRouter.analystConsensus(symbol); }
+  getPeers(symbol: string) { return financialProviderRouter.peers(symbol); }
+}
+export class CalendarRouter {
+  getEarnings(from: string, to: string, symbol?: string) { return financialProviderRouter.earningsCalendar(from, to, symbol); }
+  getDividends(from: string, to: string, symbol?: string) { return financialProviderRouter.dividendCalendar(from, to, symbol); }
+  getEconomicEvents(from: string, to: string) { return financialProviderRouter.economicCalendar(from, to); }
+}
+export class NewsRouter {
+  getTickerNews(symbol: string, limit?: number) { return financialProviderRouter.news(symbol, limit); }
+  getMarketNews(topics = ["financial_markets"], limit?: number) { return financialProviderRouter.topicNews(topics, limit); }
+  getSentiment(symbol: string, limit?: number) { return financialProviderRouter.news(symbol, limit); }
+}
+export class PoliticalRouter {
+  getSenateTrades(symbol?: string, limit?: number) { return financialProviderRouter.senateTrades(symbol, limit); }
+  getHouseTrades(symbol?: string, limit?: number) { return financialProviderRouter.houseTrades(symbol, limit); }
+}
+export class MacroRouter {
+  getInflation() { return financialProviderRouter.macroIndicator("INFLATION"); }
+  getRates() { return financialProviderRouter.macroIndicator("RATES"); }
+  getGDP() { return financialProviderRouter.macroIndicator("GDP"); }
+  getEmployment() { return financialProviderRouter.macroIndicator("EMPLOYMENT"); }
+  getEconomicCalendar(from: string, to: string) { return financialProviderRouter.economicCalendar(from, to); }
+}
+
+export const marketDataRouter = new MarketDataRouter();
+export const fundamentalsRouter = new FundamentalsRouter();
+export const calendarRouter = new CalendarRouter();
+export const newsRouter = new NewsRouter();
+export const politicalRouter = new PoliticalRouter();
+export const macroRouter = new MacroRouter();

@@ -13,8 +13,7 @@ test-results/
 *.tsbuildinfo
 
 # Environment variables and local configuration
-.env
-.env.*
+.env*
 !.env.example
 *.local
 

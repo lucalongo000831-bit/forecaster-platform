@@ -21,90 +21,151 @@ function fromDate(range: ChartRange) {
   return start.toISOString().slice(0, 10);
 }
 
-function nanosToIso(value: number | null): string | null {
+function timestampToIso(value: number | null): string | null {
   if (value === null) return null;
-  const milliseconds = value > 10_000_000_000_000 ? Math.floor(value / 1_000_000) : value;
+  const milliseconds = value > 10_000_000_000_000 ? Math.floor(value / 1_000_000) : value < 10_000_000_000 ? value * 1_000 : value;
   const date = new Date(milliseconds);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function isCrypto(symbol: string) { return symbol.endsWith("-USD"); }
+function massiveSymbol(symbol: string) { return isCrypto(symbol) ? `X:${symbol.replace("-", "")}` : symbol; }
+
+function mapUnifiedSnapshot(row: Record<string, unknown>, requestedSymbol: string): MarketQuoteDto {
+  const session = recordValue(row, "session");
+  const trade = Object.keys(recordValue(row, "last_trade")).length ? recordValue(row, "last_trade") : recordValue(row, "lastTrade");
+  const quote = Object.keys(recordValue(row, "last_quote")).length ? recordValue(row, "last_quote") : recordValue(row, "lastQuote");
+  const price = massiveNumber(trade, "price", "p") ?? massiveNumber(session, "close", "c");
+  if (price === null) throw new ProviderError("massive", "NOT_FOUND", "Snapshot Massive non disponibile.", false, 404);
+  const previousClose = massiveNumber(session, "previous_close", "previousClose");
+  const change = massiveNumber(session, "change") ?? (previousClose === null ? 0 : price - previousClose);
+  const changePercent = massiveNumber(session, "change_percent", "changePercent") ?? (previousClose ? change / previousClose * 100 : 0);
+  const asOf = timestampToIso(massiveNumber(trade, "timestamp", "participant_timestamp", "sip_timestamp", "t")) ?? timestampToIso(massiveNumber(row, "last_updated", "updated"));
+  const crypto = isCrypto(requestedSymbol);
+  const status = massiveString(row, "market_status") ?? (crypto ? "open" : "unknown");
+  return {
+    symbol: requestedSymbol,
+    name: requestedSymbol,
+    exchange: crypto ? "CRYPTO" : "US",
+    quoteType: crypto ? "CRYPTOCURRENCY" : "EQUITY",
+    currency: "USD",
+    price,
+    change,
+    changePercent,
+    open: massiveNumber(session, "open", "o"),
+    previousClose,
+    dayLow: massiveNumber(session, "low", "l"),
+    dayHigh: massiveNumber(session, "high", "h"),
+    volume: massiveNumber(session, "volume", "v"),
+    marketCap: null,
+    bid: massiveNumber(quote, "bid_price", "bid", "bp"),
+    ask: massiveNumber(quote, "ask_price", "ask", "ap"),
+    marketState: status === "open" ? "REGULAR" : status === "early_trading" || status === "late_trading" ? "EXTENDED" : status === "closed" ? "CLOSED" : crypto ? "REGULAR" : "UNKNOWN",
+    asOf,
+    isDelayed: false,
+    source: "massive",
+  };
+}
+
+async function aggregateQuote(symbol: string): Promise<{ data: MarketQuoteDto; delayed: boolean }> {
+  const response = await massiveGet(`/v2/aggs/ticker/${encodeURIComponent(massiveSymbol(symbol))}/range/1/minute/${fromDate("5D")}/${new Date().toISOString().slice(0, 10)}`, { adjusted: true, sort: "asc", limit: 50_000 }, "quote-aggregates");
+  const rows = (Array.isArray(response.results) ? response.results : []).flatMap((value) => value && typeof value === "object" ? [value as Record<string, unknown>] : []);
+  const latest = rows.at(-1); const price = latest ? massiveNumber(latest, "c") : null; const asOf = latest ? timestampToIso(massiveNumber(latest, "t")) : null;
+  if (!latest || price === null || !asOf) throw new ProviderError("massive", "NOT_FOUND", "Aggregati Massive non disponibili.", false, 404);
+  const sessionDate = asOf.slice(0, 10); const sessionRows = rows.filter((row) => timestampToIso(massiveNumber(row, "t"))?.slice(0, 10) === sessionDate);
+  const previous = [...rows].reverse().find((row) => timestampToIso(massiveNumber(row, "t"))?.slice(0, 10) !== sessionDate);
+  const previousClose = previous ? massiveNumber(previous, "c") : null;
+  const open = sessionRows.length ? massiveNumber(sessionRows[0]!, "o") : null;
+  const dayHigh = sessionRows.reduce<number | null>((maximum, row) => { const value = massiveNumber(row, "h"); return value === null ? maximum : maximum === null ? value : Math.max(maximum, value); }, null);
+  const dayLow = sessionRows.reduce<number | null>((minimum, row) => { const value = massiveNumber(row, "l"); return value === null ? minimum : minimum === null ? value : Math.min(minimum, value); }, null);
+  const volume = sessionRows.reduce((sum, row) => sum + (massiveNumber(row, "v") ?? 0), 0);
+  const change = previousClose === null ? 0 : price - previousClose; const changePercent = previousClose ? change / previousClose * 100 : 0;
+  const delayed = massiveString(response, "status") === "DELAYED" || Date.now() - new Date(asOf).getTime() > 120_000;
+  return { delayed, data: { symbol, name: symbol, exchange: isCrypto(symbol) ? "CRYPTO" : "US", quoteType: isCrypto(symbol) ? "CRYPTOCURRENCY" : "EQUITY", currency: "USD", price, change, changePercent, open, previousClose, dayLow, dayHigh, volume, marketCap: null, bid: null, ask: null, marketState: isCrypto(symbol) ? "REGULAR" : "REGULAR", asOf, isDelayed: delayed, source: "massive" } };
+}
+
 export class MassiveMarketDataAdapter implements MarketDataProvider {
   readonly name = "massive" as const;
-  isConfigured() { return Boolean(getServerEnvironment().MASSIVE_API_KEY); }
+  isConfigured() { const env = getServerEnvironment(); return Boolean(env.MASSIVE_API_KEY ?? env.POLYGON_API_KEY); }
   supportsSymbol(symbolInput: string) {
     try {
       const symbol = normalizeSymbol(symbolInput);
-      return !symbol.startsWith("^") && !symbol.includes("=") && !symbol.endsWith("-USD") && !/\.[A-Z]{2,4}$/.test(symbol);
+      return isCrypto(symbol) || (!symbol.startsWith("^") && !symbol.includes("=") && !/\.[A-Z]{2,4}$/.test(symbol));
     } catch { return false; }
   }
 
   async searchInstruments(queryInput: string) {
     const query = normalizeSearchQuery(queryInput);
-    const response = await massiveGet("/v3/reference/tickers", { search: query, market: "stocks", active: true, limit: 12, order: "asc", sort: "ticker" }, "search");
+    const response = await massiveGet("/v3/reference/tickers", { search: query, active: true, limit: 12, order: "asc", sort: "ticker" }, "search");
     const results = Array.isArray(response.results) ? response.results : [];
     const data = results.flatMap((value): SearchInstrument[] => {
       if (!value || typeof value !== "object") return [];
       const row = value as Record<string, unknown>;
-      const symbol = massiveString(row, "ticker");
-      if (!symbol) return [];
-      const venue = massiveString(row, "primary_exchange", "market") ?? "US";
-      return [{ symbol, name: massiveString(row, "name") ?? symbol, type: massiveString(row, "type") === "ETF" ? "ETF" : "Stock", venue, price: 0, currency: massiveString(row, "currency_name") ?? "USD", href: instrumentHref(symbol, venue, "EQUITY"), source: "massive" }];
+      const rawSymbol = massiveString(row, "ticker");
+      if (!rawSymbol) return [];
+      const crypto = rawSymbol.startsWith("X:");
+      const symbol = crypto ? rawSymbol.slice(2).replace(/USD$/, "-USD") : rawSymbol;
+      const venue = massiveString(row, "primary_exchange", "market") ?? (crypto ? "CRYPTO" : "US");
+      const rawType = massiveString(row, "type")?.toLowerCase() ?? "";
+      const type: SearchInstrument["type"] = crypto ? "Crypto" : rawType.includes("etf") ? "ETF" : "Stock";
+      return [{ symbol, name: massiveString(row, "name") ?? symbol, type, venue, price: 0, currency: massiveString(row, "currency_name") ?? "USD", href: instrumentHref(symbol, venue, crypto ? "CRYPTOCURRENCY" : type === "ETF" ? "ETF" : "EQUITY"), source: "massive" }];
     });
-    return providerResult(this.name, data, { freshness: "cached", quality: data.length ? "verified" : "partial" });
+    return providerResult(this.name, data, { freshness: "cached", freshnessType: "CACHED", quality: data.length ? "verified" : "partial" });
   }
 
   async getQuote(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
-    if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Massive adapter limitato ai ticker USA.", false, 422);
-    if (!getServerEnvironment().MASSIVE_SNAPSHOT_ENABLED) throw new ProviderError(this.name, "PLAN_RESTRICTED", "Snapshot Massive disabilitato perché non incluso nel piano verificato.", false, 501);
-    const response = await massiveGet(`/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(symbol)}`, {}, "quote");
-    const ticker = recordValue(response, "ticker");
-    const day = recordValue(ticker, "day");
-    const previous = recordValue(ticker, "prevDay");
-    const trade = recordValue(ticker, "lastTrade");
-    const price = massiveNumber(trade, "p") ?? massiveNumber(day, "c");
-    if (price === null) throw new ProviderError(this.name, "NOT_FOUND", "Snapshot Massive non disponibile.", false, 404);
-    const previousClose = massiveNumber(previous, "c");
-    const change = massiveNumber(ticker, "todaysChange") ?? (previousClose === null ? 0 : price - previousClose);
-    const changePercent = massiveNumber(ticker, "todaysChangePerc") ?? (previousClose ? change / previousClose * 100 : 0);
-    const asOf = nanosToIso(massiveNumber(trade, "t") ?? massiveNumber(ticker, "updated"));
-    const realtime = getServerEnvironment().ENABLE_REALTIME_DATA;
-    const data: MarketQuoteDto = { symbol, name: symbol, exchange: "US", quoteType: "EQUITY", currency: "USD", price, change, changePercent, open: massiveNumber(day, "o"), previousClose, dayLow: massiveNumber(day, "l"), dayHigh: massiveNumber(day, "h"), volume: massiveNumber(day, "v"), marketCap: null, marketState: "REGULAR", asOf, isDelayed: !realtime, source: "massive" };
-    return providerResult(this.name, data, { sourceTimestamp: asOf, freshness: realtime ? "realtime" : "delayed", quality: "partial" });
+    if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Simbolo non supportato dall'adapter Massive.", false, 422);
+    try {
+      const response = await massiveGet("/v3/snapshot", { ticker: massiveSymbol(symbol), market_type: isCrypto(symbol) ? "crypto" : "stocks", limit: 1 }, "quote");
+      const values = Array.isArray(response.results) ? response.results : response.results && typeof response.results === "object" ? [response.results] : [];
+      const row = values.find((value) => value && typeof value === "object") as Record<string, unknown> | undefined;
+      if (!row) throw new ProviderError(this.name, "NOT_FOUND", "Snapshot Massive non disponibile.", false, 404);
+      const data = mapUnifiedSnapshot(row, symbol);
+      return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: "NEAR_REALTIME", quality: "verified" });
+    } catch (error) {
+      if (!(error instanceof ProviderError) || !["UNAUTHORIZED", "PLAN_RESTRICTED", "NOT_FOUND"].includes(error.code)) throw error;
+      const aggregate = await aggregateQuote(symbol);
+      return providerResult(this.name, aggregate.data, { sourceTimestamp: aggregate.data.asOf, freshness: aggregate.delayed ? "delayed" : "realtime", freshnessType: aggregate.delayed ? "DELAYED" : "NEAR_REALTIME", quality: "verified" });
+    }
   }
 
   async getQuotes(symbols: string[]) {
     const results = await Promise.allSettled(symbols.slice(0, 20).map((symbol) => this.getQuote(symbol)));
     const data = results.flatMap((result) => result.status === "fulfilled" ? [result.value.data] : []);
     if (!data.length) throw new ProviderError(this.name, "NOT_FOUND", "Nessuno snapshot Massive disponibile.", false, 404);
-    return providerResult(this.name, data, { freshness: getServerEnvironment().ENABLE_REALTIME_DATA ? "realtime" : "delayed", quality: data.length === symbols.length ? "verified" : "partial" });
+    const sourceTimestamp = data.map((quote) => quote.asOf).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
+    return providerResult(this.name, data, { sourceTimestamp, freshness: "realtime", freshnessType: "NEAR_REALTIME", quality: data.length === symbols.length ? "verified" : "partial" });
   }
 
   async getHistoricalBars(symbolInput: string, range: ChartRange, intervalInput?: string | null) {
     const symbol = normalizeSymbol(symbolInput);
-    if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Massive adapter limitato ai ticker USA.", false, 422);
+    if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Simbolo non supportato dall'adapter Massive.", false, 422);
     const interval = (intervalInput ?? defaultIntervals[range]) as ChartInterval;
     const mapped = intervalMap[interval];
     if (!mapped) throw new ProviderError(this.name, "NOT_FOUND", "Intervallo Massive non supportato.", false, 400);
-    const response = await massiveGet(`/v2/aggs/ticker/${encodeURIComponent(symbol)}/range/${mapped.multiplier}/${mapped.timespan}/${fromDate(range)}/${new Date().toISOString().slice(0, 10)}`, { adjusted: true, sort: "asc", limit: 50_000 }, "historical-bars");
+    const response = await massiveGet(`/v2/aggs/ticker/${encodeURIComponent(massiveSymbol(symbol))}/range/${mapped.multiplier}/${mapped.timespan}/${fromDate(range)}/${new Date().toISOString().slice(0, 10)}`, { adjusted: true, sort: "asc", limit: 50_000 }, "historical-bars");
     const results = Array.isArray(response.results) ? response.results : [];
     const points = results.flatMap((value) => {
       if (!value || typeof value !== "object") return [];
       const row = value as Record<string, unknown>;
-      const timestamp = nanosToIso(massiveNumber(row, "t")); const open = massiveNumber(row, "o"); const high = massiveNumber(row, "h"); const low = massiveNumber(row, "l"); const close = massiveNumber(row, "c"); const volume = massiveNumber(row, "v");
+      const timestamp = timestampToIso(massiveNumber(row, "t")); const open = massiveNumber(row, "o"); const high = massiveNumber(row, "h"); const low = massiveNumber(row, "l"); const close = massiveNumber(row, "c"); const volume = massiveNumber(row, "v");
       if (!timestamp || open === null || high === null || low === null || close === null || volume === null) return [];
       return [{ timestamp, open, high, low, close, volume }];
     });
     if (!points.length) throw new ProviderError(this.name, "NOT_FOUND", "Storico Massive non disponibile.", false, 404);
-    const realtime = getServerEnvironment().ENABLE_REALTIME_DATA;
-    const data: MarketChartDto = { symbol, currency: "USD", exchange: "US", range, interval, previousClose: points.at(-2)?.close ?? null, isDelayed: !realtime, asOf: points.at(-1)?.timestamp ?? null, points, source: "massive" };
-    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: realtime ? "realtime" : "delayed" });
+    const data: MarketChartDto = { symbol, currency: "USD", exchange: isCrypto(symbol) ? "CRYPTO" : "US", range, interval, previousClose: points.at(-2)?.close ?? null, isDelayed: false, asOf: points.at(-1)?.timestamp ?? null, points, source: "massive" };
+    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: range === "1D" || range === "5D" ? "NEAR_REALTIME" : "END_OF_DAY" });
   }
 
-  async getMarketStatus() {
+  async getMarketStatus(market = "US") {
+    if (market.toUpperCase() === "CRYPTO") {
+      const now = new Date().toISOString();
+      return providerResult(this.name, { market: "CRYPTO", state: "open", asOf: now, nextOpen: null, nextClose: null } satisfies MarketStatus, { sourceTimestamp: now, freshness: "realtime", freshnessType: "REALTIME", delaySeconds: 0 });
+    }
     const response = await massiveGet("/v1/marketstatus/now", {}, "market-status");
-    const market = massiveString(response, "market") ?? "unknown";
-    const data: MarketStatus = { market: "US", state: market === "open" ? "open" : market === "extended-hours" ? "extended" : market === "closed" ? "closed" : "unknown", asOf: massiveString(response, "serverTime") ?? new Date().toISOString(), nextOpen: null, nextClose: null };
-    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime" });
+    const status = massiveString(response, "market") ?? "unknown";
+    const data: MarketStatus = { market: "US", state: status === "open" ? "open" : status === "extended-hours" ? "extended" : status === "closed" ? "closed" : "unknown", asOf: massiveString(response, "serverTime") ?? new Date().toISOString(), nextOpen: null, nextClose: null };
+    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: "REALTIME" });
   }
 }

@@ -14,6 +14,8 @@ The product identity and assets are replaceable. The project does not scrape the
 - Multi-provider routing across Yahoo Finance, Financial Modeling Prep, Alpha Vantage and Massive, with typed adapters, timeout, retry, caching and fallback.
 - Protected health endpoints, cron jobs, structured logs, request IDs, rate limiting and data provenance.
 - Buy-side Company Intelligence with historical statement validation, earnings/FCF quality, evidence-based company scoring, moat and management analysis, reverse DCF, bear/base/bull DCF, downside-first risks, horizons through 20 years, operational calendar, PDF/CSV reports and point-in-time decision validation.
+- Asset-specific Crypto, ETF and Index Intelligence, with technicals, risk, seasonality, attributed sentiment and probabilistic scenarios instead of inapplicable corporate DCF metrics.
+- Ask Kairo code is preserved but parked behind `ENABLE_KAIRO_AI=false`; the financial platform works without an OpenAI key.
 
 ## Technology
 
@@ -22,12 +24,13 @@ The product identity and assets are replaceable. The project does not scrape the
 - Drizzle ORM and PostgreSQL
 - Upstash Redis for distributed cache, locks and rate limiting
 - `yahoo-finance2` used only in server-only modules
+- Official `openai` SDK and Responses API used only in server-only modules
 - Zod validation, bcrypt password hashes and HMAC-protected opaque sessions
 - Vitest and Playwright
 
 ## Quick start
 
-Requirements: Node.js 20+ and npm 10+.
+Requirements: Node.js 22+ and npm 10+.
 
 ```bash
 npm install
@@ -60,8 +63,9 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run start` | run the production build |
 | `npm run db:generate` | generate a migration from schema changes |
 | `npm run db:migrate` | apply committed PostgreSQL migrations |
-| `npm run test:providers` | optional live provider smoke test |
+| `npm run test:live-providers` | safe Massive/FMP/Alpha live smoke test; prints only OK/ERROR |
 | `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |
+| `npm run test:openai` | minimal live Responses API authentication check; never prints the key or model output |
 
 ## Architecture
 
@@ -72,11 +76,15 @@ Browser / React client components
 Next.js server components + Node.js route handlers
         ├── authentication / ownership / CSRF / rate limits
         ├── financial provider router
-        │     ├── Massive      market data when enabled
-        │     ├── Yahoo        global market fallback
+        │     ├── Massive      primary US/crypto market data
+        │     ├── Yahoo        global and unsupported-symbol fallback
         │     ├── FMP          fundamentals and calendars
         │     └── Alpha        attributed news sentiment
         ├── deterministic quant engines
+        ├── Ask Kairo Responses API agent (parked by feature flag)
+        │     ├── strict internal financial tools only
+        │     ├── normalized context and provenance
+        │     └── PostgreSQL conversation memory
         └── account services / job runner
               ├── PostgreSQL durable state
               └── Redis cache, locks and distributed limits
@@ -90,11 +98,12 @@ Core boundaries:
 - `src/app/api`: normalized same-origin APIs; no raw upstream payloads.
 - `src/components`: presentation receives typed props or calls only internal APIs.
 - `src/data/mock`: explicit, centralized demo fallback only; never personal data.
-- `src/db`: 43-table PostgreSQL schema and migrations.
+- `src/ai`: server-only OpenAI client, versioned prompt, context, tool registry, cost controls and agent loop.
+- `src/db`: PostgreSQL schema and migrations, including private Kairo conversation memory.
 
 ## API surface
 
-Public market APIs include `/api/market/{search,quote,quotes,chart,profile,fundamentals,statements,analyst,news,status,events}`, `/api/analysis/{technical,fundamental,seasonality,signal,targets,risk,forecast}`, `/api/intelligence/news`, `/api/calendar` and `/api/backtests`.
+Public market APIs include `/api/market/{search,quote,quotes,chart,profile,fundamentals,statements,analyst,news,status,events,political,macro}`, `/api/analysis/{technical,fundamental,seasonality,signal,targets,risk,forecast}`, `/api/intelligence/news`, `/api/calendar` and `/api/backtests`.
 
 Company Intelligence is available at `/instrument/[market]/[symbol]/analysis` and through `/api/company/resolve`, the section endpoints under `/api/company/[symbol]/**`, report export, refresh, custom DCF and decision backtesting. Public sections share one aggregate abuse budget and one cached report pipeline; costly mutations and production exports use tighter authentication/limit controls.
 
@@ -105,6 +114,22 @@ Private APIs include:
 - `/api/account/portfolios/**`
 - `/api/account/alerts/**`
 - `/api/account/notifications`
+- `POST /api/ai/chat` (streamed NDJSON), `GET /api/ai/conversations` and `GET /api/ai/conversations/[id]`
+
+## Ask Kairo status
+
+Ask Kairo is disabled by default and does not require `OPENAI_API_KEY`. Its source, conversations and tools remain intact for future reactivation. Never paste a key into source code or chat. See [the reactivation guide](docs/FUTURE_KAIRO_AI.md).
+
+If it is reactivated in a controlled environment, configure the key through hidden terminal input:
+
+```bash
+./scripts/configure-openai-key.sh
+./scripts/configure-openai-model.sh gpt-5.6-sol
+npm run db:migrate
+npm run test:openai
+```
+
+Set `OPENAI_API_KEY` as Sensitive for Vercel Preview and Production. Vercel does not permit Sensitive variables in Development, so local development uses the ignored, mode-600 `.env.local` instead of weakening key visibility. Configure `OPENAI_MODEL` in each required environment. Ask Kairo requires an authenticated Kairo user and PostgreSQL because messages and tool audit records are user-owned. It sends only bounded conversation excerpts and normalized financial tool results to OpenAI; provider keys, session tokens, raw IPs, internal prompts, tool credentials and private chain-of-thought are never persisted or returned to the browser. See [Ask Kairo architecture](docs/KAIRO_AI.md).
 
 Operational APIs:
 
@@ -118,11 +143,11 @@ All financial and operational route handlers use the Node.js runtime. Symbols ar
 
 Provider results include provider, fetch time, source time, freshness, quality and fallback metadata. Calculated outputs include model version, calculation time, data timestamp, completeness/confidence and limitations.
 
-- `LIVE` / `DELAYED`: provider market observations.
+- `REALTIME`, `NEAR_REALTIME`, `DELAYED`, `CACHED`, `END_OF_DAY`, `STALE` and `UNAVAILABLE` are preserved separately.
 - `CACHED`: a recent server-side provider observation.
 - `ESTIMATE`: externally sourced or model-derived estimate.
 - `MODEL OUTPUT`: deterministic calculation from documented inputs.
-- `DEMO`: explicit mock fallback only when a feature permits it.
+- `DEMO`: test/development fixtures only; production routes do not silently load mock financial values.
 - `UNAVAILABLE`: no verified source or insufficient input; never silently fabricated.
 
 Personal portfolio and watchlist values are never substituted with mock account records. Political disclosures, full call transcripts and verified geopolitical event feeds remain unavailable until an appropriate licensed source is configured.
@@ -156,6 +181,10 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Company Intelligence operations](docs/COMPANY_INTELLIGENCE_OPERATIONS.md), [architecture](docs/COMPANY_INTELLIGENCE_ARCHITECTURE.md), [methodology](docs/COMPANY_ANALYSIS_METHODOLOGY.md) and [acceptance tests](docs/COMPANY_ANALYSIS_ACCEPTANCE_TESTS.md)
 - [Acceptance tests](docs/ACCEPTANCE_TESTS.md)
 - [Known data limits](docs/DATA_LIMITATIONS.md) and [Yahoo limits](YAHOO_DATA_LIMITATIONS.md)
+- [Ask Kairo architecture, tools and operating limits](docs/KAIRO_AI.md)
+- [Future Ask Kairo reactivation](docs/FUTURE_KAIRO_AI.md)
+- [Massive streaming gateway](docs/REALTIME_GATEWAY_SETUP.md)
+- [Live provider implementation report](docs/LIVE_PROVIDER_IMPLEMENTATION_REPORT.md)
 
 ## Disclaimer
 

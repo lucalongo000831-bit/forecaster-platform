@@ -28,7 +28,7 @@ Provider secrets must never have a `NEXT_PUBLIC_` prefix. Base URLs are validate
 
 ## Routing and feature flags
 
-`YAHOO_FINANCE_ENABLED`, provider routing variables and `ENABLE_*` flags accept explicit documented values. Defaults keep optional paid/AI/realtime/backtest features disabled. `ENABLE_MOCK_FALLBACK` defaults to false so fictional data cannot silently enter production.
+`YAHOO_FINANCE_ENABLED`, provider routing variables and `ENABLE_*` flags accept explicit documented values. Defaults keep optional AI, streaming and backtest features disabled. Production financial routes never activate mock fallback.
 
 Plan-gated feature flags default to false: `MASSIVE_SNAPSHOT_ENABLED`, `FMP_STATEMENTS_ENABLED` and `FMP_HISTORICAL_RATIOS_ENABLED`. Enable one only after its endpoint succeeds for the configured subscription; aggregate bars and other provider capabilities remain independently routable.
 

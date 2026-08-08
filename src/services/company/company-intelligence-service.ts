@@ -15,7 +15,7 @@ import { getTechnicalAnalysis } from "@/services/analysis/technical-service";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
 import { getNewsIntelligence } from "@/services/intelligence/news-service";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
-import type { CompanyDataQuality, CompanyIntelligenceReport, CompanySource, MarketProfileDto } from "@/types";
+import type { CompanyDataQuality, CompanyIntelligenceReport, CompanySource, MarketProfileDto, PeerComparison } from "@/types";
 import { persistCompanyAnalysis } from "./company-analysis-repository";
 import { classifyCompanyInstrument } from "./instrument-applicability";
 
@@ -106,6 +106,12 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   if (technicalStage.data) sources.push({ provider: technicalStage.data.provider, label: "Historical prices and technical calculations", url: null, timestamp: technicalStage.data.sourceTimestamp, kind: "CALCULATED" });
   if (newsStage.data) sources.push({ provider: newsStage.data.meta.provider, label: "Company news intelligence", url: null, timestamp: newsStage.data.meta.sourceTimestamp, kind: "CALCULATED" });
   const statements = (stage: typeof annualIncomeStage): FinancialStatement[] => stage.data?.data ?? [];
+  const peerStage = await runCompanyStage("LoadPeers", () => financialProviderRouter.peers(symbol), { empty: (value) => !value.data.length }); stages.push(peerStage.stage);
+  const peers: PeerComparison[] = await Promise.all((peerStage.data?.data ?? []).slice(0, 5).map(async (peerSymbol) => {
+    const [peerProfile, peerFundamentals] = await Promise.all([financialProviderRouter.profile(peerSymbol).catch(() => null), financialProviderRouter.fundamentals(peerSymbol).catch(() => null)]);
+    return { symbol: peerSymbol, name: peerProfile?.data.name ?? peerSymbol, verified: Boolean(peerFundamentals), metrics: { marketCap: peerFundamentals?.data.marketCap ?? null, trailingPe: peerFundamentals?.data.trailingPe ?? null, priceToBook: peerFundamentals?.data.priceToBook ?? null, returnOnEquity: peerFundamentals?.data.returnOnEquity ?? null, profitMargins: peerFundamentals?.data.profitMargins ?? null }, percentiles: {}, provider: peerFundamentals?.meta.provider ?? peerStage.data!.meta.provider };
+  }));
+  if (peerStage.data) sources.push({ provider: peerStage.data.meta.provider, label: "Verified company peer set", url: null, timestamp: peerStage.data.meta.sourceTimestamp, kind: "FACT" });
   const income = [...statements(annualIncomeStage), ...statements(quarterIncomeStage)]; const balance = [...statements(annualBalanceStage), ...statements(quarterBalanceStage)]; const cashFlow = [...statements(annualCashStage), ...statements(quarterCashStage)];
   const historical = buildHistoricalPeriods({ income, balance, cashFlow });
   const annualHistory = historical.filter((row) => row.period === "annual");
@@ -138,7 +144,7 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   ];
   const report: CompanyIntelligenceReport = {
     symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: true, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap: quote.data.marketCap, marketState: quote.data.marketState,
-    verdict: decision.verdict, assessment: decision.assessment, overallScore: scored.score, confidence: scored.confidence, dataQuality, historical, earningsQuality, quality, moat, management, peers: [], valuation, horizons, dailyOutlook, seasonality, operationalCalendar, risks, macro: macroNews.macro,
+    verdict: decision.verdict, assessment: decision.assessment, overallScore: scored.score, confidence: scored.confidence, dataQuality, historical, earningsQuality, quality, moat, management, peers, valuation, horizons, dailyOutlook, seasonality, operationalCalendar, risks, macro: macroNews.macro,
     thesis: { verdict: decision.verdict.replaceAll("_", " "), whyItMayWork: [...quality.growth.positives, ...quality.profitability.positives, ...macroNews.catalysts.filter((item) => item.direction === "POSITIVE").slice(0, 3).map((item) => item.title)], whyItMayFail: [...risks.redFlags.slice(0, 5).map((item) => item.evidence), ...risks.items.slice(0, 3).map((item) => item.description)], monitor: [...risks.items.flatMap((item) => item.indicators).slice(0, 5), ...macroNews.catalysts.slice(0, 3).map((item) => item.title)] },
     sources, limitations, pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: valuation?.modelVersion ?? "company-valuation-v1.0.0", signalVersion: technicalStage.data?.analysis.modelVersion ?? TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, providerVersions: providerVersions(sources), dataTimestamp, calculatedAt: new Date().toISOString(),
   };

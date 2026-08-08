@@ -515,3 +515,33 @@ export const timeHorizonAssessments = pgTable("time_horizon_assessments", { ...c
 export const dailyOutlooks = pgTable("daily_outlooks", companyResultColumns(), (table) => [index("daily_outlook_time_idx").on(table.instrumentId, table.calculatedAt)]);
 export const operationalCalendarSnapshots = pgTable("operational_calendar_snapshots", companyResultColumns(), (table) => [index("operational_calendar_time_idx").on(table.instrumentId, table.calculatedAt)]);
 export const companyAnalysisReports = pgTable("company_analysis_reports", { ...companyResultColumns(), userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }) }, (table) => [index("company_report_time_idx").on(table.instrumentId, table.calculatedAt), index("company_report_user_time_idx").on(table.userId, table.calculatedAt)]);
+
+export const aiConversations = pgTable("ai_conversations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  symbol: varchar("symbol", { length: 64 }),
+  market: varchar("market", { length: 80 }),
+  assetType: varchar("asset_type", { length: 32 }),
+  ...createdUpdated(),
+}, (table) => [index("ai_conversation_user_updated_idx").on(table.userId, table.updatedAt)]);
+
+export const aiMessages = pgTable("ai_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  conversationId: uuid("conversation_id").references(() => aiConversations.id, { onDelete: "cascade" }).notNull(),
+  role: varchar("role", { length: 16 }).notNull(),
+  content: text("content").notNull(),
+  sources: jsonb("sources").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("ai_message_conversation_time_idx").on(table.conversationId, table.createdAt)]);
+
+export const aiToolCalls = pgTable("ai_tool_calls", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  conversationId: uuid("conversation_id").references(() => aiConversations.id, { onDelete: "cascade" }).notNull(),
+  toolName: varchar("tool_name", { length: 100 }).notNull(),
+  status: varchar("status", { length: 24 }).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("ai_tool_call_conversation_time_idx").on(table.conversationId, table.createdAt)]);

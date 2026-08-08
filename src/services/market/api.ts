@@ -14,18 +14,13 @@ export function providerApiSuccess<T>(result: ProviderResult<T>, context: Reques
       fetchedAt: result.meta.fetchedAt,
       sourceTimestamp: result.meta.sourceTimestamp,
       freshness: result.meta.freshness,
+      freshnessType: result.meta.freshnessType,
+      delaySeconds: result.meta.delaySeconds,
       quality: result.meta.quality,
       fallback: result.meta.isFallback,
       stale: result.meta.freshness === "stale",
       delayed: result.meta.freshness === "delayed",
     },
-  });
-}
-
-export function mockApiSuccess<T>(data: T, context: RequestContext, message: string) {
-  return jsonSuccess(data, context, {
-    headers: { "Cache-Control": "private, no-store" },
-    meta: { provider: "mock", source: "mock", fetchedAt: new Date().toISOString(), sourceTimestamp: null, freshness: "fallback", quality: "unavailable", fallback: true, stale: false, delayed: true, message },
   });
 }
 

@@ -13,6 +13,10 @@ export interface MarketCalendarEvent {
   actual: number | null;
   previous: number | null;
   unit: string | null;
+  timezone: string;
+  company: string | null;
+  currency: string | null;
+  sourceTimestamp: string | null;
   details: Record<string, string | number | null>;
 }
 

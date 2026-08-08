@@ -8,6 +8,8 @@ import { booleanValue, fmpGet, numberValue, stringValue } from "../fmp/client";
 import { providerResult } from "../metadata";
 import type {
   AnalystConsensus,
+  AnalystEstimate,
+  AnalystRating,
   DividendEvent,
   EconomicEvent,
   EarningsEvent,
@@ -102,7 +104,6 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
   }
 
   async getStatements(symbolInput: string, kind: StatementKind, period: StatementPeriod, limit = 5) {
-    if (!getServerEnvironment().FMP_STATEMENTS_ENABLED) throw new ProviderError(this.name, "PLAN_RESTRICTED", "Bilanci FMP disabilitati perché non inclusi nel piano verificato.", false, 501);
     const symbol = normalizeSymbol(symbolInput);
     const rows = await fmpGet(statementEndpoint(kind), { symbol, period, limit: Math.min(20, Math.max(1, limit)) }, `statement:${kind}`);
     const data = rows.flatMap((row): FinancialStatement[] => {
@@ -122,7 +123,6 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
   }
 
   async getRatios(symbolInput: string, period: StatementPeriod, limit = 5) {
-    if (!getServerEnvironment().FMP_HISTORICAL_RATIOS_ENABLED) throw new ProviderError(this.name, "PLAN_RESTRICTED", "Ratio storici FMP disabilitati perché non inclusi nel piano verificato.", false, 501);
     const symbol = normalizeSymbol(symbolInput);
     const rows = await fmpGet("ratios", { symbol, period, limit: Math.min(20, Math.max(1, limit)) }, "ratios");
     const data: FundamentalRatios[] = rows.map((row) => ({
@@ -148,6 +148,39 @@ export class FmpFundamentalsAdapter implements FundamentalsProvider {
       asOf: stringValue(row, "lastUpdated", "date"),
     };
     return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "cached", quality: data.targetConsensus === null ? "partial" : "verified" });
+  }
+
+  async getAnalystEstimates(symbolInput: string, limit = 8) {
+    const symbol = normalizeSymbol(symbolInput);
+    const rows = await fmpGet("analyst-estimates", { symbol, period: "annual", limit: Math.min(20, Math.max(1, limit)) }, "analyst-estimates");
+    const data: AnalystEstimate[] = rows.map((row) => ({ symbol, date: stringValue(row, "date"), period: stringValue(row, "period"), estimatedRevenueAverage: numberValue(row, "estimatedRevenueAvg", "estimatedRevenueAverage"), estimatedEpsAverage: numberValue(row, "estimatedEpsAvg", "estimatedEpsAverage"), analystCount: numberValue(row, "numberAnalystsEstimatedRevenue", "numberAnalystEstimatedEps") }));
+    return providerResult(this.name, data, { sourceTimestamp: data[0]?.date ?? null, freshness: "cached", quality: data.length ? "verified" : "partial" });
+  }
+
+  async getAnalystRatings(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput);
+    const row = (await fmpGet("grades-consensus", { symbol }, "analyst-ratings"))[0] ?? {};
+    const data: AnalystRating = { symbol, strongBuy: numberValue(row, "strongBuy"), buy: numberValue(row, "buy"), hold: numberValue(row, "hold"), sell: numberValue(row, "sell"), strongSell: numberValue(row, "strongSell"), consensus: stringValue(row, "consensus") };
+    return providerResult(this.name, data, { freshness: "cached", quality: data.consensus || Object.values(data).some((value) => typeof value === "number") ? "verified" : "partial" });
+  }
+
+  async getGrowth(symbolInput: string, period: StatementPeriod = "annual", limit = 10) {
+    const symbol = normalizeSymbol(symbolInput);
+    const rows = await fmpGet("financial-growth", { symbol, period, limit: Math.min(20, Math.max(1, limit)) }, "financial-growth");
+    const data = rows.map((row) => ({ symbol, date: stringValue(row, "date"), period: stringValue(row, "period") ?? period, values: numericValues(row) }));
+    return providerResult(this.name, data, { sourceTimestamp: data[0]?.date ?? null, freshness: "cached", quality: data.length ? "verified" : "partial" });
+  }
+
+  async getPeers(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput);
+    const rows = await fmpGet("stock-peers", { symbol }, "stock-peers");
+    const peers = rows.flatMap((row) => {
+      const values = row.peersList ?? row.peers ?? row.symbols;
+      if (Array.isArray(values)) return values.filter((value): value is string => typeof value === "string").map((value) => value.toUpperCase());
+      const peer = stringValue(row, "symbol"); return peer && peer !== symbol ? [peer] : [];
+    });
+    const data = [...new Set(peers)].filter((peer) => peer !== symbol).slice(0, 10);
+    return providerResult(this.name, data, { freshness: "cached", quality: data.length ? "verified" : "partial" });
   }
 
   async getEarningsCalendar(from: string, to: string, symbolInput?: string) {

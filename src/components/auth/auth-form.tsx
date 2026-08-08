@@ -1,4 +1,5 @@
 "use client";
+
 import Link from "next/link";
 import { ArrowRight, Eye, EyeOff, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -6,7 +7,59 @@ import { useState } from "react";
 import type { BrandIdentity } from "@/types";
 
 export function AuthForm({ mode, brand }: { mode: "login" | "register"; brand: BrandIdentity }) {
-  const router=useRouter(); const [show,setShow]=useState(false); const [error,setError]=useState(""); const [loading,setLoading]=useState(false);
-  const submit=async(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();setLoading(true);setError("");const form=new FormData(event.currentTarget);const password=String(form.get("password")||"");if(password.length<12){setError("Use at least 12 characters.");setLoading(false);return}const name=mode==="register"?`${String(form.get("first")||"")} ${String(form.get("last")||"")}`.trim():undefined;try{const response=await fetch(`/api/auth/${mode}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:String(form.get("email")||""),password,name})});const body=await response.json() as {error?:{message?:string}};if(!response.ok)throw new Error(body.error?.message??"Authentication unavailable");router.replace("/dashboard");router.refresh()}catch(requestError){setError(requestError instanceof Error?requestError.message:"Authentication unavailable")}finally{setLoading(false)}};
-  return <main className="auth-shell"><section className="auth-story"><Link href="/" className="brand"><span className="brand-mark"><span/></span><span className="brand-name"><strong>{brand.name}</strong><small>{brand.tagline}</small></span></Link><div className="auth-copy"><span className="page-kicker">A clearer market ritual</span><h1>See the signal.<br/><em>Skip the noise.</em></h1><p>Kairo brings price action, fundamentals, events and narrative into one calm, intentional workspace.</p><div className="auth-quote"><Sparkles size={18}/><span>Private account data is stored only when PostgreSQL and secure authentication are configured.</span></div></div><span className="auth-foot">Market intelligence, designed in Milan · 2026</span></section><section className="auth-form-side"><form onSubmit={submit} className="auth-form"><Link href="/" className="brand auth-mobile-brand"><span className="brand-mark"><span/></span><span className="brand-name"><strong>{brand.name}</strong><small>{brand.tagline}</small></span></Link><span className="page-kicker">{mode==="login"?"Welcome back":"New workspace"}</span><h2>{mode==="login"?"Enter Kairo.":"Create your account."}</h2><p className="muted">{mode==="login"?"Use your private workspace credentials.":"Create a private, database-backed workspace."}</p>{mode==="register"&&<div className="mt-7 grid-2"><label>First name<input name="first" required placeholder="Sam"/></label><label>Last name<input name="last" required placeholder="Morgan"/></label></div>}<label className="mt-6 block">Email<input name="email" type="email" autoComplete="email" required placeholder="sam@example.test"/></label><label className="mt-5 block">Password<span className="password-field"><input name="password" type={show?"text":"password"} autoComplete={mode==="login"?"current-password":"new-password"} minLength={12} required/><button type="button" onClick={()=>setShow(!show)} aria-label="Show password">{show?<EyeOff/>:<Eye/>}</button></span></label>{error&&<p role="alert" className="negative mt-4">{error}</p>}<button disabled={loading} className="button-primary mt-7 w-full">{loading?"Please wait…":mode==="login"?"Enter workspace":"Create account"}<ArrowRight size={17}/></button><p className="mt-6 text-center muted">{mode==="login"?"New to Kairo? ":"Already have an account? "}<Link className="font-bold text-indigo-600" href={mode==="login"?"/register":"/login"}>{mode==="login"?"Create account":"Sign in"}</Link></p></form></section></main>;
+  const router = useRouter();
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") || "");
+    if (password.length < 12) {
+      setError("Use at least 12 characters.");
+      setLoading(false);
+      return;
+    }
+    const name = mode === "register" ? `${String(form.get("first") || "")} ${String(form.get("last") || "")}`.trim() : undefined;
+    try {
+      const response = await fetch(`/api/auth/${mode}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: String(form.get("email") || ""), password, name }),
+      });
+      const body = await response.json() as { error?: { message?: string } };
+      if (!response.ok) throw new Error(body.error?.message ?? "Authentication unavailable");
+      router.replace("/dashboard");
+      router.refresh();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Authentication unavailable");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return <main className="auth-shell">
+    <section className="auth-story">
+      <Link href="/" className="brand"><span className="brand-mark"><span/></span><span className="brand-name"><strong>{brand.name}</strong><small>{brand.tagline}</small></span></Link>
+      <div className="auth-copy"><span className="page-kicker">A clearer market ritual</span><h1>See the signal.<br/><em>Skip the noise.</em></h1><p>Kairo brings price action, fundamentals, events and narrative into one calm, intentional workspace.</p><div className="auth-quote"><Sparkles size={18}/><span>Private account data is stored only when PostgreSQL and secure authentication are configured.</span></div></div>
+      <span className="auth-foot">Market intelligence, designed in Milan · {new Date().getFullYear()}</span>
+    </section>
+    <section className="auth-form-side">
+      <form onSubmit={submit} className="auth-form">
+        <Link href="/" className="brand auth-mobile-brand"><span className="brand-mark"><span/></span><span className="brand-name"><strong>{brand.name}</strong><small>{brand.tagline}</small></span></Link>
+        <span className="page-kicker">{mode === "login" ? "Welcome back" : "New workspace"}</span>
+        <h2>{mode === "login" ? "Enter Kairo." : "Create your account."}</h2>
+        <p className="muted">{mode === "login" ? "Use your private workspace credentials." : "Create a private, database-backed workspace."}</p>
+        {mode === "register" && <div className="mt-7 grid-2"><label>First name<input name="first" required placeholder="Sam"/></label><label>Last name<input name="last" required placeholder="Morgan"/></label></div>}
+        <label className="mt-6 block">Email<input name="email" type="email" autoComplete="email" required placeholder="sam@example.test"/></label>
+        <label className="mt-5 block">Password<span className="password-field"><input name="password" type={show ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={12} required/><button type="button" onClick={() => setShow(!show)} aria-label="Show password">{show ? <EyeOff/> : <Eye/>}</button></span></label>
+        {error && <p role="alert" className="negative mt-4">{error}</p>}
+        <button disabled={loading} className="button-primary mt-7 w-full">{loading ? "Please wait…" : mode === "login" ? "Enter workspace" : "Create account"}<ArrowRight size={17}/></button>
+        <p className="mt-6 text-center muted">{mode === "login" ? "New to Kairo? " : "Already have an account? "}<Link className="font-bold text-indigo-600" href={mode === "login" ? "/register" : "/login"}>{mode === "login" ? "Create account" : "Sign in"}</Link></p>
+      </form>
+    </section>
+  </main>;
 }

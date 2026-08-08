@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { instrumentPath } from "@/lib";
 import { useMarketSearch } from "@/lib/use-market-search";
 import type { SearchInstrument, ShellData } from "@/types";
+import { useKairoChat } from "@/components/ai/kairo-chat-provider";
 
 const railItems = [
   ["/dashboard", "Control room", LayoutDashboard], ["/search", "Discover", Search],
@@ -20,6 +21,7 @@ const railItems = [
 ] as const;
 
 export function AppShell({ children, data }: { children: React.ReactNode; data: ShellData }) {
+  const { openKairo } = useKairoChat();
   const pathname = usePathname();
   const [searchOpen, setSearchOpen] = useState(false);
   const [launcherOpen, setLauncherOpen] = useState(false);
@@ -58,6 +60,11 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     ["/settings", "Profile", UserRound],
   ] as const;
   const currentArea = pathname.startsWith("/instrument") ? "Equity workspace" : railItems.find(([href]) => pathname === href)?.[1] ?? "Market workspace";
+  const currentDate = useMemo(() => {
+    const parts = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long", timeZone: "Europe/Rome" }).formatToParts(new Date());
+    const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+    return `${value("weekday")} · ${value("day")} ${value("month")}`;
+  }, []);
 
   return (
     <div className={`app-frame ${railCollapsed ? "is-collapsed" : ""}`}>
@@ -73,17 +80,17 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
         <div className="rail-section-label">Workspace</div>
         <nav className="rail-nav">{railItems.map(([href, label, Icon]) => <Link key={href} href={href} onClick={() => setMobileRail(false)} className={`rail-link ${pathname === href ? "active" : ""}`}><Icon size={20}/><span>{label}</span></Link>)}</nav>
         <div className="rail-divider"/>
-        <Link className="lens-card" href={instrumentPath(data.primaryInstrument, "news")}>
+        <button className="lens-card" onClick={() => openKairo("Genera il Daily Market Narrative di oggi con regime, indici, mover, earnings, macro, news, rischi geopolitici e rilevanza per la watchlist.")}>
           <span className="lens-icon"><Sparkles size={18}/></span>
           <span><strong>Kairo Lens</strong><small>Daily market narrative</small></span>
-        </Link>
+        </button>
         <div className="market-status"><span className="status-dot"/><span><strong>{data.marketStatus}</strong><small>{data.marketClosesIn}</small></span></div>
       </aside>
 
       <div className="app-workspace">
         <header className="app-header">
           <button className="mobile-menu-button" aria-label="Open navigation" onClick={() => setMobileRail(true)}><Menu size={21}/></button>
-          <div className="workspace-context"><small>Thursday · 06 August</small><strong>{currentArea}</strong></div>
+          <div className="workspace-context"><small>{currentDate}</small><strong>{currentArea}</strong></div>
           <button className="search-trigger" onClick={() => { setSearchOpen(true); setLauncherOpen(false); }} aria-expanded={searchOpen}>
             <Search size={19}/><span>Search markets</span><kbd><Command size={12}/>K</kbd>
           </button>
@@ -120,7 +127,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
           {launcherItems.map(([href, label, Icon]) => <Link key={href + label} href={href} onClick={() => setLauncherOpen(false)}><Icon size={22}/><span>{label}</span></Link>)}
         </nav>
       </>}
-      <button className="chat" aria-label="Open Kairo assistant" onClick={() => alert("Kairo Lens remains a demo assistant; market prices are loaded through the server-side provider.")}><MessageCircle size={22}/><span>Ask Kairo</span></button>
+      <button className="chat" aria-label="Open Kairo assistant" onClick={() => openKairo()}><MessageCircle size={22}/><span>Ask Kairo</span></button>
     </div>
   );
 }

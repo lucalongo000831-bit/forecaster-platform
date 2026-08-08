@@ -36,10 +36,12 @@ const serverEnvironmentSchema = z.object({
   ALPHA_VANTAGE_API_KEY: optionalSecret,
   ALPHA_VANTAGE_BASE_URL: trustedProviderUrl("https://www.alphavantage.co", ["https:"], ["www.alphavantage.co"]),
   MASSIVE_API_KEY: optionalSecret,
+  POLYGON_API_KEY: optionalSecret,
   MASSIVE_BASE_URL: trustedProviderUrl("https://api.massive.com", ["https:"], ["api.massive.com"]),
   MASSIVE_WEBSOCKET_URL: trustedProviderUrl("wss://socket.massive.com", ["wss:"], ["socket.massive.com"]),
   OPENAI_API_KEY: optionalSecret,
   OPENAI_MODEL: optionalString,
+  ENABLE_KAIRO_AI: booleanFlag,
   UPSTASH_REDIS_REST_URL: optionalUrl,
   UPSTASH_REDIS_REST_TOKEN: optionalSecret,
   CRON_SECRET: optionalSecret,
@@ -54,7 +56,7 @@ const serverEnvironmentSchema = z.object({
   FMP_STATEMENTS_ENABLED: booleanFlag,
   FMP_HISTORICAL_RATIOS_ENABLED: booleanFlag,
   ENABLE_AI_NEWS_ANALYSIS: booleanFlag,
-  ENABLE_MOCK_FALLBACK: booleanFlag,
+  ENABLE_DEMO_DATA: booleanFlag,
   ENABLE_BACKTEST_API: booleanFlag,
 });
 
@@ -87,7 +89,7 @@ export function getEnvironmentStatus(source: NodeJS.ProcessEnv = process.env) {
     redisConfigured: Boolean(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN),
     fmpConfigured: Boolean(env.FMP_API_KEY),
     alphaVantageConfigured: Boolean(env.ALPHA_VANTAGE_API_KEY),
-    massiveConfigured: Boolean(env.MASSIVE_API_KEY),
+    massiveConfigured: Boolean(env.MASSIVE_API_KEY ?? env.POLYGON_API_KEY),
     cronConfigured: Boolean(env.CRON_SECRET),
     internalApiConfigured: Boolean(env.INTERNAL_API_SECRET),
   };

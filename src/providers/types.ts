@@ -9,6 +9,7 @@ import type {
 
 export type ProviderName = "yahoo" | "fmp" | "alpha-vantage" | "massive";
 export type DataFreshness = "realtime" | "delayed" | "cached" | "stale";
+export type FreshnessType = "REALTIME" | "NEAR_REALTIME" | "DELAYED" | "CACHED" | "END_OF_DAY" | "STALE" | "UNAVAILABLE";
 export type DataQuality = "verified" | "partial" | "estimated" | "unavailable";
 
 export interface ProviderMetadata {
@@ -16,6 +17,8 @@ export interface ProviderMetadata {
   fetchedAt: string;
   sourceTimestamp: string | null;
   freshness: DataFreshness;
+  freshnessType: FreshnessType;
+  delaySeconds: number | null;
   quality: DataQuality;
   isFallback: boolean;
 }
@@ -56,6 +59,25 @@ export interface AnalystConsensus {
   asOf: string | null;
 }
 
+export interface AnalystEstimate {
+  symbol: string;
+  date: string | null;
+  period: string | null;
+  estimatedRevenueAverage: number | null;
+  estimatedEpsAverage: number | null;
+  analystCount: number | null;
+}
+
+export interface AnalystRating {
+  symbol: string;
+  strongBuy: number | null;
+  buy: number | null;
+  hold: number | null;
+  sell: number | null;
+  strongSell: number | null;
+  consensus: string | null;
+}
+
 export interface EarningsEvent {
   symbol: string;
   date: string;
@@ -90,6 +112,29 @@ export interface EconomicEvent {
   actual: number | null;
   impact: string | null;
   unit: string | null;
+}
+
+export interface PoliticalDisclosure {
+  id: string;
+  politician: string;
+  chamber: "SENATE" | "HOUSE";
+  symbol: string | null;
+  asset: string;
+  transactionType: "PURCHASE" | "SALE" | "EXCHANGE" | "OTHER";
+  transactionDate: string;
+  disclosureDate: string | null;
+  amountRange: string | null;
+  ownership: string | null;
+  capitalGains: number | null;
+  sourceUrl: string | null;
+}
+
+export interface MacroObservation {
+  indicator: "INFLATION" | "RATES" | "GDP" | "EMPLOYMENT";
+  date: string;
+  value: number | null;
+  unit: string | null;
+  country: string | null;
 }
 
 export interface ProviderNewsItem extends MarketNewsDto {
@@ -143,6 +188,19 @@ export interface NewsProvider {
   isConfigured(): boolean;
   getTickerNews(symbol: string, limit?: number): Promise<ProviderResult<ProviderNewsItem[]>>;
   getTopicNews(topics: string[], limit?: number): Promise<ProviderResult<ProviderNewsItem[]>>;
+}
+
+export interface PoliticalProvider {
+  readonly name: ProviderName;
+  isConfigured(): boolean;
+  getSenateTrades(symbol?: string, limit?: number): Promise<ProviderResult<PoliticalDisclosure[]>>;
+  getHouseTrades(symbol?: string, limit?: number): Promise<ProviderResult<PoliticalDisclosure[]>>;
+}
+
+export interface MacroProvider {
+  readonly name: ProviderName;
+  isConfigured(): boolean;
+  getIndicator(indicator: MacroObservation["indicator"]): Promise<ProviderResult<MacroObservation[]>>;
 }
 
 export interface ProviderCapability {

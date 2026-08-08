@@ -27,6 +27,13 @@ export interface QuoteSnapshot {
   asOf?: string;
   isDelayed?: boolean;
   source?: DataSource;
+  provider?: string;
+  sourceTimestamp?: string | null;
+  fetchedAt?: string;
+  freshnessType?: "REALTIME" | "NEAR_REALTIME" | "DELAYED" | "CACHED" | "END_OF_DAY" | "STALE" | "UNAVAILABLE";
+  delaySeconds?: number | null;
+  bid?: number | null;
+  ask?: number | null;
 }
 
 export interface InstrumentProfile extends InstrumentRef {
@@ -91,16 +98,21 @@ export interface InsiderTransaction {
 }
 
 export interface PoliticalTrade {
-  id: number;
+  id: number | string;
   name: string;
   role: string;
-  party: "Civic" | "Union";
+  party?: string;
   region: string;
-  type: "BUY" | "SELL";
+  type: "BUY" | "SELL" | "EXCHANGE" | "OTHER";
   published: string;
   traded: string;
   amount: string;
   amountLevel: number;
+  asset?: string;
+  ownership?: string | null;
+  disclosureDelayDays?: number | null;
+  capitalGains?: number | null;
+  sourceUrl?: string | null;
 }
 
 export interface NewsArticle {
@@ -174,11 +186,11 @@ export interface DashboardData {
   watchlist: WatchlistEntry[];
   spotlight: InstrumentProfile;
   spotlightSeries: TimePoint[];
-  portfolioValue: number;
-  monthlyPortfolioChange: number;
+  portfolioValue: number | null;
+  monthlyPortfolioChange: number | null;
   signalSummary: string;
-  constructivePercent: number;
-  upcomingEvents: number;
+  constructivePercent: number | null;
+  upcomingEvents: number | null;
   briefTitle: string;
   briefBody: string;
   source?: DataSource;
@@ -321,6 +333,7 @@ export interface PoliticalData {
   chartSeries: TimePoint[];
   trades: PoliticalTrade[];
   source?: DataSource;
+  fetchedAt?: string;
 }
 
 export interface NewsData {

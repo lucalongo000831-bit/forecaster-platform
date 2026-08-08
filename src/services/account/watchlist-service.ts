@@ -21,8 +21,8 @@ export async function listWatchlists(userId: string): Promise<AccountWatchlist[]
   if (!lists.length) return [];
   const rows = await database.select({ id: watchlistItems.id, watchlistId: watchlistItems.watchlistId, instrumentId: watchlistItems.instrumentId, position: watchlistItems.position, notes: watchlistItems.notes, symbol: instruments.canonicalSymbol, name: instruments.name, type: instruments.type, currency: instruments.currency, market: instruments.market }).from(watchlistItems).innerJoin(instruments, eq(watchlistItems.instrumentId, instruments.id)).where(inArray(watchlistItems.watchlistId, lists.map((list) => list.id))).orderBy(asc(watchlistItems.position));
   const symbols = [...new Set(rows.map((row) => row.symbol))];
-  const quotes = symbols.length ? await financialProviderRouter.quotes(symbols).then((result) => result.data).catch(() => []) : [];
-  const quoteMap = new Map(quotes.map((quote) => [quote.symbol, quote]));
+  const quoteResult = symbols.length ? await financialProviderRouter.quotes(symbols).catch(() => null) : null;
+  const quoteMap = new Map((quoteResult?.data ?? []).map((quote) => [quote.symbol, quote]));
   const [futureEvents, activeAlertRows] = symbols.length ? await Promise.all([
     database.select({ symbol: calendarEvents.symbol, title: calendarEvents.title, startsAt: calendarEvents.startsAt }).from(calendarEvents).where(and(inArray(calendarEvents.symbol, symbols), gte(calendarEvents.startsAt, new Date()))).orderBy(asc(calendarEvents.startsAt)),
     database.select({ instrumentId: alerts.instrumentId }).from(alerts).where(and(eq(alerts.userId, userId), eq(alerts.status, "ACTIVE"), inArray(alerts.instrumentId, rows.map((row) => row.instrumentId)))),
@@ -35,7 +35,7 @@ export async function listWatchlists(userId: string): Promise<AccountWatchlist[]
     const [signal, target] = await Promise.all([getSignalAnalysis(symbol, "1m").catch(() => null), getTargetAnalysis(symbol, "12m").catch(() => null)]);
     analyses.set(symbol, { signal: signal?.analysis.category ?? null, confidence: signal?.analysis.confidence ?? null, target: target?.analysis.compositeTarget ?? null });
   }));
-  return lists.map((list) => ({ id: list.id, name: list.name, description: list.description, items: rows.filter((row) => row.watchlistId === list.id).map((row) => { const quote = quoteMap.get(row.symbol); const analysis = analyses.get(row.symbol); return { id: row.id, symbol: row.symbol, name: row.name, type: row.type, currency: row.currency, market: row.market, position: row.position, notes: row.notes, price: quote?.price ?? null, changePercent: quote?.changePercent ?? null, signal: analysis?.signal ?? null, confidence: analysis?.confidence ?? null, target: analysis?.target ?? null, nextEvent: nextEvent.get(row.symbol) ?? null, activeAlerts: alertCounts.get(row.instrumentId) ?? 0 }; }) }));
+  return lists.map((list) => ({ id: list.id, name: list.name, description: list.description, items: rows.filter((row) => row.watchlistId === list.id).map((row) => { const quote = quoteMap.get(row.symbol); const analysis = analyses.get(row.symbol); return { id: row.id, symbol: row.symbol, name: row.name, type: row.type, currency: row.currency, market: row.market, position: row.position, notes: row.notes, price: quote?.price ?? null, changePercent: quote?.changePercent ?? null, volume: quote?.volume ?? null, marketState: quote?.marketState ?? null, lastUpdated: quote?.asOf ?? quoteResult?.meta.sourceTimestamp ?? null, provider: quote ? quoteResult?.meta.provider ?? null : null, signal: analysis?.signal ?? null, confidence: analysis?.confidence ?? null, target: analysis?.target ?? null, nextEvent: nextEvent.get(row.symbol) ?? null, activeAlerts: alertCounts.get(row.instrumentId) ?? 0 }; }) }));
 }
 
 export async function createWatchlist(userId: string, input: { name: string; description?: string | null }) {

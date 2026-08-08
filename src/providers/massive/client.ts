@@ -14,11 +14,12 @@ export const massiveResponseSchema = z.object({
 
 export async function massiveGet(path: string, params: Record<string, string | number | boolean | undefined>, operation: string) {
   const env = getServerEnvironment();
-  if (!env.MASSIVE_API_KEY) throw new ProviderError("massive", "NOT_CONFIGURED", "Massive non configurato.", false, 503);
-  await enforceRateLimit("global", { scope: "provider:massive", limit: 4, windowSeconds: 60 });
+  const apiKey = env.MASSIVE_API_KEY ?? env.POLYGON_API_KEY;
+  if (!apiKey) throw new ProviderError("massive", "NOT_CONFIGURED", "Massive non configurato.", false, 503);
+  await enforceRateLimit("global", { scope: "provider:massive", limit: 120, windowSeconds: 60 });
   const url = new URL(path, env.MASSIVE_BASE_URL);
   for (const [key, value] of Object.entries(params)) if (value !== undefined) url.searchParams.set(key, String(value));
-  const data = await providerRequest({ provider: "massive", operation, url, schema: massiveResponseSchema, headers: { Authorization: `Bearer ${env.MASSIVE_API_KEY}` }, timeoutMs: 14_000, retries: 1 });
+  const data = await providerRequest({ provider: "massive", operation, url, schema: massiveResponseSchema, headers: { Authorization: `Bearer ${apiKey}` }, timeoutMs: 14_000, retries: 1 });
   if (data.error || data.status === "ERROR" || data.status === "NOT_AUTHORIZED") {
     const message = data.error ?? data.message ?? "";
     const restricted = /plan|subscription|not entitled|permission|upgrade|forbidden/i.test(message);
