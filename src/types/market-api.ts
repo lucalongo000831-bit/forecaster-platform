@@ -18,6 +18,8 @@ export interface MarketQuoteDto {
   dayHigh: number | null;
   volume: number | null;
   marketCap: number | null;
+  bid?: number | null;
+  ask?: number | null;
   marketState: string;
   asOf: string | null;
   isDelayed: boolean;
@@ -94,6 +96,11 @@ export interface ApiMeta {
   source: DataSource;
   stale: boolean;
   fallback: boolean;
+  provider?: string;
+  fetchedAt?: string;
+  sourceTimestamp?: string | null;
+  freshnessType?: "REALTIME" | "NEAR_REALTIME" | "DELAYED" | "CACHED" | "END_OF_DAY" | "STALE" | "UNAVAILABLE";
+  delaySeconds?: number | null;
   message?: string;
 }
 

@@ -1,6 +1,6 @@
 import type { FinancialDataProvider } from "./financial-data-provider";
 import { YahooFinanceProvider } from "./yahoo-finance-provider";
 
-// Single provider selection point. Yahoo is server-only and every method owns a
-// clearly identified mock/unavailable fallback so presentation components stay stable.
+// Stable presentation facade. All upstream selection happens in the central
+// server-only router; unavailable data stays unavailable and is never fabricated.
 export const financialDataService: FinancialDataProvider = new YahooFinanceProvider();

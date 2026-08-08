@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { FinancialDataProvider } from "./financial-data-provider";
-import { MockFinancialDataProvider } from "./mock-financial-data-provider";
+import { brandIdentity } from "@/config/brand";
 import { financialProviderRouter } from "@/providers";
 import { analyticalClose, annualPerformance, drawdowns, periodReturns, relativeStrengthIndex, simpleMovingAverage, toTimeSeries } from "./yahoo/analytics";
 import { instrumentHref, marketSlug, normalizeSymbol } from "./yahoo/symbol-resolver";
@@ -52,18 +52,17 @@ function quoteType(type: string): SearchInstrument["type"] {
 }
 
 export class YahooFinanceProvider implements FinancialDataProvider {
-  private readonly mock = new MockFinancialDataProvider();
-
-  private async fallback<T>(operation: string, symbol: string | undefined, real: () => Promise<T>, demo: () => Promise<T>): Promise<T> {
+  private async fallback<T>(operation: string, symbol: string | undefined, real: () => Promise<T>, unavailable?: () => Promise<T>): Promise<T> {
     try { return await real(); }
     catch (error) {
       if (!canFallback(error)) throw error;
       safeServerLog(`${operation}:fallback`, symbol, error);
-      return demo();
+      if (unavailable) return unavailable();
+      throw error;
     }
   }
 
-  getBrand() { return this.mock.getBrand(); }
+  async getBrand() { return brandIdentity; }
 
   async getShellData() {
     const brand = await this.getBrand();
@@ -79,7 +78,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         marketClosesIn: primary.isDelayed ? "Quotations may be delayed" : `Updated ${primary.asOf ? new Date(primary.asOf).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "recently"}`,
         source: quotesResult.meta.provider,
       };
-    }, async () => ({ ...(await this.mock.getShellData()), source: "mock" as const, marketStatus: "Demo mode", marketClosesIn: "Financial providers unavailable" }));
+    }, async () => ({ brand, primaryInstrument: DEFAULT_REF, searchResults: [], marketStatus: "Market data unavailable", marketClosesIn: "Provider connection will retry", source: "unavailable" as const }));
   }
 
   async getWatchlist(): Promise<WatchlistEntry[]> {
@@ -95,7 +94,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         market: marketSlug(quote.exchange, quote.quoteType),
         source: quote.source,
       }));
-    }, async () => (await this.mock.getWatchlist()).map((item) => ({ ...item, source: "mock" as const })));
+    }, async () => []);
   }
 
   async getSearchUniverse(): Promise<SearchInstrument[]> {
@@ -111,7 +110,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         href: instrumentHref(quote.symbol, quote.exchange, quote.quoteType),
         source: quote.source,
       }));
-    }, async () => (await this.mock.getSearchUniverse()).map((item) => ({ ...item, source: "mock" as const })));
+    }, async () => []);
   }
 
   async getInstrument(ref: InstrumentRef): Promise<InstrumentProfile> {
@@ -147,6 +146,13 @@ export class YahooFinanceProvider implements FinancialDataProvider {
           asOf: quote.asOf ?? undefined,
           isDelayed: quote.isDelayed,
           source: quote.source,
+          provider: quoteResult.meta.provider,
+          sourceTimestamp: quoteResult.meta.sourceTimestamp,
+          fetchedAt: quoteResult.meta.fetchedAt,
+          freshnessType: quoteResult.meta.freshnessType,
+          delaySeconds: quoteResult.meta.delaySeconds,
+          bid: quote.bid,
+          ask: quote.ask,
         },
         earnings: { daysUntil: 0, dateLabel: "Dato non disponibile", consensusEps: 0 },
         description: profile?.description ?? undefined,
@@ -154,9 +160,6 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         quoteType: quote.quoteType,
         source: quoteResult.meta.provider,
       };
-    }, async () => {
-      const demo = await this.mock.getInstrument(ref);
-      return { ...demo, market: ref.market, symbol, name: `${symbol} · modalità demo`, source: "mock", quote: { ...demo.quote, source: "mock", isDelayed: true, marketStatus: "Demo data" }, earnings: { daysUntil: 0, dateLabel: "Dato non disponibile", consensusEps: 0 } };
     });
   }
 
@@ -177,7 +180,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         source: "calculated" as const,
         unavailableSections: ["Dividends history", "Insider transactions"],
       };
-    }, async () => ({ ...(await this.mock.getOverview(ref)), source: "mock" as const }));
+    });
   }
 
   async getSeasonality(ref: InstrumentRef): Promise<SeasonalityData> {
@@ -199,7 +202,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         sampleSize: analysis.observations,
         disclaimer: analysis.disclaimer,
       };
-    }, async () => ({ ...(await this.mock.getSeasonality(ref)), source: "mock" as const }));
+    });
   }
 
   async getPatterns(ref: InstrumentRef): Promise<PatternData> {
@@ -231,7 +234,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         cases: usable,
         source: "calculated",
       };
-    }, async () => { const data = await this.mock.getPatterns(ref); return { ...data, assessment: `DEMO FALLBACK · ${data.assessment}`, source: "mock" as const }; });
+    });
   }
 
   async getMomentum(ref: InstrumentRef): Promise<MomentumData> {
@@ -255,7 +258,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         oscillatorSeries: points.map((point, index) => ({ label: point.timestamp.slice(0, 10), value: (rsi[index] - 50) * 2 })),
         source: "calculated",
       };
-    }, async () => { const data = await this.mock.getMomentum(ref); return { ...data, assessment: `DEMO FALLBACK · ${data.assessment}`, source: "mock" as const }; });
+    });
   }
 
   async getFundamentals(ref: InstrumentRef): Promise<FundamentalsData> {
@@ -324,12 +327,37 @@ export class YahooFinanceProvider implements FinancialDataProvider {
         source: fundamentalsResult.meta.provider,
         unavailableSections: ["Fair-value models", "Solidity scores", "Revenue by product", "Historical transcripts"],
       };
-    }, async () => { const data = await this.mock.getFundamentals(ref); return { ...data, summaryColumns: [[{ label: "Data source", value: "DEMO FALLBACK" }], ...data.summaryColumns], source: "mock" as const }; });
+    });
   }
 
   async getPoliticalActivity(ref: InstrumentRef) {
     const symbol = refSymbol(ref);
-    return this.fallback<PoliticalData>("political", symbol, async () => ({ chartSeries: toTimeSeries((await financialProviderRouter.chart(symbol, "5Y")).data.points), trades: [], source: "unavailable" as const }), async () => ({ chartSeries: [], trades: [], source: "unavailable" as const }));
+    return this.fallback<PoliticalData>("political", symbol, async () => {
+      const [chart, senate, house] = await Promise.all([
+        financialProviderRouter.chart(symbol, "5Y"),
+        financialProviderRouter.senateTrades(symbol).catch(() => null),
+        financialProviderRouter.houseTrades(symbol).catch(() => null),
+      ]);
+      const disclosures = [...(senate?.data ?? []), ...(house?.data ?? [])].sort((a, b) => (b.disclosureDate ?? b.transactionDate).localeCompare(a.disclosureDate ?? a.transactionDate));
+      const markers = new Map<string, { buy: number; sell: number }>();
+      for (const item of disclosures) {
+        const marker = markers.get(item.transactionDate) ?? { buy: 0, sell: 0 };
+        if (item.transactionType === "PURCHASE") marker.buy += 1;
+        if (item.transactionType === "SALE") marker.sell += 1;
+        markers.set(item.transactionDate, marker);
+      }
+      const chartSeries = toTimeSeries(chart.data.points).map((point) => {
+        const marker = markers.get(point.label.slice(0, 10));
+        return { ...point, buy: marker?.buy, sell: marker?.sell };
+      });
+      const delayDays = (transactionDate: string, disclosureDate: string | null) => disclosureDate ? Math.max(0, Math.round((new Date(disclosureDate).getTime() - new Date(transactionDate).getTime()) / 86_400_000)) : null;
+      return {
+        chartSeries,
+        trades: disclosures.map((item) => ({ id: item.id, name: item.politician, role: item.chamber === "SENATE" ? "Senator" : "Representative", party: undefined, region: item.chamber, type: item.transactionType === "PURCHASE" ? "BUY" : item.transactionType === "SALE" ? "SELL" : item.transactionType, published: item.disclosureDate ?? "Dato non disponibile", traded: item.transactionDate, amount: item.amountRange ?? "Dato non disponibile", amountLevel: 1, asset: item.asset, ownership: item.ownership, disclosureDelayDays: delayDays(item.transactionDate, item.disclosureDate), capitalGains: item.capitalGains, sourceUrl: item.sourceUrl })),
+        source: "fmp" as const,
+        fetchedAt: senate?.meta.fetchedAt ?? house?.meta.fetchedAt ?? chart.meta.fetchedAt,
+      };
+    }, async () => ({ chartSeries: [], trades: [], source: "unavailable" as const }));
   }
 
   async getNews(ref: InstrumentRef) {
@@ -350,21 +378,24 @@ export class YahooFinanceProvider implements FinancialDataProvider {
       const [watchlist, spotlight, chart, pulseQuotes] = await Promise.all([
         this.getWatchlist(), this.getInstrument(DEFAULT_REF), financialProviderRouter.chart(DEFAULT_SYMBOL, "1Y"), financialProviderRouter.quotes(["^GSPC", "^NDX", "^TNX", "^VIX"]),
       ]);
-      const demo = await this.mock.getDashboardData();
       return {
-        ...demo,
+        greetingName: "",
         pulse: pulseQuotes.data.map((item) => ({ name: item.name, value: item.price.toLocaleString("en-US", { maximumFractionDigits: 2 }), change: `${item.changePercent >= 0 ? "+" : ""}${item.changePercent.toFixed(2)}%` })),
         watchlist,
         spotlight,
         spotlightSeries: toTimeSeries(chart.data.points),
         briefTitle: "Narrative automatica non disponibile",
-        briefBody: "Prezzi e indicatori provengono dai provider server-side configurati; il brief editoriale resta in modalità demo e non viene presentato come dato reale.",
+        briefBody: "Automated narrative is currently unavailable while Kairo AI is disabled.",
+        portfolioValue: null,
+        monthlyPortfolioChange: null,
+        signalSummary: "Dato non disponibile",
+        constructivePercent: null,
+        upcomingEvents: null,
         source: chart.meta.provider,
-        demoSections: ["Portfolio personale", "Signal summary", "Editorial brief"],
       };
-    }, async () => ({ ...(await this.mock.getDashboardData()), source: "mock" as const, demoSections: ["Entire dashboard"] }));
+    });
   }
 
-  async getCalendarData() { const data = await this.mock.getCalendarData(); return { ...data, selectedEventTitle: "Modalità demo", selectedEventDescription: "Il calendario composito non è ancora collegato alla persistenza; questi eventi sono dimostrativi." }; }
-  async getPortfolioData() { return this.mock.getPortfolioData(); }
+  async getCalendarData() { return { monthLabel: "Dato non disponibile", days: [], selectedEventTitle: "Dato non disponibile", selectedEventDescription: "Use the live market calendar." }; }
+  async getPortfolioData() { return { positions: [], totalReturn: 0, dayChangePercent: 0 }; }
 }

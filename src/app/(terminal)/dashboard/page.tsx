@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/server/auth";
 import { isDatabaseConfigured } from "@/db";
 import { listPortfolios, listWatchlists } from "@/services/account";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
+import { DashboardAutoRefresh } from "@/components/financial/dashboard-auto-refresh";
 
 export default async function DashboardPage(){
   const data = await financialDataService.getDashboardData(); const user = await getCurrentUser().catch(() => null); const today = new Date(); const nextWeek = new Date(today.getTime() + 7 * 86_400_000);
@@ -18,7 +19,7 @@ export default async function DashboardPage(){
   ]);
   const portfolio = privateData?.portfolios[0]; const privateItems = privateData?.lists.flatMap((list) => list.items) ?? []; const directional = privateItems.filter((item) => item.signal && item.signal !== "HOLD"); const constructive = directional.filter((item) => item.signal?.includes("BUY")).length; const constructivePercent = directional.length ? constructive / directional.length * 100 : null;
   const greeting = user?.name?.trim().split(/\s+/)[0];
-  return <div className="container-shell page-stack dashboard-page"><DataSourceNotice source={data.source}/>
+  return <div className="container-shell page-stack dashboard-page"><DashboardAutoRefresh/><DataSourceNotice source={data.source}/>
   <header className="dashboard-heading"><div><span className="page-kicker">Personal intelligence workspace</span><h1 className="page-title">Good afternoon{greeting ? `, ${greeting}` : ""}.</h1><p className="muted mt-3 text-base">Focus on what moved, what matters and what comes next.</p></div><Link className="button-primary" href="/search"><Radar size={17}/>Explore markets</Link></header>
   <section className="market-pulse"><div className="pulse-label"><i/><span>Market pulse</span><small>US session</small></div>{data.pulse.map(({ name, value, change }) => <div className="pulse-item" key={name}><span>{name}</span><strong>{value}</strong><small>{change}</small></div>)}</section>
   <section className="grid-3 metric-grid">{[

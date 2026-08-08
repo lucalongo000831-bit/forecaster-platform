@@ -14,7 +14,8 @@ The product identity and assets are replaceable. The project does not scrape the
 - Multi-provider routing across Yahoo Finance, Financial Modeling Prep, Alpha Vantage and Massive, with typed adapters, timeout, retry, caching and fallback.
 - Protected health endpoints, cron jobs, structured logs, request IDs, rate limiting and data provenance.
 - Buy-side Company Intelligence with historical statement validation, earnings/FCF quality, evidence-based company scoring, moat and management analysis, reverse DCF, bear/base/bull DCF, downside-first risks, horizons through 20 years, operational calendar, PDF/CSV reports and point-in-time decision validation.
-- Ask Kairo, a persistent OpenAI Responses API market-intelligence agent with page-aware context, server-side function calling, progressive streaming, operational tool status, explicit provenance, cancellation and conversation history.
+- Asset-specific Crypto, ETF and Index Intelligence, with technicals, risk, seasonality, attributed sentiment and probabilistic scenarios instead of inapplicable corporate DCF metrics.
+- Ask Kairo code is preserved but parked behind `ENABLE_KAIRO_AI=false`; the financial platform works without an OpenAI key.
 
 ## Technology
 
@@ -62,7 +63,7 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run start` | run the production build |
 | `npm run db:generate` | generate a migration from schema changes |
 | `npm run db:migrate` | apply committed PostgreSQL migrations |
-| `npm run test:providers` | optional live provider smoke test |
+| `npm run test:live-providers` | safe Massive/FMP/Alpha live smoke test; prints only OK/ERROR |
 | `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |
 | `npm run test:openai` | minimal live Responses API authentication check; never prints the key or model output |
 
@@ -75,12 +76,12 @@ Browser / React client components
 Next.js server components + Node.js route handlers
         ├── authentication / ownership / CSRF / rate limits
         ├── financial provider router
-        │     ├── Massive      market data when enabled
-        │     ├── Yahoo        global market fallback
+        │     ├── Massive      primary US/crypto market data
+        │     ├── Yahoo        global and unsupported-symbol fallback
         │     ├── FMP          fundamentals and calendars
         │     └── Alpha        attributed news sentiment
         ├── deterministic quant engines
-        ├── Ask Kairo Responses API agent
+        ├── Ask Kairo Responses API agent (parked by feature flag)
         │     ├── strict internal financial tools only
         │     ├── normalized context and provenance
         │     └── PostgreSQL conversation memory
@@ -102,7 +103,7 @@ Core boundaries:
 
 ## API surface
 
-Public market APIs include `/api/market/{search,quote,quotes,chart,profile,fundamentals,statements,analyst,news,status,events}`, `/api/analysis/{technical,fundamental,seasonality,signal,targets,risk,forecast}`, `/api/intelligence/news`, `/api/calendar` and `/api/backtests`.
+Public market APIs include `/api/market/{search,quote,quotes,chart,profile,fundamentals,statements,analyst,news,status,events,political,macro}`, `/api/analysis/{technical,fundamental,seasonality,signal,targets,risk,forecast}`, `/api/intelligence/news`, `/api/calendar` and `/api/backtests`.
 
 Company Intelligence is available at `/instrument/[market]/[symbol]/analysis` and through `/api/company/resolve`, the section endpoints under `/api/company/[symbol]/**`, report export, refresh, custom DCF and decision backtesting. Public sections share one aggregate abuse budget and one cached report pipeline; costly mutations and production exports use tighter authentication/limit controls.
 
@@ -115,9 +116,11 @@ Private APIs include:
 - `/api/account/notifications`
 - `POST /api/ai/chat` (streamed NDJSON), `GET /api/ai/conversations` and `GET /api/ai/conversations/[id]`
 
-## Ask Kairo setup
+## Ask Kairo status
 
-Never paste the API key into source code or the chat. Configure it locally through hidden terminal input, then select a model through the environment:
+Ask Kairo is disabled by default and does not require `OPENAI_API_KEY`. Its source, conversations and tools remain intact for future reactivation. Never paste a key into source code or chat. See [the reactivation guide](docs/FUTURE_KAIRO_AI.md).
+
+If it is reactivated in a controlled environment, configure the key through hidden terminal input:
 
 ```bash
 ./scripts/configure-openai-key.sh
@@ -140,11 +143,11 @@ All financial and operational route handlers use the Node.js runtime. Symbols ar
 
 Provider results include provider, fetch time, source time, freshness, quality and fallback metadata. Calculated outputs include model version, calculation time, data timestamp, completeness/confidence and limitations.
 
-- `LIVE` / `DELAYED`: provider market observations.
+- `REALTIME`, `NEAR_REALTIME`, `DELAYED`, `CACHED`, `END_OF_DAY`, `STALE` and `UNAVAILABLE` are preserved separately.
 - `CACHED`: a recent server-side provider observation.
 - `ESTIMATE`: externally sourced or model-derived estimate.
 - `MODEL OUTPUT`: deterministic calculation from documented inputs.
-- `DEMO`: explicit mock fallback only when a feature permits it.
+- `DEMO`: test/development fixtures only; production routes do not silently load mock financial values.
 - `UNAVAILABLE`: no verified source or insufficient input; never silently fabricated.
 
 Personal portfolio and watchlist values are never substituted with mock account records. Political disclosures, full call transcripts and verified geopolitical event feeds remain unavailable until an appropriate licensed source is configured.
@@ -179,6 +182,9 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Acceptance tests](docs/ACCEPTANCE_TESTS.md)
 - [Known data limits](docs/DATA_LIMITATIONS.md) and [Yahoo limits](YAHOO_DATA_LIMITATIONS.md)
 - [Ask Kairo architecture, tools and operating limits](docs/KAIRO_AI.md)
+- [Future Ask Kairo reactivation](docs/FUTURE_KAIRO_AI.md)
+- [Massive streaming gateway](docs/REALTIME_GATEWAY_SETUP.md)
+- [Live provider implementation report](docs/LIVE_PROVIDER_IMPLEMENTATION_REPORT.md)
 
 ## Disclaimer
 

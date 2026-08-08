@@ -31,14 +31,14 @@ export async function providerCached<T>(key: string, policy: ProviderCachePolicy
   const cached = await cacheGet<CachedProviderResult<T>>(`provider:${key}`);
   if (cached && cached.freshUntil > Date.now()) {
     structuredLog("info", "provider.cache.hit", { operation: key, cache: "fresh" });
-    return { ...cached.result, meta: { ...cached.result.meta, freshness: "cached" } };
+    return { ...cached.result, meta: { ...cached.result.meta, freshness: "cached", freshnessType: "CACHED" } };
   }
   if (cached) {
     structuredLog("info", "provider.cache.hit", { operation: key, cache: "stale" });
     void loadAndStore(key, policy, loader).catch((error) => {
       structuredLog("warn", "provider.cache.revalidation_failed", { operation: key, code: error instanceof Error ? error.name : "UNKNOWN" });
     });
-    return { ...cached.result, meta: { ...cached.result.meta, freshness: "stale" } };
+    return { ...cached.result, meta: { ...cached.result.meta, freshness: "stale", freshnessType: "STALE" } };
   }
   structuredLog("info", "provider.cache.miss", { operation: key, cache: "miss" });
   return loadAndStore(key, policy, loader);

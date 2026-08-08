@@ -19,8 +19,8 @@ import type {
 
 /**
  * Stable boundary between the UI and any financial-data source.
- * A future YahooFinanceProvider only needs to implement this contract; pages and
- * presentation components remain unchanged.
+ * Provider routing and normalized data can change without changing pages or
+ * presentation components.
  */
 export interface FinancialDataProvider {
   getBrand(): Promise<BrandIdentity>;

@@ -25,6 +25,8 @@ function searchType(value: string | null): SearchInstrument["type"] {
   return "Stock";
 }
 
+function fmpSymbol(symbol: string) { return symbol.endsWith("-USD") ? symbol.replace("-", "") : symbol; }
+
 function mapQuote(record: Record<string, unknown>, requestedSymbol: string): MarketQuoteDto {
   const symbol = stringValue(record, "symbol") ?? requestedSymbol;
   const price = numberValue(record, "price");
@@ -47,7 +49,7 @@ function mapQuote(record: Record<string, unknown>, requestedSymbol: string): Mar
     marketCap: numberValue(record, "marketCap"),
     marketState: booleanValue(record, "isMarketOpen") === true ? "REGULAR" : "CLOSED",
     asOf: timestamp ? new Date(timestamp * 1_000).toISOString() : null,
-    isDelayed: true,
+    isDelayed: false,
     source: "fmp",
   };
 }
@@ -72,31 +74,43 @@ export class FmpMarketDataAdapter implements MarketDataProvider {
   }
   async getQuote(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
-    const row = (await fmpGet("quote", { symbol }, "quote"))[0];
+    const row = (await fmpGet("quote", { symbol: fmpSymbol(symbol) }, "quote"))[0];
     const data = mapQuote(row, symbol);
-    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "delayed" });
+    data.symbol = symbol;
+    data.quoteType = symbol.endsWith("-USD") ? "CRYPTOCURRENCY" : data.quoteType;
+    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: "NEAR_REALTIME" });
   }
   async getQuotes(symbols: string[]) {
-    const results = await Promise.allSettled(symbols.slice(0, 20).map((symbol) => this.getQuote(symbol)));
-    const data = results.flatMap((result) => result.status === "fulfilled" ? [result.value.data] : []);
+    const requested = symbols.slice(0, 50).map(normalizeSymbol);
+    const rows = await fmpGet("batch-quote", { symbols: requested.map(fmpSymbol).join(",") }, "batch-quote");
+    const byProviderSymbol = new Map(rows.map((row) => [stringValue(row, "symbol"), row]));
+    const data = requested.flatMap((symbol) => {
+      const row = byProviderSymbol.get(fmpSymbol(symbol));
+      if (!row) return [];
+      const quote = mapQuote(row, symbol); quote.symbol = symbol; quote.quoteType = symbol.endsWith("-USD") ? "CRYPTOCURRENCY" : quote.quoteType;
+      return [quote];
+    });
     if (!data.length) throw new ProviderError(this.name, "NOT_FOUND", "Nessuna quotazione FMP disponibile.", false, 404);
-    return providerResult(this.name, data, { freshness: "delayed", quality: data.length === symbols.length ? "verified" : "partial" });
+    const sourceTimestamp = data.map((quote) => quote.asOf).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
+    return providerResult(this.name, data, { sourceTimestamp, freshness: "realtime", freshnessType: "NEAR_REALTIME", quality: data.length === symbols.length ? "verified" : "partial" });
   }
   async getHistoricalBars(symbolInput: string, range: ChartRange, interval?: string | null) {
-    if (interval && !["1d", "5d", "1wk", "1mo"].includes(interval)) {
-      throw new ProviderError(this.name, "PLAN_RESTRICTED", "L'adapter FMP fallback espone soltanto barre giornaliere.", false, 501);
-    }
     const symbol = normalizeSymbol(symbolInput);
-    const rows = await fmpGet("historical-price-eod/full", { symbol, from: rangeStart(range), to: new Date().toISOString().slice(0, 10) }, "historical-bars");
+    const requestedInterval = interval ?? (range === "1D" ? "5m" : range === "5D" ? "15m" : "1d");
+    const intradayEndpoint: Record<string, string> = { "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "60m": "1hour", "1h": "1hour" };
+    const endpoint = intradayEndpoint[requestedInterval] ? `historical-chart/${intradayEndpoint[requestedInterval]}` : "historical-price-eod/full";
+    const rows = await fmpGet(endpoint, { symbol: fmpSymbol(symbol), from: rangeStart(range), to: new Date().toISOString().slice(0, 10) }, "historical-bars");
     const points = rows.flatMap((row) => {
       const timestamp = stringValue(row, "date");
       const open = numberValue(row, "open"); const high = numberValue(row, "high"); const low = numberValue(row, "low"); const close = numberValue(row, "close"); const volume = numberValue(row, "volume");
       if (!timestamp || open === null || high === null || low === null || close === null || volume === null) return [];
-      return [{ timestamp: new Date(`${timestamp}T00:00:00.000Z`).toISOString(), open, high, low, close, adjustedClose: numberValue(row, "adjClose") ?? undefined, volume }];
+      const normalizedTimestamp = timestamp.includes("T") || timestamp.includes(" ") ? new Date(timestamp.replace(" ", "T") + (timestamp.endsWith("Z") ? "" : "Z")).toISOString() : new Date(`${timestamp}T00:00:00.000Z`).toISOString();
+      return [{ timestamp: normalizedTimestamp, open, high, low, close, adjustedClose: numberValue(row, "adjClose") ?? undefined, volume }];
     }).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     if (!points.length) throw new ProviderError(this.name, "NOT_FOUND", "Storico FMP non disponibile.", false, 404);
-    const data: MarketChartDto = { symbol, currency: "USD", exchange: marketSlug("market"), range, interval: "1d", previousClose: points.at(-2)?.close ?? null, isDelayed: true, asOf: points.at(-1)?.timestamp ?? null, points, source: "fmp" };
-    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "delayed" });
+    const normalizedInterval = (intradayEndpoint[requestedInterval] ? requestedInterval : "1d") as MarketChartDto["interval"];
+    const data: MarketChartDto = { symbol, currency: "USD", exchange: symbol.endsWith("-USD") ? "CRYPTO" : marketSlug("market"), range, interval: normalizedInterval, previousClose: points.at(-2)?.close ?? null, isDelayed: false, asOf: points.at(-1)?.timestamp ?? null, points, source: "fmp" };
+    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: intradayEndpoint[requestedInterval] ? "realtime" : "cached", freshnessType: intradayEndpoint[requestedInterval] ? "NEAR_REALTIME" : "END_OF_DAY" });
   }
   async getMarketStatus(): Promise<never> {
     throw new ProviderError(this.name, "PLAN_RESTRICTED", "Stato mercato non disponibile tramite FMP adapter.", false, 501);

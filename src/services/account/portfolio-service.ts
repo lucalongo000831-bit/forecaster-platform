@@ -20,11 +20,11 @@ export async function listPortfolios(userId: string): Promise<AccountPortfolio[]
   if (!records.length) return [];
   const rows = await database.select({ portfolioId: portfolioPositions.portfolioId, instrumentId: portfolioPositions.instrumentId, quantity: portfolioPositions.quantity, averagePrice: portfolioPositions.averagePrice, realizedPnl: portfolioPositions.realizedPnl, symbol: instruments.canonicalSymbol, name: instruments.name, currency: instruments.currency }).from(portfolioPositions).innerJoin(instruments, eq(portfolioPositions.instrumentId, instruments.id)).where(inArray(portfolioPositions.portfolioId, records.map((record) => record.id)));
   const symbols = [...new Set(rows.map((row) => row.symbol))];
-  const quoteRows = symbols.length ? await financialProviderRouter.quotes(symbols).then((result) => result.data).catch(() => []) : [];
-  const quotes = new Map(quoteRows.map((quote) => [quote.symbol, quote]));
+  const quoteResult = symbols.length ? await financialProviderRouter.quotes(symbols).catch(() => null) : null;
+  const quotes = new Map((quoteResult?.data ?? []).map((quote) => [quote.symbol, quote]));
   return records.map((record) => {
     const matching = rows.filter((row) => row.portfolioId === record.id);
-    const raw = matching.map((row) => { const quote = quotes.get(row.symbol); const quantity = Number(row.quantity); const averagePrice = Number(row.averagePrice); const realizedPnl = Number(row.realizedPnl); const currentPrice = quote?.price ?? null; const marketValue = currentPrice === null ? null : currentPrice * quantity; const unrealizedPnl = currentPrice === null ? null : (currentPrice - averagePrice) * quantity; return { instrumentId: row.instrumentId, symbol: row.symbol, name: row.name, quantity, averagePrice, realizedPnl, currentPrice, currency: row.currency, marketValue, unrealizedPnl, allocation: null }; });
+    const raw = matching.map((row) => { const quote = quotes.get(row.symbol); const quantity = Number(row.quantity); const averagePrice = Number(row.averagePrice); const realizedPnl = Number(row.realizedPnl); const currentPrice = quote?.price ?? null; const marketValue = currentPrice === null ? null : currentPrice * quantity; const unrealizedPnl = currentPrice === null ? null : (currentPrice - averagePrice) * quantity; return { instrumentId: row.instrumentId, symbol: row.symbol, name: row.name, quantity, averagePrice, realizedPnl, currentPrice, currency: row.currency, marketValue, unrealizedPnl, allocation: null, lastUpdated: quote?.asOf ?? null, provider: quote ? quoteResult?.meta.provider ?? null : null }; });
     const valued = raw.filter((position) => position.marketValue !== null);
     const gross = valued.reduce((sum, position) => sum + Math.abs(position.marketValue ?? 0), 0);
     const positions = raw.map((position) => ({ ...position, allocation: position.marketValue === null || gross === 0 ? null : Math.abs(position.marketValue) / gross * 100 }));

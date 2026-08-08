@@ -5,7 +5,6 @@ describe("server environment", () => {
   it("uses safe defaults while optional external services are absent", () => {
     const env = getServerEnvironment({ NODE_ENV: "test" });
     expect(env.YAHOO_FINANCE_ENABLED).toBe(true);
-    expect(env.ENABLE_MOCK_FALLBACK).toBe(false);
     expect(env.ENABLE_DEMO_DATA).toBe(false);
     expect(env.ENABLE_KAIRO_AI).toBe(false);
     expect(env.MARKET_DATA_PRIMARY_PROVIDER).toBe("massive");

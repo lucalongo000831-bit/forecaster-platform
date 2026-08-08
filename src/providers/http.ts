@@ -3,6 +3,7 @@ import "server-only";
 import type { ZodType } from "zod";
 import { structuredLog } from "@/lib/server/logger";
 import { ProviderError, normalizeProviderError } from "./errors";
+import { recordProviderFailure, recordProviderSuccess } from "./health";
 import type { ProviderName } from "./types";
 
 interface ProviderRequest<T> {
@@ -63,6 +64,7 @@ export async function providerRequest<T>(request: ProviderRequest<T>): Promise<T
         durationMs: Date.now() - startedAt,
         status: response.status,
       });
+      recordProviderSuccess(request.provider, Date.now() - startedAt);
       return parsed.data;
     } catch (error) {
       lastError = normalizeProviderError(request.provider, error);
@@ -72,6 +74,7 @@ export async function providerRequest<T>(request: ProviderRequest<T>): Promise<T
         durationMs: Date.now() - startedAt,
         code: lastError instanceof ProviderError ? lastError.code : "UNKNOWN",
       });
+      recordProviderFailure(request.provider, lastError instanceof ProviderError ? lastError.code : "UNKNOWN", Date.now() - startedAt);
       if (!(lastError instanceof ProviderError) || !lastError.retryable || attempt === attempts - 1) break;
       await new Promise((resolve) => setTimeout(resolve, retryDelay(attempt)));
     }

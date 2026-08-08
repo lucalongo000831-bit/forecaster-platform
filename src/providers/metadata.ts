@@ -1,4 +1,17 @@
-import type { DataFreshness, DataQuality, ProviderMetadata, ProviderName, ProviderResult } from "./types";
+import type { DataFreshness, DataQuality, FreshnessType, ProviderMetadata, ProviderName, ProviderResult } from "./types";
+
+const freshnessTypeByLegacy: Record<DataFreshness, FreshnessType> = {
+  realtime: "REALTIME",
+  delayed: "DELAYED",
+  cached: "CACHED",
+  stale: "STALE",
+};
+
+function sourceDelaySeconds(sourceTimestamp: string | null | undefined) {
+  if (!sourceTimestamp) return null;
+  const timestamp = new Date(sourceTimestamp).getTime();
+  return Number.isFinite(timestamp) ? Math.max(0, Math.floor((Date.now() - timestamp) / 1_000)) : null;
+}
 
 export function providerResult<T>(
   provider: ProviderName,
@@ -6,15 +19,20 @@ export function providerResult<T>(
   options: {
     sourceTimestamp?: string | null;
     freshness?: DataFreshness;
+    freshnessType?: FreshnessType;
+    delaySeconds?: number | null;
     quality?: DataQuality;
     isFallback?: boolean;
   } = {},
 ): ProviderResult<T> {
+  const freshness = options.freshness ?? "delayed";
   const meta: ProviderMetadata = {
     provider,
     fetchedAt: new Date().toISOString(),
     sourceTimestamp: options.sourceTimestamp ?? null,
-    freshness: options.freshness ?? "delayed",
+    freshness,
+    freshnessType: options.freshnessType ?? freshnessTypeByLegacy[freshness],
+    delaySeconds: options.delaySeconds ?? sourceDelaySeconds(options.sourceTimestamp),
     quality: options.quality ?? "verified",
     isFallback: options.isFallback ?? false,
   };
