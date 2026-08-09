@@ -11,7 +11,7 @@ The product identity and assets are replaceable. The project does not scrape the
 - Technical indicators, multi-factor signals, market regime, seasonality, targets, DCF, risk plans and probabilistic forecasts.
 - Point-in-time backtesting with fees, spread, slippage, next-session execution and explicit bias controls.
 - Secure credentials authentication, HttpOnly sessions and per-user watchlists, portfolio ledgers, alerts and internal notifications.
-- Multi-provider routing across Yahoo Finance, Financial Modeling Prep, Alpha Vantage and Massive, with typed adapters, timeout, retry, caching and fallback.
+- Multi-provider routing across Massive, FMP, Alpha Vantage, EODHD, Finnhub, CoinGecko, SEC EDGAR and Yahoo fallback, with typed server-only adapters, timeout, retry, caching, circuit state and explicit fallback.
 - Protected health endpoints, cron jobs, structured logs, request IDs, rate limiting and data provenance.
 - Buy-side Company Intelligence with historical statement validation, earnings/FCF quality, evidence-based company scoring, moat and management analysis, reverse DCF, bear/base/bull DCF, downside-first risks, horizons through 20 years, operational calendar, PDF/CSV reports and point-in-time decision validation.
 - Asset-specific Crypto, ETF and Index Intelligence, with technicals, risk, seasonality, attributed sentiment and probabilistic scenarios instead of inapplicable corporate DCF metrics.
@@ -65,6 +65,8 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run db:generate` | generate a migration from schema changes |
 | `npm run db:migrate` | apply committed PostgreSQL migrations |
 | `npm run test:live-providers` | safe Massive/FMP/Alpha live smoke test; prints only OK/ERROR |
+| `npm run test:new-providers` | safe EODHD/Finnhub/CoinGecko/SEC authentication smoke test |
+| `npm run test:complete-data-stack` | provider and optional Preview route smoke matrix; never prints keys |
 | `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |
 | `npm run test:openai` | minimal live Responses API authentication check; never prints the key or model output |
 
@@ -80,7 +82,12 @@ Next.js server components + Node.js route handlers
         │     ├── Massive      primary US/crypto market data
         │     ├── Yahoo        global and unsupported-symbol fallback
         │     ├── FMP          fundamentals and calendars
-        │     └── Alpha        attributed news sentiment
+        │     ├── Alpha        attributed news sentiment
+        │     ├── EODHD        international identity, EOD history and statements
+        │     ├── Finnhub      peers, executives, insiders and ETF structure
+        │     ├── CoinGecko    crypto identity, supply and global context
+        │     ├── SEC EDGAR    official US issuer identity and XBRL facts
+        │     └── ESEF         optional European official-filing normalization
         ├── deterministic quant engines
         ├── Ask Kairo Responses API agent (parked by feature flag)
         │     ├── strict internal financial tools only
@@ -146,6 +153,8 @@ All financial and operational route handlers use the Node.js runtime. Symbols ar
 
 Provider results include provider, fetch time, source time, freshness, quality and fallback metadata. Calculated outputs include model version, calculation time, data timestamp, completeness/confidence and limitations.
 
+Company, ETF and crypto acquisition is consolidated in typed data bundles. Issuers are separate from tradable listings, provider symbols are mapped explicitly, and protected diagnostics are available at `/preferences/providers` and `/preferences/data-lineage`. See [the field coverage audit](docs/DATA_COVERAGE_AUDIT.md), [implementation report](docs/COMPLETE_DATA_COVERAGE_REPORT.md) and [remaining gaps](docs/REMAINING_DATA_GAPS.md).
+
 - `REALTIME`, `NEAR_REALTIME`, `DELAYED`, `CACHED`, `END_OF_DAY`, `STALE` and `UNAVAILABLE` are preserved separately.
 - `CACHED`: a recent server-side provider observation.
 - `ESTIMATE`: externally sourced or model-derived estimate.
@@ -188,6 +197,7 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Future Ask Kairo reactivation](docs/FUTURE_KAIRO_AI.md)
 - [Massive streaming gateway](docs/REALTIME_GATEWAY_SETUP.md)
 - [Live provider implementation report](docs/LIVE_PROVIDER_IMPLEMENTATION_REPORT.md)
+- [Complete field coverage audit](docs/DATA_COVERAGE_AUDIT.md), [coverage implementation](docs/COMPLETE_DATA_COVERAGE_REPORT.md) and [remaining data gaps](docs/REMAINING_DATA_GAPS.md)
 - [Global Risk engine](docs/GLOBAL_RISK_ENGINE.md), [methodology](docs/GLOBAL_RISK_MODEL_METHODOLOGY.md), [data sources](docs/GLOBAL_MARKETS_DATA_SOURCES.md), [editorial workflow](docs/GLOBAL_MARKET_BRIEF.md) and [future editorial AI boundary](docs/FUTURE_AUTOMATED_EDITORIAL_AI.md)
 
 ## Disclaimer

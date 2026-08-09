@@ -18,6 +18,7 @@
     "test:providers": "node scripts/test-financial-providers.mjs",
     "test:live-providers": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-live-providers.ts",
     "test:new-providers": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-new-data-providers.ts",
+    "test:complete-data-stack": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-complete-data-stack.ts",
     "test:company-smoke": "node scripts/test-company-intelligence.mjs",
     "test:openai": "node --env-file-if-exists=.env.local scripts/verify-openai.mjs",
     "db:generate": "drizzle-kit generate",
