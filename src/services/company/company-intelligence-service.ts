@@ -21,7 +21,7 @@ import { classifyCompanyInstrument } from "./instrument-applicability";
 import { getAnalysisDataBundle } from "@/services/financial/data-bundle-service";
 import { convertHistoricalPeriods } from "@/services/financial/currency-service";
 
-export const COMPANY_INTELLIGENCE_MODEL_VERSION = "company-intelligence-v1.0.0";
+export const COMPANY_INTELLIGENCE_MODEL_VERSION = "company-intelligence-v1.0.1";
 const cacheKey = (symbol: string) => `company-intelligence:${COMPANY_INTELLIGENCE_MODEL_VERSION}:${symbol}`;
 const cacheTag = (symbol: string) => `company-intelligence:${symbol}`;
 const companyAnalysisFlight = createSingleFlight<string, CompanyIntelligenceReport>();
@@ -128,10 +128,11 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   const currencyStage = await runCompanyStage("NormalizeReportingCurrency", () => needsCurrencyConversion ? convertHistoricalPeriods(annualHistory, quote.data.currency) : Promise.resolve(annualHistory), { empty: (value) => annualHistory.length > 0 && !value.length }); stages.push(currencyStage.stage);
   const analyticalHistory = currencyStage.data ?? (needsCurrencyConversion ? [] : annualHistory);
   const fundamental = summaryStage.data ? analyzeFundamentals({ symbol, summary: summaryStage.data.data, income: statements(annualIncomeStage), balanceSheet: statements(annualBalanceStage), cashFlow: statements(annualCashStage), ratios: [], analyst: analystStage.data?.data ?? null, source: summaryStage.data.meta.provider }) : null;
+  const marketCap = quote.data.marketCap ?? summaryStage.data?.data.marketCap ?? null;
   const dataTimestamp = annualHistory[0]?.fiscalDate ?? quote.meta.sourceTimestamp;
   const dataQuality = validateCompanyData({ income, balance, cashFlow, periods: historical, dataTimestamp });
   if (fundamental) { dataQuality.completeness = Math.max(dataQuality.completeness, fundamental.dataCompleteness * 0.75); dataQuality.score = Math.max(dataQuality.score, fundamental.dataCompleteness * 0.65); }
-  const earningsQuality = analyzeEarningsQuality(analyticalHistory, quote.data.marketCap);
+  const earningsQuality = analyzeEarningsQuality(analyticalHistory, marketCap);
   const moat = analyzeMoat(fundamental, analyticalHistory); const management = analyzeManagement(analyticalHistory, bundleStage.data?.insiderSignal);
   const quality = analyzeCompanyQuality({ fundamental, earningsQuality, periods: analyticalHistory, moatScore: moat.score, managementScore: management.overallScore });
   const valuation = analyticalHistory.length ? buildCompanyValuation({ currentPrice: quote.data.price, fundamental, historical: analyticalHistory, analyst: analystStage.data?.data ?? null, technicalTarget: technicalStage.data?.analysis.structure.resistance20 ?? null, qualityScore: quality.totalScore }) : null;
@@ -155,7 +156,7 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
     "This is non-personalized research, not investment advice or a promise of future performance.",
   ];
   const report: CompanyIntelligenceReport = {
-    symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: true, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap: quote.data.marketCap, marketState: quote.data.marketState,
+    symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: true, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap, marketState: quote.data.marketState,
     verdict: decision.verdict, assessment: decision.assessment, overallScore: scored.score, confidence: scored.confidence, dataQuality, historical, earningsQuality, quality, moat, management, peers, valuation, horizons, dailyOutlook, seasonality, operationalCalendar, risks, macro: macroNews.macro,
     thesis: { verdict: decision.verdict.replaceAll("_", " "), whyItMayWork: [...quality.growth.positives, ...quality.profitability.positives, ...macroNews.catalysts.filter((item) => item.direction === "POSITIVE").slice(0, 3).map((item) => item.title)], whyItMayFail: [...risks.redFlags.slice(0, 5).map((item) => item.evidence), ...risks.items.slice(0, 3).map((item) => item.description)], monitor: [...risks.items.flatMap((item) => item.indicators).slice(0, 5), ...macroNews.catalysts.slice(0, 3).map((item) => item.title)] },
     sources, fieldProvenance: bundleStage.data?.provenance ?? [], missingData: bundleStage.data?.missing ?? [], limitations: [...limitations, ...(bundleStage.data?.missing.map((item) => `${item.field}: ${item.message} [${item.reason}]`) ?? [])], pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: valuation?.modelVersion ?? "company-valuation-v1.0.0", signalVersion: technicalStage.data?.analysis.modelVersion ?? TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, providerVersions: providerVersions(sources), dataTimestamp, calculatedAt: new Date().toISOString(),

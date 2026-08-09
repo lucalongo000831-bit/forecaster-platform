@@ -29,6 +29,7 @@ export async function resolveSecIdentity(symbolInput: string) {
 
 type FactObservation = { end: string; val: number; filed: string | null; form: string; fp: string | null; unit: string };
 function observations(facts: Record<string, unknown>, tags: string[]) {
+  const observationsByTag: FactObservation[] = [];
   for (const tag of tags) {
     const fact = objectValue(facts[tag]); const units = objectValue(fact.units);
     for (const [unit, values] of Object.entries(units)) {
@@ -36,11 +37,17 @@ function observations(facts: Record<string, unknown>, tags: string[]) {
         const row = objectValue(value); const end = textValue(row, "end"); const val = numericValue(row, "val"); const form = textValue(row, "form") ?? "";
         return end && val !== null && /^(10-K|10-Q|20-F|40-F)$/.test(form) ? [{ end, val, filed: textValue(row, "filed"), form, fp: textValue(row, "fp"), unit }] : [];
       });
-      if (rows.length) return rows;
+      observationsByTag.push(...rows);
     }
   }
-  return [];
+  // XBRL concepts are frequently superseded over time. Returning after the
+  // first populated alias silently drops newer filings that use a successor
+  // concept (for example NVIDIA capex and revenue). Keep all compatible
+  // aliases and let the filing date select the freshest observation.
+  return observationsByTag;
 }
+
+export const __test = { observations };
 
 const fieldsByKind: Record<StatementKind, Record<string, string[]>> = {
   income: {
@@ -52,7 +59,7 @@ const fieldsByKind: Record<StatementKind, Record<string, string[]>> = {
     cashAndCashEquivalents: ["CashAndCashEquivalentsAtCarryingValue", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"], totalAssets: ["Assets"], totalLiabilities: ["Liabilities"], totalStockholdersEquity: ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"], totalCurrentAssets: ["AssetsCurrent"], totalCurrentLiabilities: ["LiabilitiesCurrent"], goodwill: ["Goodwill"], intangibleAssets: ["FiniteLivedIntangibleAssetsNet", "IndefiniteLivedIntangibleAssetsExcludingGoodwill"], totalDebt: ["LongTermDebtAndFinanceLeaseObligationsCurrent", "LongTermDebtCurrent", "LongTermDebtNoncurrent"],
   },
   "cash-flow": {
-    operatingCashFlow: ["NetCashProvidedByUsedInOperatingActivities"], capitalExpenditure: ["PaymentsToAcquirePropertyPlantAndEquipment"], acquisitionsNet: ["PaymentsToAcquireBusinessesNetOfCashAcquired"], commonStockRepurchased: ["PaymentsForRepurchaseOfCommonStock"], commonStockIssued: ["ProceedsFromStockOptionsExercised"], commonStockDividendsPaid: ["PaymentsOfDividendsCommonStock"], stockBasedCompensation: ["ShareBasedCompensation"],
+    operatingCashFlow: ["NetCashProvidedByUsedInOperatingActivities"], capitalExpenditure: ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"], acquisitionsNet: ["PaymentsToAcquireBusinessesNetOfCashAcquired", "PaymentsToAcquireBusinessTwoNetOfCashAcquired"], commonStockRepurchased: ["PaymentsForRepurchaseOfCommonStock"], commonStockIssued: ["ProceedsFromStockOptionsExercised"], commonStockDividendsPaid: ["PaymentsOfDividendsCommonStock"], stockBasedCompensation: ["ShareBasedCompensation"],
   },
 };
 
