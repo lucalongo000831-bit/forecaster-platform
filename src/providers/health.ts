@@ -9,11 +9,12 @@ export interface ProviderHealthSnapshot {
   lastError: string | null;
   latencyMs: number | null;
   lastDataTimestamp: string | null;
+  rateLimited: boolean;
 }
 
-const providers: ProviderName[] = ["massive", "fmp", "alpha-vantage", "yahoo"];
+const providers: ProviderName[] = ["massive", "fmp", "alpha-vantage", "eodhd", "finnhub", "coingecko", "sec-edgar", "esef", "yahoo"];
 const state = new Map<ProviderName, ProviderHealthSnapshot>(
-  providers.map((provider) => [provider, { provider, healthy: null, lastSuccess: null, lastError: null, latencyMs: null, lastDataTimestamp: null }]),
+  providers.map((provider) => [provider, { provider, healthy: null, lastSuccess: null, lastError: null, latencyMs: null, lastDataTimestamp: null, rateLimited: false }]),
 );
 
 export function recordProviderSuccess(provider: ProviderName, latencyMs: number, lastDataTimestamp?: string | null) {
@@ -25,6 +26,7 @@ export function recordProviderSuccess(provider: ProviderName, latencyMs: number,
     lastError: previous?.lastError ?? null,
     latencyMs,
     lastDataTimestamp: lastDataTimestamp ?? previous?.lastDataTimestamp ?? null,
+    rateLimited: false,
   });
 }
 
@@ -37,6 +39,7 @@ export function recordProviderFailure(provider: ProviderName, errorCode: string,
     lastError: `${new Date().toISOString()} · ${errorCode}`,
     latencyMs,
     lastDataTimestamp: previous?.lastDataTimestamp ?? null,
+    rateLimited: errorCode === "RATE_LIMITED",
   });
 }
 

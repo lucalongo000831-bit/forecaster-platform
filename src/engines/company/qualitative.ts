@@ -31,7 +31,7 @@ export function analyzeMoat(fundamental: FundamentalAnalysis | null, periods: Hi
   return { classification, score, categories, confidence: confidence(scores.length), modelVersion: MOAT_MODEL_VERSION };
 }
 
-export function analyzeManagement(periods: HistoricalCompanyPeriod[]): ManagementAnalysis {
+export function analyzeManagement(periods: HistoricalCompanyPeriod[], insiderSignal?: { score: number | null; netShares: number | null; purchases: number; sales: number }) : ManagementAnalysis {
   const latest = periods[0]; const previous = periods[1];
   if (!latest) return { executionScore: null, capitalAllocationScore: null, shareholderAlignmentScore: null, credibilityScore: null, overallScore: null, evidence: [], warnings: ["Historical capital-allocation data not available."], confidence: "VERY_LOW", modelVersion: MANAGEMENT_MODEL_VERSION };
   const evidence: string[] = []; const warnings: string[] = [];
@@ -42,14 +42,16 @@ export function analyzeManagement(periods: HistoricalCompanyPeriod[]): Managemen
   const executionScore = mean([revenueGrowth, fcfGrowth].filter((value): value is number => value !== null).map((value) => clamp(50 + value * 180, 0, 100)));
   const allocationInputs = [latest.freeCashFlow !== null ? clamp(45 + (latest.freeCashFlow > 0 ? 25 : -30), 0, 100) : null, debtGrowth === null ? null : clamp(65 - Math.max(0, debtGrowth) * 180, 0, 100)];
   const capitalAllocationScore = mean(allocationInputs.filter((value): value is number => value !== null));
-  const shareholderAlignmentScore = shareGrowth === null ? null : clamp(70 - Math.max(0, shareGrowth) * 700 + Math.max(0, -shareGrowth) * 150, 0, 100);
+  const dilutionAlignment = shareGrowth === null ? null : clamp(70 - Math.max(0, shareGrowth) * 700 + Math.max(0, -shareGrowth) * 150, 0, 100);
+  const shareholderAlignmentScore = mean([dilutionAlignment, insiderSignal?.score ?? null].filter((value): value is number => value !== null));
   if (revenueGrowth !== null) evidence.push(`Observed revenue growth ${(revenueGrowth * 100).toFixed(1)}%.`);
   if (fcfGrowth !== null) evidence.push(`Observed FCF growth ${(fcfGrowth * 100).toFixed(1)}%.`);
   if (shareGrowth !== null && shareGrowth > 0.03) warnings.push("Material year-over-year dilution observed.");
   if (debtGrowth !== null && debtGrowth > 0.2) warnings.push("Debt increased materially year over year.");
   if (latest.acquisitions !== null) evidence.push("Provider-reported acquisition cash flow is included; acquisition quality requires deal-level evidence.");
+  if (insiderSignal?.netShares !== null && insiderSignal?.netShares !== undefined) evidence.push(`Verified insider activity: ${insiderSignal.purchases} acquisitions, ${insiderSignal.sales} dispositions, net ${insiderSignal.netShares.toLocaleString()} shares.`);
   const overallScore = mean([executionScore, capitalAllocationScore, shareholderAlignmentScore].filter((value): value is number => value !== null));
-  return { executionScore, capitalAllocationScore, shareholderAlignmentScore, credibilityScore: null, overallScore, evidence, warnings: [...warnings, "Guidance accuracy, incentives and executive turnover require structured external disclosures."], confidence: confidence([executionScore, capitalAllocationScore, shareholderAlignmentScore].filter((value) => value !== null).length), modelVersion: MANAGEMENT_MODEL_VERSION };
+  return { executionScore, capitalAllocationScore, shareholderAlignmentScore, credibilityScore: null, overallScore, evidence, warnings: [...warnings, "Guidance accuracy, incentives and executive turnover require structured external disclosures."], confidence: confidence([executionScore, capitalAllocationScore, shareholderAlignmentScore, insiderSignal?.score ?? null].filter((value) => value !== null).length), modelVersion: MANAGEMENT_MODEL_VERSION };
 }
 
 export function compareVerifiedPeers(company: { symbol: string; name: string; metrics: Record<string, number | null>; provider: string }, peers: Array<{ symbol: string; name: string; metrics: Record<string, number | null>; provider: string; verified: boolean }>): PeerComparison[] {

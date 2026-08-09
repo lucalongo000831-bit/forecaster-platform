@@ -83,8 +83,23 @@ export const exchanges = pgTable("exchanges", {
   ...createdUpdated(),
 }, (table) => [uniqueIndex("exchanges_mic_unique").on(table.mic)]);
 
+export const issuers = pgTable("issuers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  legalName: varchar("legal_name", { length: 320 }).notNull(),
+  countryCode: varchar("country_code", { length: 2 }),
+  lei: varchar("lei", { length: 20 }),
+  cik: varchar("cik", { length: 10 }),
+  primaryIsin: varchar("primary_isin", { length: 12 }),
+  website: text("website"),
+  sector: varchar("sector", { length: 160 }),
+  industry: varchar("industry", { length: 180 }),
+  identifiers: jsonb("identifiers").$type<Record<string, string>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("issuers_lei_unique").on(table.lei), uniqueIndex("issuers_cik_unique").on(table.cik), index("issuers_name_idx").on(table.legalName)]);
+
 export const instruments = pgTable("instruments", {
   id: uuid("id").defaultRandom().primaryKey(),
+  issuerId: uuid("issuer_id").references(() => issuers.id, { onDelete: "set null" }),
   exchangeId: uuid("exchange_id").references(() => exchanges.id),
   canonicalSymbol: varchar("canonical_symbol", { length: 64 }).notNull(),
   name: varchar("name", { length: 300 }).notNull(),
@@ -95,6 +110,9 @@ export const instruments = pgTable("instruments", {
   countryCode: varchar("country_code", { length: 2 }),
   sector: varchar("sector", { length: 160 }),
   industry: varchar("industry", { length: 180 }),
+  isin: varchar("isin", { length: 12 }),
+  figi: varchar("figi", { length: 20 }),
+  providerSymbols: jsonb("provider_symbols").$type<Record<string, { symbol: string; exchangeCode?: string | null; providerInstrumentId?: string | null }>>().default({}).notNull(),
   active: boolean("active").default(true).notNull(),
   delistedAt: timestamp("delisted_at", { withTimezone: true }),
   ...createdUpdated(),
@@ -103,6 +121,7 @@ export const instruments = pgTable("instruments", {
   uniqueIndex("instruments_symbol_exchange_unique").on(table.canonicalSymbol, table.exchangeId),
   index("instruments_search_idx").on(table.canonicalSymbol, table.name),
   index("instruments_type_idx").on(table.type, table.active),
+  index("instruments_issuer_idx").on(table.issuerId),
 ]);
 
 export const instrumentSymbols = pgTable("instrument_symbols", {
@@ -458,6 +477,31 @@ export const providerHealthSnapshots = pgTable("provider_health_snapshots", {
   errorCode: varchar("error_code", { length: 80 }),
   checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("provider_health_time_idx").on(table.provider, table.checkedAt)]);
+
+export const analysisDataBundleSnapshots = pgTable("analysis_data_bundle_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "cascade" }).notNull(),
+  bundleType: varchar("bundle_type", { length: 24 }).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  provenance: jsonb("provenance").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+  missingData: jsonb("missing_data").$type<Array<Record<string, unknown>>>().default([]).notNull(),
+  dataTimestamp: timestamp("data_timestamp", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("analysis_bundle_instrument_type_time_idx").on(table.instrumentId, table.bundleType, table.createdAt)]);
+
+export const fieldProvenanceSnapshots = pgTable("field_provenance_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "cascade" }).notNull(),
+  fieldPath: varchar("field_path", { length: 220 }).notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  quality: varchar("quality", { length: 24 }).notNull(),
+  sourceTimestamp: timestamp("source_timestamp", { withTimezone: true }),
+  formula: text("formula"),
+  inputs: jsonb("inputs").$type<string[]>().default([]).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("field_provenance_instrument_field_time_idx").on(table.instrumentId, table.fieldPath, table.createdAt)]);
 
 const companyResultColumns = () => ({
   id: uuid("id").defaultRandom().primaryKey(),

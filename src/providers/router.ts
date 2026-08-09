@@ -9,6 +9,8 @@ import { providerResult } from "./metadata";
 import { recordProviderDataTimestamp } from "./health";
 import { FmpFundamentalsAdapter } from "./fundamentals/fmp-adapter";
 import { YahooFundamentalsAdapter } from "./fundamentals/yahoo-adapter";
+import { EodhdFundamentalsAdapter } from "./fundamentals/eodhd-adapter";
+import { SecEdgarFundamentalsAdapter } from "./sec/edgar-adapter";
 import { AlphaVantageNewsAdapter } from "./news/alpha-vantage-adapter";
 import { FmpNewsAdapter } from "./news/fmp-adapter";
 import { YahooNewsAdapter } from "./news/yahoo-adapter";
@@ -18,6 +20,8 @@ import { AlphaVantageMacroAdapter } from "./macro/alpha-vantage-adapter";
 import { FmpMarketDataAdapter } from "./market-data/fmp-adapter";
 import { MassiveMarketDataAdapter } from "./market-data/massive-adapter";
 import { YahooMarketDataAdapter } from "./market-data/yahoo-adapter";
+import { EodhdMarketDataAdapter } from "./market-data/eodhd-adapter";
+import { finnhubCompanyAdapter } from "./finnhub/company-adapter";
 import type {
   FundamentalsProvider,
   MarketDataProvider,
@@ -36,8 +40,9 @@ const marketAdapters = {
   massive: new MassiveMarketDataAdapter(),
   yahoo: new YahooMarketDataAdapter(),
   fmp: new FmpMarketDataAdapter(),
-} satisfies Record<"massive" | "yahoo" | "fmp", MarketDataProvider>;
-const fundamentalAdapters = { fmp: new FmpFundamentalsAdapter(), yahoo: new YahooFundamentalsAdapter() } satisfies Record<"fmp" | "yahoo", FundamentalsProvider>;
+  eodhd: new EodhdMarketDataAdapter(),
+} satisfies Record<"massive" | "yahoo" | "fmp" | "eodhd", MarketDataProvider>;
+const fundamentalAdapters = { fmp: new FmpFundamentalsAdapter(), eodhd: new EodhdFundamentalsAdapter(), "sec-edgar": new SecEdgarFundamentalsAdapter(), yahoo: new YahooFundamentalsAdapter() } satisfies Record<"fmp" | "eodhd" | "sec-edgar" | "yahoo", FundamentalsProvider>;
 const newsAdapters = { "alpha-vantage": new AlphaVantageNewsAdapter(), fmp: new FmpNewsAdapter(), yahoo: new YahooNewsAdapter() } satisfies Record<"alpha-vantage" | "fmp" | "yahoo", NewsProvider>;
 const politicalAdapters = { fmp: new FmpPoliticalAdapter() } satisfies Record<"fmp", PoliticalProvider>;
 const macroAdapters = { fmp: new FmpMacroAdapter(), "alpha-vantage": new AlphaVantageMacroAdapter() } satisfies Record<"fmp" | "alpha-vantage", MacroProvider>;
@@ -71,11 +76,11 @@ async function firstAvailable<T>(operation: string, symbol: string | undefined, 
 export class FinancialProviderRouter {
   private marketOrder(): MarketDataProvider[] {
     const env = getServerEnvironment();
-    return unique([env.MARKET_DATA_PRIMARY_PROVIDER, env.MARKET_DATA_FALLBACK_PROVIDER, "yahoo", "fmp"] as const).map((name) => marketAdapters[name]);
+    return unique([env.MARKET_DATA_PRIMARY_PROVIDER, env.MARKET_DATA_FALLBACK_PROVIDER, "yahoo", "fmp", "eodhd"] as const).map((name) => marketAdapters[name]);
   }
   private fundamentalOrder(): FundamentalsProvider[] {
     const env = getServerEnvironment();
-    return unique([env.FUNDAMENTALS_PRIMARY_PROVIDER, "fmp", "yahoo"] as const).map((name) => fundamentalAdapters[name]);
+    return unique([env.FUNDAMENTALS_PRIMARY_PROVIDER, "fmp", "eodhd", "sec-edgar", "yahoo"] as const).map((name) => fundamentalAdapters[name]);
   }
   private newsOrder(): NewsProvider[] {
     const env = getServerEnvironment();
@@ -84,7 +89,7 @@ export class FinancialProviderRouter {
 
   search(queryInput: string) {
     const query = normalizeSearchQuery(queryInput);
-    const order = [marketAdapters.fmp, marketAdapters.massive, marketAdapters.yahoo];
+    const order = [marketAdapters.fmp, marketAdapters.eodhd, marketAdapters.massive, marketAdapters.yahoo];
     return providerCached(`search:${query.toLowerCase()}`, { freshSeconds: 300, staleSeconds: 1_800 }, () => firstAvailable("search", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.searchInstruments(query) }))));
   }
 
@@ -173,7 +178,10 @@ export class FinancialProviderRouter {
 
   peers(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
-    return providerCached(`peers:${symbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, () => firstAvailable("peers", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getPeers(symbol) }]));
+    return providerCached(`peers:${symbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, () => firstAvailable("peers", symbol, [
+      { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getPeers(symbol) },
+      { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !symbol.startsWith("^") && !symbol.endsWith("-USD"), task: async () => providerResult("finnhub", await finnhubCompanyAdapter.getPeers(symbol), { freshness: "cached", freshnessType: "END_OF_DAY" }) },
+    ]));
   }
 
   earningsCalendar(from: string, to: string, symbol?: string) {

@@ -1,5 +1,5 @@
 export type Signal = "BUY" | "HOLD" | "SELL";
-export type DataSource = "yahoo" | "fmp" | "alpha-vantage" | "massive" | "calculated" | "mock" | "unavailable";
+export type DataSource = "yahoo" | "fmp" | "alpha-vantage" | "massive" | "eodhd" | "finnhub" | "coingecko" | "sec-edgar" | "esef" | "calculated" | "mock" | "unavailable";
 
 export interface InstrumentRef {
   market: string;

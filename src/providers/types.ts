@@ -7,7 +7,16 @@ import type {
   SearchInstrument,
 } from "@/types";
 
-export type ProviderName = "yahoo" | "fmp" | "alpha-vantage" | "massive";
+export type ProviderName =
+  | "yahoo"
+  | "fmp"
+  | "alpha-vantage"
+  | "massive"
+  | "eodhd"
+  | "finnhub"
+  | "coingecko"
+  | "sec-edgar"
+  | "esef";
 export type DataFreshness = "realtime" | "delayed" | "cached" | "stale";
 export type FreshnessType = "REALTIME" | "NEAR_REALTIME" | "DELAYED" | "CACHED" | "END_OF_DAY" | "STALE" | "UNAVAILABLE";
 export type DataQuality = "verified" | "partial" | "estimated" | "unavailable";
@@ -21,6 +30,33 @@ export interface ProviderMetadata {
   delaySeconds: number | null;
   quality: DataQuality;
   isFallback: boolean;
+  requestId?: string;
+  lineage?: FieldProvenance[];
+}
+
+export type MissingDataReason =
+  | "NOT_REPORTED"
+  | "NOT_APPLICABLE"
+  | "PROVIDER_PLAN_LIMIT"
+  | "PROVIDER_RATE_LIMIT"
+  | "PROVIDER_UNAVAILABLE"
+  | "IDENTIFIER_UNRESOLVED"
+  | "STALE_BEYOND_TOLERANCE"
+  | "INSUFFICIENT_HISTORY"
+  | "DATA_CONFLICT"
+  | "CALCULATION_INPUT_MISSING";
+
+export interface FieldProvenance {
+  field: string;
+  provider: ProviderName | "calculated";
+  sourceTimestamp: string | null;
+  fetchedAt: string;
+  quality: DataQuality;
+  currency?: string | null;
+  unit?: string | null;
+  formula?: string | null;
+  inputs?: string[];
+  missingReason?: MissingDataReason;
 }
 
 export interface ProviderResult<T> {

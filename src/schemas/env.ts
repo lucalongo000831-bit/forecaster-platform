@@ -100,6 +100,7 @@ export function getEnvironmentStatus(source: NodeJS.ProcessEnv = process.env) {
     finnhubConfigured: Boolean(env.FINNHUB_API_KEY),
     coinGeckoConfigured: Boolean(env.COINGECKO_API_KEY),
     secConfigured: Boolean(env.SEC_USER_AGENT),
+    esefEnabled: env.ENABLE_ESEF_INGESTION,
     cronConfigured: Boolean(env.CRON_SECRET),
     internalApiConfigured: Boolean(env.INTERNAL_API_SECRET),
   };

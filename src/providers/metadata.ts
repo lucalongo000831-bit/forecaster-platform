@@ -1,4 +1,4 @@
-import type { DataFreshness, DataQuality, FreshnessType, ProviderMetadata, ProviderName, ProviderResult } from "./types";
+import type { DataFreshness, DataQuality, FieldProvenance, FreshnessType, ProviderMetadata, ProviderName, ProviderResult } from "./types";
 
 const freshnessTypeByLegacy: Record<DataFreshness, FreshnessType> = {
   realtime: "REALTIME",
@@ -23,6 +23,8 @@ export function providerResult<T>(
     delaySeconds?: number | null;
     quality?: DataQuality;
     isFallback?: boolean;
+    requestId?: string;
+    lineage?: FieldProvenance[];
   } = {},
 ): ProviderResult<T> {
   const freshness = options.freshness ?? "delayed";
@@ -35,6 +37,8 @@ export function providerResult<T>(
     delaySeconds: options.delaySeconds ?? sourceDelaySeconds(options.sourceTimestamp),
     quality: options.quality ?? "verified",
     isFallback: options.isFallback ?? false,
+    requestId: options.requestId,
+    lineage: options.lineage,
   };
   return { data, meta };
 }

@@ -5,6 +5,7 @@ import { structuredLog } from "@/lib/server/logger";
 import { ProviderError, normalizeProviderError } from "./errors";
 import { recordProviderFailure, recordProviderSuccess } from "./health";
 import type { ProviderName } from "./types";
+import { coordinatedProviderRequest } from "./coordinator";
 
 interface ProviderRequest<T> {
   provider: ProviderName;
@@ -31,28 +32,14 @@ export async function providerRequest<T>(request: ProviderRequest<T>): Promise<T
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const startedAt = Date.now();
     try {
-      const response = await fetch(request.url, {
-        headers: request.headers,
-        cache: "no-store",
-        redirect: "error",
-        signal: AbortSignal.timeout(request.timeoutMs ?? 12_000),
+      const response = await coordinatedProviderRequest(request.provider, async () => {
+        const upstream = await fetch(request.url, { headers: request.headers, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(request.timeoutMs ?? 12_000) });
+        if (!upstream.ok) {
+          const code = upstream.status === 401 || upstream.status === 403 ? "UNAUTHORIZED" : upstream.status === 404 ? "NOT_FOUND" : upstream.status === 429 ? "RATE_LIMITED" : "UPSTREAM_UNAVAILABLE";
+          throw new ProviderError(request.provider, code, `Risposta provider HTTP ${upstream.status}.`, retryableStatus(upstream.status), upstream.status === 404 ? 404 : 502);
+        }
+        return upstream;
       });
-      if (!response.ok) {
-        const code = response.status === 401 || response.status === 403
-          ? "UNAUTHORIZED"
-          : response.status === 404
-            ? "NOT_FOUND"
-            : response.status === 429
-              ? "RATE_LIMITED"
-              : "UPSTREAM_UNAVAILABLE";
-        throw new ProviderError(
-          request.provider,
-          code,
-          `Risposta provider HTTP ${response.status}.`,
-          retryableStatus(response.status),
-          response.status === 404 ? 404 : 502,
-        );
-      }
       const raw: unknown = await response.json();
       const parsed = request.schema.safeParse(raw);
       if (!parsed.success) {
