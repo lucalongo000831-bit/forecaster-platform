@@ -6,7 +6,7 @@ import { providerResult } from "@/providers/metadata";
 import { financialProviderRouter } from "@/providers/router";
 import type { HistoricalCompanyPeriod } from "@/types";
 
-const monetaryFields: Array<keyof HistoricalCompanyPeriod> = ["revenue", "grossProfit", "ebitda", "operatingIncome", "netIncome", "dilutedEps", "cash", "totalAssets", "goodwill", "intangibles", "totalDebt", "netDebt", "equity", "workingCapital", "operatingCashFlow", "capitalExpenditure", "freeCashFlow", "acquisitions", "buybacks", "shareIssuance", "dividends", "stockBasedCompensation"];
+const monetaryFields: Array<keyof HistoricalCompanyPeriod> = ["revenue", "costOfRevenue", "grossProfit", "ebitda", "operatingIncome", "netIncome", "dilutedEps", "cash", "shortTermInvestments", "receivables", "inventory", "currentAssets", "propertyPlantEquipment", "totalAssets", "goodwill", "intangibles", "totalDebt", "shortTermDebt", "longTermDebt", "netDebt", "equity", "totalLiabilities", "accountsPayable", "currentLiabilities", "workingCapital", "operatingCashFlow", "capitalExpenditure", "freeCashFlow", "acquisitions", "buybacks", "shareIssuance", "dividends", "stockBasedCompensation"];
 
 async function chartRate(base: string, quote: string, date: string) {
   const chart = await financialProviderRouter.analyticsChart(`${base}${quote}=X`, "MAX", "1d");

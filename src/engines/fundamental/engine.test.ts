@@ -26,7 +26,7 @@ describe("fundamental engine", () => {
     expect(result.metrics.debtToAssets).toBeCloseTo(0.2);
     expect(result.fundamentalScore).toBeGreaterThanOrEqual(0);
     expect(result.fundamentalScore).toBeLessThanOrEqual(100);
-    expect(result.modelVersion).toBe("fundamental-v1.0.0");
+    expect(result.modelVersion).toBe("fundamental-v1.0.1");
   });
 
   it("keeps unavailable metrics null instead of substituting zero", () => {
@@ -34,5 +34,15 @@ describe("fundamental engine", () => {
     expect(sparse.metrics.revenueGrowthYoY).toBeNull();
     expect(sparse.metrics.freeCashFlowYield).toBeNull();
     expect(sparse.confidence).toBe("INSUFFICIENT");
+  });
+
+  it("derives applicable valuation ratios from reconciled filing values", () => {
+    const filingSummary = { ...summary, trailingPe: null, priceToBook: null, debtToEquity: null };
+    const result = analyzeFundamentals({ symbol: "ACME", summary: filingSummary, income, balanceSheet: balance, cashFlow: cash, ratios: [], source: "sec-edgar" });
+    expect(result.metrics.trailingPe).toBeCloseTo(2_000 / 130);
+    expect(result.metrics.priceToSales).toBeCloseTo(2);
+    expect(result.metrics.priceToBook).toBeCloseTo(2_000 / 750);
+    expect(result.metrics.debtToEquity).toBeCloseTo(300 / 750);
+    expect(result.metrics.earningsYield).toBeCloseTo(130 / 2_000);
   });
 });

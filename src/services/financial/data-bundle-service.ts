@@ -37,9 +37,9 @@ export async function getAnalysisDataBundle(symbolInput: string): Promise<Analys
   return (await providerCached(`analysis-bundle:${symbol}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, async () => {
     const now = new Date(); const from = new Date(now.getTime() - 730 * 86_400_000).toISOString().slice(0, 10); const to = now.toISOString().slice(0, 10);
     const [quote, profile, summary, income, balance, cashFlow, analyst, peers, insiders, dividends] = await Promise.allSettled([
-      financialProviderRouter.quote(symbol), financialProviderRouter.profile(symbol), financialProviderRouter.fundamentals(symbol),
-      financialProviderRouter.statements(symbol, "income", "annual", 10), financialProviderRouter.statements(symbol, "balance-sheet", "annual", 10), financialProviderRouter.statements(symbol, "cash-flow", "annual", 10),
-      financialProviderRouter.analystConsensus(symbol), financialProviderRouter.peers(symbol), finnhubCompanyAdapter.getInsiderTransactions(symbol, from, to).catch(async () => getSecForm4Transactions(symbol)), financialProviderRouter.dividendCalendar(from, to, symbol),
+      financialProviderRouter.quote(symbol), financialProviderRouter.profile(symbol), financialProviderRouter.fundamentalsForInstrument(instrument),
+      financialProviderRouter.statementsForInstrument(instrument, "income", "annual", 10), financialProviderRouter.statementsForInstrument(instrument, "balance-sheet", "annual", 10), financialProviderRouter.statementsForInstrument(instrument, "cash-flow", "annual", 10),
+      financialProviderRouter.analystConsensusForInstrument(instrument), financialProviderRouter.peersForInstrument(instrument), finnhubCompanyAdapter.getInsiderTransactions(instrument.mappings.find((item) => item.provider === "finnhub")?.symbol ?? symbol, from, to).catch(async () => getSecForm4Transactions(instrument.mappings.find((item) => item.provider === "sec-edgar")?.symbol ?? symbol)), financialProviderRouter.dividendCalendar(from, to, symbol),
     ]);
     const missingData: MissingDataDetail[] = []; const lineage: FieldProvenance[] = [];
     const settled = <T>(result: PromiseSettledResult<T>, field: string, providers: ProviderName[]): T | null => { if (result.status === "fulfilled") return result.value; missingData.push(missing(field, result.reason, providers)); return null; };

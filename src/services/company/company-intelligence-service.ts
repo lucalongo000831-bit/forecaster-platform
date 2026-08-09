@@ -20,8 +20,10 @@ import { persistCompanyAnalysis } from "./company-analysis-repository";
 import { classifyCompanyInstrument } from "./instrument-applicability";
 import { getAnalysisDataBundle } from "@/services/financial/data-bundle-service";
 import { convertHistoricalPeriods } from "@/services/financial/currency-service";
+import { resolveInstrument } from "@/services/instruments/instrument-resolver";
+import { officialIssuerSources } from "@/providers/official/issuer-sources";
 
-export const COMPANY_INTELLIGENCE_MODEL_VERSION = "company-intelligence-v1.0.1";
+export const COMPANY_INTELLIGENCE_MODEL_VERSION = "company-intelligence-v1.0.2";
 const cacheKey = (symbol: string) => `company-intelligence:${COMPANY_INTELLIGENCE_MODEL_VERSION}:${symbol}`;
 const cacheTag = (symbol: string) => `company-intelligence:${symbol}`;
 const companyAnalysisFlight = createSingleFlight<string, CompanyIntelligenceReport>();
@@ -78,22 +80,25 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   const profileStage = await runCompanyStage("LoadCompanyProfile", () => financialProviderRouter.profile(symbol));
   stages.push(profileStage.stage);
   const profile = profileStage.data?.data ?? null;
+  const instrumentStage = await runCompanyStage("ResolveCanonicalIssuer", () => resolveInstrument(symbol));
+  stages.push(instrumentStage.stage);
+  const resolvedInstrument = instrumentStage.data;
   const { instrumentType, applicable } = classifyCompanyInstrument(symbol, profile?.quoteType, quote.data.quoteType, profile?.name ?? quote.data.name);
-  const sources: CompanySource[] = [{ provider: quote.meta.provider, label: `${symbol} market quote`, url: null, timestamp: quote.meta.sourceTimestamp, kind: "FACT" }, ...profileSource(profile, profileStage.data?.meta.provider ?? null)];
+  const sources: CompanySource[] = [{ provider: quote.meta.provider, label: `${symbol} market quote`, url: null, timestamp: quote.meta.sourceTimestamp, kind: "FACT" }, ...profileSource(profile, profileStage.data?.meta.provider ?? null), ...officialIssuerSources(resolvedInstrument ?? null)];
   if (!applicable) {
     const unavailableQuality: CompanyDataQuality = { score: 100, confidence: "HIGH", completeness: 100, stale: false, checks: [{ code: "INSTRUMENT_APPLICABILITY", status: "PASS", message: `Corporate analysis is not applicable to ${instrumentType}.` }], missingFields: [], divergences: [] };
     const report: CompanyIntelligenceReport = { symbol, market: quote.data.exchange, name: profile?.name ?? quote.data.name, exchange: profile?.exchange ?? quote.data.exchange, sector: profile?.sector ?? null, industry: profile?.industry ?? null, currency: quote.data.currency, instrumentType, applicable: false, currentPrice: quote.data.price, dailyChangePercent: quote.data.changePercent, marketCap: quote.data.marketCap, marketState: quote.data.marketState, verdict: "INSUFFICIENT_DATA", assessment: "INSUFFICIENT_DATA", overallScore: null, confidence: "HIGH", dataQuality: unavailableQuality, historical: [], earningsQuality: null, quality: null, moat: null, management: null, peers: [], valuation: null, horizons: [], dailyOutlook: null, seasonality: [], operationalCalendar: [], risks: null, macro: null, thesis: { verdict: "NOT APPLICABLE", whyItMayWork: [], whyItMayFail: [], monitor: [] }, sources, limitations: [`Corporate analysis is not applicable to instrument type ${instrumentType}.`], pipeline: stages, modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION, scoringVersion: COMPANY_SCORE_VERSION, valuationVersion: "company-valuation-v1.0.0", signalVersion: TECHNICAL_MODEL_VERSION, reportVersion: COMPANY_REPORT_VERSION, providerVersions: providerVersions(sources), dataTimestamp: quote.meta.sourceTimestamp, calculatedAt: new Date().toISOString() };
     await cacheSet(cacheKey(symbol), report, 21_600); return report;
   }
   const [summaryStage, annualIncomeStage, annualBalanceStage, annualCashStage, quarterIncomeStage, quarterBalanceStage, quarterCashStage, analystStage, technicalStage, newsStage, bundleStage] = await Promise.all([
-    runCompanyStage("LoadFundamentals", () => financialProviderRouter.fundamentals(symbol)),
-    runCompanyStage("LoadAnnualIncome", () => financialProviderRouter.statements(symbol, "income", "annual", 10), { empty: (value) => !value.data.length }),
-    runCompanyStage("LoadAnnualBalance", () => financialProviderRouter.statements(symbol, "balance-sheet", "annual", 10), { empty: (value) => !value.data.length }),
-    runCompanyStage("LoadAnnualCashFlow", () => financialProviderRouter.statements(symbol, "cash-flow", "annual", 10), { empty: (value) => !value.data.length }),
-    runCompanyStage("LoadQuarterlyIncome", () => financialProviderRouter.statements(symbol, "income", "quarter", 12), { empty: (value) => !value.data.length }),
-    runCompanyStage("LoadQuarterlyBalance", () => financialProviderRouter.statements(symbol, "balance-sheet", "quarter", 12), { empty: (value) => !value.data.length }),
-    runCompanyStage("LoadQuarterlyCashFlow", () => financialProviderRouter.statements(symbol, "cash-flow", "quarter", 12), { empty: (value) => !value.data.length }),
-    runCompanyStage("LoadAnalystData", () => financialProviderRouter.analystConsensus(symbol)),
+    runCompanyStage("LoadFundamentals", () => resolvedInstrument ? financialProviderRouter.fundamentalsForInstrument(resolvedInstrument) : financialProviderRouter.fundamentals(symbol)),
+    runCompanyStage("LoadAnnualIncome", () => resolvedInstrument ? financialProviderRouter.statementsForInstrument(resolvedInstrument, "income", "annual", 10) : financialProviderRouter.statements(symbol, "income", "annual", 10), { empty: (value) => !value.data.length }),
+    runCompanyStage("LoadAnnualBalance", () => resolvedInstrument ? financialProviderRouter.statementsForInstrument(resolvedInstrument, "balance-sheet", "annual", 10) : financialProviderRouter.statements(symbol, "balance-sheet", "annual", 10), { empty: (value) => !value.data.length }),
+    runCompanyStage("LoadAnnualCashFlow", () => resolvedInstrument ? financialProviderRouter.statementsForInstrument(resolvedInstrument, "cash-flow", "annual", 10) : financialProviderRouter.statements(symbol, "cash-flow", "annual", 10), { empty: (value) => !value.data.length }),
+    runCompanyStage("LoadQuarterlyIncome", () => resolvedInstrument ? financialProviderRouter.statementsForInstrument(resolvedInstrument, "income", "quarter", 12) : financialProviderRouter.statements(symbol, "income", "quarter", 12), { empty: (value) => !value.data.length }),
+    runCompanyStage("LoadQuarterlyBalance", () => resolvedInstrument ? financialProviderRouter.statementsForInstrument(resolvedInstrument, "balance-sheet", "quarter", 12) : financialProviderRouter.statements(symbol, "balance-sheet", "quarter", 12), { empty: (value) => !value.data.length }),
+    runCompanyStage("LoadQuarterlyCashFlow", () => resolvedInstrument ? financialProviderRouter.statementsForInstrument(resolvedInstrument, "cash-flow", "quarter", 12) : financialProviderRouter.statements(symbol, "cash-flow", "quarter", 12), { empty: (value) => !value.data.length }),
+    runCompanyStage("LoadAnalystData", () => resolvedInstrument ? financialProviderRouter.analystConsensusForInstrument(resolvedInstrument) : financialProviderRouter.analystConsensus(symbol)),
     runCompanyStage("CalculateTechnicalOutlook", () => getTechnicalAnalysis(symbol, "1m", "^GSPC")),
     runCompanyStage("LoadNews", () => getNewsIntelligence(symbol, 30)),
     runCompanyStage("BuildAnalysisDataBundle", () => getAnalysisDataBundle(symbol)),
@@ -114,7 +119,7 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   if (technicalStage.data) sources.push({ provider: technicalStage.data.provider, label: "Historical prices and technical calculations", url: null, timestamp: technicalStage.data.sourceTimestamp, kind: "CALCULATED" });
   if (newsStage.data) sources.push({ provider: newsStage.data.meta.provider, label: "Company news intelligence", url: null, timestamp: newsStage.data.meta.sourceTimestamp, kind: "CALCULATED" });
   const statements = (stage: typeof annualIncomeStage): FinancialStatement[] => stage.data?.data ?? [];
-  const peerStage = await runCompanyStage("LoadPeers", () => financialProviderRouter.peers(symbol), { empty: (value) => !value.data.length }); stages.push(peerStage.stage);
+  const peerStage = await runCompanyStage("LoadPeers", () => resolvedInstrument ? financialProviderRouter.peersForInstrument(resolvedInstrument) : financialProviderRouter.peers(symbol), { empty: (value) => !value.data.length }); stages.push(peerStage.stage);
   const peers: PeerComparison[] = await Promise.all((peerStage.data?.data ?? []).slice(0, 5).map(async (peerSymbol) => {
     const [peerProfile, peerFundamentals] = await Promise.all([financialProviderRouter.profile(peerSymbol).catch(() => null), financialProviderRouter.fundamentals(peerSymbol).catch(() => null)]);
     return { symbol: peerSymbol, name: peerProfile?.data.name ?? peerSymbol, verified: Boolean(peerFundamentals), metrics: { marketCap: peerFundamentals?.data.marketCap ?? null, trailingPe: peerFundamentals?.data.trailingPe ?? null, priceToBook: peerFundamentals?.data.priceToBook ?? null, returnOnEquity: peerFundamentals?.data.returnOnEquity ?? null, profitMargins: peerFundamentals?.data.profitMargins ?? null }, percentiles: {}, provider: peerFundamentals?.meta.provider ?? peerStage.data!.meta.provider };
@@ -127,10 +132,29 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   const needsCurrencyConversion = reportingCurrencies.some((currency) => currency !== quote.data.currency);
   const currencyStage = await runCompanyStage("NormalizeReportingCurrency", () => needsCurrencyConversion ? convertHistoricalPeriods(annualHistory, quote.data.currency) : Promise.resolve(annualHistory), { empty: (value) => annualHistory.length > 0 && !value.length }); stages.push(currencyStage.stage);
   const analyticalHistory = currencyStage.data ?? (needsCurrencyConversion ? [] : annualHistory);
-  const fundamental = summaryStage.data ? analyzeFundamentals({ symbol, summary: summaryStage.data.data, income: statements(annualIncomeStage), balanceSheet: statements(annualBalanceStage), cashFlow: statements(annualCashStage), ratios: [], analyst: analystStage.data?.data ?? null, source: summaryStage.data.meta.provider }) : null;
-  const marketCap = quote.data.marketCap ?? summaryStage.data?.data.marketCap ?? null;
+  const filingShares = summaryStage.data?.data.sharesOutstanding ?? null;
+  const filingMarketCap = filingShares !== null && quote.data.currency === (resolvedInstrument?.issuer?.reportingCurrency ?? quote.data.currency) ? quote.data.price * filingShares : null;
+  const marketCap = filingMarketCap ?? quote.data.marketCap ?? summaryStage.data?.data.marketCap ?? null;
+  const latestAnnual = analyticalHistory[0];
+  const reconciledSummary = summaryStage.data ? {
+    ...summaryStage.data.data,
+    marketCap,
+    enterpriseValue: marketCap !== null && latestAnnual?.netDebt !== null && latestAnnual?.netDebt !== undefined ? marketCap + latestAnnual.netDebt : summaryStage.data.data.enterpriseValue,
+    trailingEps: latestAnnual?.dilutedEps ?? summaryStage.data.data.trailingEps,
+    revenue: latestAnnual?.revenue ?? summaryStage.data.data.revenue,
+    freeCashflow: latestAnnual?.freeCashFlow ?? summaryStage.data.data.freeCashflow,
+  } : null;
+  const fundamental = reconciledSummary ? analyzeFundamentals({ symbol, summary: reconciledSummary, income: statements(annualIncomeStage), balanceSheet: statements(annualBalanceStage), cashFlow: statements(annualCashStage), ratios: [], analyst: analystStage.data?.data ?? null, source: summaryStage.data!.meta.provider }) : null;
   const dataTimestamp = annualHistory[0]?.fiscalDate ?? quote.meta.sourceTimestamp;
   const dataQuality = validateCompanyData({ income, balance, cashFlow, periods: historical, dataTimestamp });
+  if (filingMarketCap !== null && quote.data.marketCap !== null) {
+    const relativeDifference = Math.abs(filingMarketCap - quote.data.marketCap) / Math.max(Math.abs(filingMarketCap), Math.abs(quote.data.marketCap), 1);
+    dataQuality.checks.push({ code: "MARKET_CAP_RECONCILIATION", status: relativeDifference <= 0.1 ? "PASS" : "WARN", message: relativeDifference <= 0.1 ? "Listing market cap reconciles with official period-end common shares." : "Provider market cap diverges from listing price multiplied by official period-end common shares; the reconciled value is used." });
+    if (relativeDifference > 0.1) {
+      dataQuality.divergences.push(`Provider market cap differs by ${(relativeDifference * 100).toFixed(1)}% from price × official period-end common shares.`);
+      dataQuality.score = Math.max(0, dataQuality.score - 6);
+    }
+  }
   if (fundamental) { dataQuality.completeness = Math.max(dataQuality.completeness, fundamental.dataCompleteness * 0.75); dataQuality.score = Math.max(dataQuality.score, fundamental.dataCompleteness * 0.65); }
   const earningsQuality = analyzeEarningsQuality(analyticalHistory, marketCap);
   const moat = analyzeMoat(fundamental, analyticalHistory); const management = analyzeManagement(analyticalHistory, bundleStage.data?.insiderSignal);

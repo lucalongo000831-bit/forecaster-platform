@@ -21,6 +21,10 @@ export function analyzeEarningsQuality(periods: HistoricalCompanyPeriod[], marke
   const fcfYield = ratio(latest.freeCashFlow, marketCap);
   const fcfPerShare = ratio(latest.freeCashFlow, latest.dilutedShares);
   const ebitdaToFcfConversion = ratio(latest.freeCashFlow, latest.ebitda);
+  const inventoryGrowth = ratio(latest.inventory !== null && latest.inventory !== undefined && previous?.inventory !== null && previous?.inventory !== undefined ? latest.inventory - previous.inventory : null, previous?.inventory === undefined ? null : previous.inventory === null ? null : Math.abs(previous.inventory));
+  const inventoryToRevenue = ratio(latest.inventory ?? null, latest.revenue);
+  const receivablesGrowth = ratio(latest.receivables !== null && latest.receivables !== undefined && previous?.receivables !== null && previous?.receivables !== undefined ? latest.receivables - previous.receivables : null, previous?.receivables === undefined ? null : previous.receivables === null ? null : Math.abs(previous.receivables));
+  const receivablesToRevenue = ratio(latest.receivables ?? null, latest.revenue);
   const cashConversionScore = scoreAverage([
     cashConversion === null ? null : clamp(35 + cashConversion * 45, 0, 100),
     fcfToNetIncome === null ? null : clamp(35 + fcfToNetIncome * 45, 0, 100),
@@ -37,12 +41,14 @@ export function analyzeEarningsQuality(periods: HistoricalCompanyPeriod[], marke
   if (fcfToNetIncome !== null && fcfToNetIncome < 0.65) redFlags.push("Free cash flow is materially below reported net income.");
   if (sbcToFcf !== null && sbcToFcf > 0.3) redFlags.push("Stock-based compensation is high relative to free cash flow.");
   if (dilution !== null && dilution > 0.03) redFlags.push("Diluted share count increased by more than 3% year over year.");
+  if (inventoryGrowth !== null && latest.revenue !== null && previous?.revenue && inventoryGrowth > latest.revenue / previous.revenue - 1 + 0.1) redFlags.push("Inventory growth exceeded revenue growth by more than 10 percentage points.");
+  if (receivablesGrowth !== null && latest.revenue !== null && previous?.revenue && receivablesGrowth > latest.revenue / previous.revenue - 1 + 0.1) redFlags.push("Receivables growth exceeded revenue growth by more than 10 percentage points.");
   const negativeFcf = latest.freeCashFlow !== null && latest.freeCashFlow < 0;
   const classification = negativeFcf ? "NEGATIVE" : riskAdjusted === null ? "NOT_ASSESSABLE" : riskAdjusted >= 80 ? "EXCELLENT" : riskAdjusted >= 65 ? "GOOD" : riskAdjusted >= 50 ? "FAIR" : "WEAK";
   const available = [cashConversion, fcfToNetIncome, fcfMargin, fcfYield, fcfPerShare, ebitdaToFcfConversion, dilution, sbcToFcf].filter((value) => value !== null).length;
   return {
     score: riskAdjusted, cashConversionScore, accrualRiskScore, dilutionRiskScore, normalizationRiskScore,
-    cashConversion, fcfToNetIncome, fcfMargin, fcfYield, fcfPerShare, ebitdaToFcfConversion, classification, redFlags,
+    cashConversion, fcfToNetIncome, fcfMargin, fcfYield, fcfPerShare, ebitdaToFcfConversion, inventoryGrowth, inventoryToRevenue, receivablesGrowth, receivablesToRevenue, classification, redFlags,
     assumptions: ["FCF uses reported FCF or operating cash flow plus provider-signed capex.", "Maintenance and growth capex are not separated without a verified disclosure.", "Adjusted-versus-GAAP risk remains unavailable without structured adjusted earnings."],
     confidence: confidence(available, periods.length), modelVersion: EARNINGS_QUALITY_MODEL_VERSION,
   };

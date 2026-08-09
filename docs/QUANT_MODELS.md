@@ -5,7 +5,7 @@ All production calculations are pure server-side functions, timestamped and vers
 ## Versions
 
 - Technical indicators: `technical-v1.0.0`.
-- Fundamental scoring: `fundamental-v1.0.0`.
+- Fundamental scoring: `fundamental-v1.0.1`.
 - Seasonality: `seasonality-v1.0.0`.
 - Multi-horizon signals: `signal-v1.0.0`.
 - Targets/risk: `targets-v1.0.0`, `risk-v1.0.0`.

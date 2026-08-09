@@ -1,7 +1,7 @@
 import type { AnalystConsensus, FinancialStatement, FundamentalRatios } from "@/providers";
 import type { MarketFundamentalsDto } from "@/types";
 
-export const FUNDAMENTAL_MODEL_VERSION = "fundamental-v1.0.0";
+export const FUNDAMENTAL_MODEL_VERSION = "fundamental-v1.0.1";
 
 export interface FundamentalMetricSet {
   revenueGrowthYoY: number | null;

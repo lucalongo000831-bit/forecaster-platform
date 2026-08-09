@@ -57,6 +57,9 @@ export interface FieldProvenance {
   formula?: string | null;
   inputs?: string[];
   missingReason?: MissingDataReason;
+  sourceConcept?: string | null;
+  accessionNumber?: string | null;
+  sourceUrl?: string | null;
 }
 
 export interface ProviderResult<T> {
@@ -75,6 +78,7 @@ export interface FinancialStatement {
   reportedCurrency: string | null;
   acceptedAt: string | null;
   values: Record<string, number | null>;
+  lineage?: Record<string, FieldProvenance>;
 }
 
 export interface FundamentalRatios {

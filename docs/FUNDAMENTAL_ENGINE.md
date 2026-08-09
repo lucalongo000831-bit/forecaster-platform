@@ -1,6 +1,6 @@
 # Fundamental engine
 
-Model version: `fundamental-v1.0.0`.
+Model version: `fundamental-v1.0.1`.
 
 The engine receives normalized FMP/Yahoo summary fields plus annual or quarterly income statements, balance sheets, cash-flow statements and ratios. It never calls a provider and never replaces a missing field with zero. The server-side provider router is therefore replaceable without changing calculations or UI components.
 

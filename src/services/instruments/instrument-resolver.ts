@@ -8,6 +8,7 @@ import { financialProviderRouter } from "@/providers/router";
 import type { ProviderName } from "@/providers/types";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import type { InstrumentKind, ProviderSymbolMapping, ResolvedInstrument } from "@/types";
+import { verifiedIssuerByLegalName, verifiedIssuerByListing } from "./verified-issuer-registry";
 
 function kindFor(symbol: string, quoteType?: string | null): InstrumentKind {
   const type = quoteType?.toUpperCase() ?? "";
@@ -38,16 +39,23 @@ export async function resolveInstrument(symbolInput: string): Promise<ResolvedIn
         name = profile.data.name; exchange = profile.data.exchange; currency = profile.data.currency; countryCode = profile.data.country; sector = profile.data.sector; industry = profile.data.industry; website = profile.data.website; quoteType = profile.data.quoteType;
         mappings.push(map(profile.meta.provider, profile.meta.provider === "eodhd" && !symbol.includes(".") ? `${symbol}.US` : symbol, exchange, null, 0.95));
       }
-      const sec = await resolveSecIdentity(symbol).catch(() => null);
+      const verified = verifiedIssuerByLegalName(profile?.data.name) ?? verifiedIssuerByListing(symbol);
+      const sec = await resolveSecIdentity(symbol, profile?.data.name ?? verified?.legalName).catch(() => null);
       if (sec) { cik = sec.cik; name = profile?.data.name ?? sec.title; mappings.push(map("sec-edgar", sec.cik, "SEC", sec.cik, 1)); }
       if (!profile && !sec) warnings.push("Issuer identifiers could not be verified by EODHD or SEC.");
       if (!symbol.startsWith("^") && !symbol.includes("=")) {
-        mappings.push(map("fmp", symbol, exchange, null, 0.8), map("finnhub", symbol.split(".")[0]!, exchange, null, symbol.includes(".") ? 0.65 : 0.9), map("massive", symbol, exchange, null, symbol.includes(".") ? 0.4 : 0.9));
+        mappings.push(map("fmp", symbol, exchange, null, 0.8), map("finnhub", verified?.issuerProviderSymbols.finnhub ?? sec?.symbol ?? symbol.split(".")[0]!, exchange, null, verified || sec ? 1 : symbol.includes(".") ? 0.65 : 0.9), map("massive", symbol, exchange, null, symbol.includes(".") ? 0.4 : 0.9));
+      }
+      if (verified) {
+        cik = verified.cik;
+        countryCode = countryCode ?? verified.countryCode;
+        mappings.push(...Object.entries(verified.issuerProviderSymbols).flatMap(([provider, providerSymbol]) => providerSymbol && !mappings.some((item) => item.provider === provider && item.symbol === providerSymbol) ? [map(provider as ProviderName, providerSymbol, provider === "sec-edgar" ? "SEC" : exchange, provider === "sec-edgar" ? providerSymbol : null, 1)] : []));
       }
     }
     const kind = kindFor(symbol, quoteType);
-    const issuer = kind === "EQUITY" ? { legalName: name, countryCode, lei: null, cik, isin: null, website, sector, industry } : null;
-    const data: ResolvedInstrument = { canonicalSymbol: symbol, name, kind, exchange, mic: null, currency, tradingCurrency: currency, countryCode, issuer, mappings, resolutionQuality: warnings.length ? mappings.length > 1 ? "partial" : "unavailable" : "verified", warnings };
+    const verified = verifiedIssuerByLegalName(name) ?? verifiedIssuerByListing(symbol);
+    const issuer = kind === "EQUITY" ? { legalName: verified?.legalName ?? name, countryCode: verified?.countryCode ?? countryCode, lei: verified?.lei ?? null, cik: verified?.cik ?? cik, isin: verified?.isin ?? null, website, sector, industry, reportingCurrency: verified?.reportingCurrency ?? null, comparableHistoryStartDate: verified?.comparableHistoryStartDate ?? null } : null;
+    const data: ResolvedInstrument = { canonicalSymbol: symbol, name, kind, exchange, mic: verified?.listings.find((listing) => listing.providerSymbol === symbol)?.mic ?? null, currency, tradingCurrency: currency, countryCode, issuer, listings: verified?.listings, mappings, resolutionQuality: warnings.length ? mappings.length > 1 ? "partial" : "unavailable" : "verified", warnings };
     return providerResult("eodhd", data, { freshness: "cached", freshnessType: "CACHED", quality: data.resolutionQuality });
   })).data;
 }

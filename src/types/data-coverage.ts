@@ -12,6 +12,19 @@ export interface IssuerIdentity {
   website: string | null;
   sector: string | null;
   industry: string | null;
+  reportingCurrency?: string | null;
+  comparableHistoryStartDate?: string | null;
+}
+
+export interface IssuerListing {
+  symbol: string;
+  providerSymbol: string;
+  exchange: string;
+  mic: string | null;
+  currency: string;
+  countryCode: string | null;
+  primary: boolean;
+  verificationUrl: string | null;
 }
 
 export interface ProviderSymbolMapping {
@@ -33,6 +46,7 @@ export interface ResolvedInstrument {
   tradingCurrency: string | null;
   countryCode: string | null;
   issuer: IssuerIdentity | null;
+  listings?: IssuerListing[];
   mappings: ProviderSymbolMapping[];
   resolutionQuality: DataQuality;
   warnings: string[];

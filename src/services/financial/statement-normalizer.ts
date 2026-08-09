@@ -31,7 +31,8 @@ export function normalizeFinancialStatements(input: { income: FinancialStatement
       cash: value(row.balance, aliases.cash), totalAssets: value(row.balance, aliases.totalAssets), totalDebt: value(row.balance, aliases.totalDebt), totalEquity: value(row.balance, aliases.totalEquity), operatingCashFlow: value(row.cashFlow, aliases.operatingCashFlow), capitalExpenditure: value(row.cashFlow, aliases.capitalExpenditure), freeCashFlow: value(row.cashFlow, aliases.freeCashFlow),
     };
     const freeCashFlow = direct.freeCashFlow ?? (direct.operatingCashFlow !== null && direct.capitalExpenditure !== null ? direct.operatingCashFlow + (direct.capitalExpenditure > 0 ? -direct.capitalExpenditure : direct.capitalExpenditure) : null);
-    const provenance = Object.fromEntries(Object.keys(direct).map((field) => [field, lineage(field, input.provider, timestamp, currency)]));
+    const sourceForField = (field: string) => row.income?.lineage?.[field] ?? row.balance?.lineage?.[field] ?? row.cashFlow?.lineage?.[field] ?? lineage(field, input.provider, timestamp, currency);
+    const provenance = Object.fromEntries(Object.keys(direct).map((field) => [field, sourceForField(field)]));
     if (direct.freeCashFlow === null && freeCashFlow !== null) provenance.freeCashFlow = lineage("freeCashFlow", "calculated", timestamp, currency, "operatingCashFlow - abs(capitalExpenditure)", ["operatingCashFlow", "capitalExpenditure"]);
     const period: NormalizedFinancialPeriod["period"] = source.period === "annual" ? "annual" : "quarter";
     return { period, fiscalDate: source.fiscalDate, filingDate: source.acceptedAt, currency, ...direct, freeCashFlow, provenance };

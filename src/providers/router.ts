@@ -34,7 +34,7 @@ import type {
   StatementKind,
   StatementPeriod,
 } from "./types";
-import type { ChartRange } from "@/types";
+import type { ChartRange, ResolvedInstrument } from "@/types";
 
 const marketAdapters = {
   massive: new MassiveMarketDataAdapter(),
@@ -49,6 +49,10 @@ const macroAdapters = { fmp: new FmpMacroAdapter(), "alpha-vantage": new AlphaVa
 const capabilityBlocks = new Map<string, number>();
 
 function unique<T>(values: T[]) { return [...new Set(values)]; }
+
+function mappedSymbol(instrument: ResolvedInstrument, provider: ProviderName) {
+  return instrument.mappings.find((mapping) => mapping.provider === provider)?.symbol ?? instrument.canonicalSymbol;
+}
 
 async function firstAvailable<T>(operation: string, symbol: string | undefined, candidates: Array<{ name: ProviderName; configured: boolean; supported: boolean; task: () => Promise<ProviderResult<T>> }>) {
   const errors: ProviderError[] = [];
@@ -143,10 +147,34 @@ export class FinancialProviderRouter {
     return providerCached(`fundamentals:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("fundamentals", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getFundamentals(symbol) }))));
   }
 
+  fundamentalsForInstrument(instrument: ResolvedInstrument) {
+    const order = this.fundamentalOrder();
+    const cacheIdentity = instrument.issuer?.cik ?? instrument.issuer?.lei ?? instrument.canonicalSymbol;
+    return providerCached(`fundamentals:issuer:${cacheIdentity}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("fundamentals", instrument.canonicalSymbol, order.map((adapter) => {
+      const symbol = mappedSymbol(instrument, adapter.name);
+      return { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getFundamentals(symbol) };
+    })));
+  }
+
   statements(symbolInput: string, kind: StatementKind, period: StatementPeriod, limit = 5) {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.fundamentalOrder();
     return providerCached(`statements:${symbol}:${kind}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, () => firstAvailable("statements", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getStatements(symbol, kind, period, limit) }))));
+  }
+
+  statementsForInstrument(instrument: ResolvedInstrument, kind: StatementKind, period: StatementPeriod, limit = 5) {
+    const order = this.fundamentalOrder();
+    const cacheIdentity = instrument.issuer?.cik ?? instrument.issuer?.lei ?? instrument.canonicalSymbol;
+    return providerCached(`statements:issuer:${cacheIdentity}:${kind}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, async () => {
+      const result = await firstAvailable("statements", instrument.canonicalSymbol, order.map((adapter) => {
+        const symbol = mappedSymbol(instrument, adapter.name);
+        return { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getStatements(symbol, kind, period, limit) };
+      }));
+      const comparableStart = instrument.issuer?.comparableHistoryStartDate;
+      const data = comparableStart && period === "annual" ? result.data.filter((statement) => statement.fiscalDate >= comparableStart) : result.data;
+      if (!data.length) throw new ProviderError(result.meta.provider, "NOT_FOUND", "Nessun periodo finanziario comparabile disponibile per l'issuer corrente.", false, 404);
+      return { ...result, data };
+    });
   }
 
   ratios(symbolInput: string, period: StatementPeriod, limit = 5) {
@@ -159,6 +187,14 @@ export class FinancialProviderRouter {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.fundamentalOrder();
     return providerCached(`analyst:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystConsensus(symbol) }))));
+  }
+
+  analystConsensusForInstrument(instrument: ResolvedInstrument) {
+    const order = this.fundamentalOrder();
+    return providerCached(`analyst:issuer:${instrument.issuer?.cik ?? instrument.canonicalSymbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst", instrument.canonicalSymbol, order.map((adapter) => {
+      const symbol = mappedSymbol(instrument, adapter.name);
+      return { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystConsensus(symbol) };
+    })));
   }
 
   analystEstimates(symbolInput: string, limit = 8) {
@@ -182,6 +218,22 @@ export class FinancialProviderRouter {
       { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getPeers(symbol) },
       { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !symbol.startsWith("^") && !symbol.endsWith("-USD"), task: async () => providerResult("finnhub", await finnhubCompanyAdapter.getPeers(symbol), { freshness: "cached", freshnessType: "END_OF_DAY" }) },
     ]));
+  }
+
+  peersForInstrument(instrument: ResolvedInstrument) {
+    const fmp = fundamentalAdapters.fmp;
+    const fmpSymbol = mappedSymbol(instrument, "fmp");
+    const finnhubSymbol = mappedSymbol(instrument, "finnhub");
+    return providerCached(`peers:issuer:${instrument.issuer?.cik ?? instrument.canonicalSymbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, async () => {
+      const result = await firstAvailable("peers", instrument.canonicalSymbol, [
+        { name: fmp.name, configured: fmp.isConfigured(), supported: fmp.supportsSymbol(fmpSymbol), task: () => fmp.getPeers(fmpSymbol) },
+        { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !finnhubSymbol.startsWith("^") && !finnhubSymbol.endsWith("-USD"), task: async () => providerResult("finnhub", await finnhubCompanyAdapter.getPeers(finnhubSymbol), { freshness: "cached", freshnessType: "END_OF_DAY" }) },
+      ]);
+      const issuerListings = new Set([instrument.canonicalSymbol, ...instrument.mappings.map((mapping) => mapping.symbol), ...(instrument.listings?.flatMap((listing) => [listing.symbol, listing.providerSymbol]) ?? [])].map((value) => value.toUpperCase()));
+      const data = result.data.filter((symbol) => !issuerListings.has(symbol.toUpperCase()));
+      if (!data.length) throw new ProviderError(result.meta.provider, "NOT_FOUND", "Il provider ha restituito soltanto listing dello stesso issuer, non peer economici.", false, 404);
+      return { ...result, data };
+    });
   }
 
   earningsCalendar(from: string, to: string, symbol?: string) {
