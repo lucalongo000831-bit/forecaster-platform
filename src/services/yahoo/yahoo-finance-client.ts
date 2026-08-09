@@ -273,6 +273,118 @@ export class YahooFinanceClient {
     }))).value;
   }
 
+  async analystConsensus(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput);
+    return (await cached(`analyst-consensus:${symbol}`, { freshMs: 6 * 60 * 60_000, staleMs: 48 * 60 * 60_000 }, () => withRetry("analyst-consensus", symbol, async () => {
+      const [quote, summary] = await Promise.all([
+        this.quote(symbol),
+        yahoo.quoteSummary(symbol, { modules: ["financialData"] }, moduleOptions(18_000)),
+      ]);
+      const financial = summary.financialData;
+      const targetConsensus = nullable(financial?.targetMeanPrice);
+      if (targetConsensus === null) throw new FinancialDataError("NOT_FOUND", "Consensus analisti non disponibile per questo simbolo.", 404);
+      return {
+        symbol,
+        targetLow: nullable(financial?.targetLowPrice),
+        targetHigh: nullable(financial?.targetHighPrice),
+        targetMedian: nullable(financial?.targetMedianPrice),
+        targetConsensus,
+        analystCount: nullable(financial?.numberOfAnalystOpinions),
+        currency: financial?.financialCurrency || quote.currency,
+        asOf: quote.asOf,
+      };
+    }))).value;
+  }
+
+  async relatedSymbols(symbolInput: string): Promise<string[]> {
+    const symbol = normalizeSymbol(symbolInput);
+    return (await cached(`related-symbols:${symbol}`, { freshMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 }, () => withRetry("related-symbols", symbol, async () => {
+      const result = await yahoo.recommendationsBySymbol(symbol, {}, moduleOptions(15_000));
+      const related = result.recommendedSymbols
+        .filter((item) => typeof item.symbol === "string" && item.symbol.toUpperCase() !== symbol)
+        .sort((left, right) => right.score - left.score)
+        .map((item) => normalizeSymbol(item.symbol))
+        .slice(0, 12);
+      if (!related.length) throw new FinancialDataError("NOT_FOUND", "Peer economici non disponibili per questo simbolo.", 404);
+      return [...new Set(related)];
+    }))).value;
+  }
+
+  async dividendHistory(symbolInput: string, from: string, to: string) {
+    const symbol = normalizeSymbol(symbolInput);
+    const period1 = new Date(`${from}T00:00:00.000Z`);
+    const period2 = new Date(`${to}T23:59:59.999Z`);
+    if (!Number.isFinite(period1.getTime()) || !Number.isFinite(period2.getTime()) || period1 >= period2) throw new FinancialDataError("INVALID_QUERY", "Intervallo dividendi non valido.", 400);
+    return (await cached(`dividend-history:${symbol}:${from}:${to}`, { freshMs: 12 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 }, () => withRetry("dividend-history", symbol, async () => {
+      const [quote, result] = await Promise.all([
+        this.quote(symbol),
+        yahoo.chart(symbol, { period1, period2, interval: "1mo", events: "div", return: "array" }, moduleOptions(18_000)),
+      ]);
+      const events = (result.events?.dividends ?? []).flatMap((event) => event.date instanceof Date && Number.isFinite(event.amount) ? [{
+        symbol,
+        date: event.date.toISOString().slice(0, 10),
+        recordDate: null,
+        paymentDate: null,
+        declarationDate: null,
+        amount: event.amount,
+        adjustedAmount: event.amount,
+        yield: null,
+        frequency: null,
+        currency: quote.currency,
+      }] : []);
+      if (!events.length) throw new FinancialDataError("NOT_FOUND", "Storico dividendi non disponibile per questo simbolo.", 404);
+      return events;
+    }))).value;
+  }
+
+  async insiderTransactions(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput);
+    return (await cached(`insider-transactions:${symbol}`, { freshMs: 6 * 60 * 60_000, staleMs: 48 * 60 * 60_000 }, () => withRetry("insider-transactions", symbol, async () => {
+      const summary = await yahoo.quoteSummary(symbol, { modules: ["insiderTransactions"] }, moduleOptions(18_000));
+      const transactions = (summary.insiderTransactions?.transactions ?? []).map((item) => {
+        const sale = /sale|sold|disposition/i.test(item.transactionText);
+        const purchase = /purchase|bought|acquisition/i.test(item.transactionText);
+        return {
+          name: item.filerName,
+          share: item.shares,
+          change: sale ? -Math.abs(item.shares) : purchase ? Math.abs(item.shares) : null,
+          filingDate: item.startDate.toISOString().slice(0, 10),
+          transactionDate: item.startDate.toISOString().slice(0, 10),
+          transactionCode: sale ? "S" : purchase ? "P" : null,
+          transactionPrice: item.value && item.shares ? item.value / item.shares : null,
+          relation: item.filerRelation,
+          sourceUrl: item.filerUrl,
+          provider: "yahoo" as const,
+        };
+      });
+      if (!transactions.length) throw new FinancialDataError("NOT_FOUND", "Transazioni insider non disponibili per questo simbolo.", 404);
+      return transactions;
+    }))).value;
+  }
+
+  async ownership(symbolInput: string) {
+    const symbol = normalizeSymbol(symbolInput);
+    return (await cached(`ownership:${symbol}`, { freshMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 }, () => withRetry("ownership", symbol, async () => {
+      const summary = await yahoo.quoteSummary(symbol, { modules: ["institutionOwnership", "majorHoldersBreakdown"] }, moduleOptions(18_000));
+      const major = summary.majorHoldersBreakdown;
+      const institutions = (summary.institutionOwnership?.ownershipList ?? []).map((item) => ({
+        organization: item.organization,
+        reportDate: item.reportDate.toISOString().slice(0, 10),
+        percentHeld: item.pctHeld,
+        position: item.position,
+        value: item.value,
+      }));
+      const data = {
+        institutions,
+        institutionalOwnership: nullable(major?.institutionsPercentHeld),
+        insiderOwnership: nullable(major?.insidersPercentHeld),
+        institutionsCount: nullable(major?.institutionsCount),
+      };
+      if (!institutions.length && data.institutionalOwnership === null && data.insiderOwnership === null) throw new FinancialDataError("NOT_FOUND", "Dati di proprietà non disponibili per questo simbolo.", 404);
+      return data;
+    }))).value;
+  }
+
   async news(symbolInput: string): Promise<MarketNewsDto[]> {
     const symbol = normalizeSymbol(symbolInput);
     return (await cached(`news:${symbol}`, { freshMs: 10 * 60_000, staleMs: 60 * 60_000 }, () => withRetry("news", symbol, async () => {

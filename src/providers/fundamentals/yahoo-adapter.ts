@@ -29,17 +29,16 @@ export class YahooFundamentalsAdapter implements FundamentalsProvider {
     void [_symbol, _period, _limit];
     throw new ProviderError(this.name, "PLAN_RESTRICTED", "Serie storiche dei ratio non esposte dall'adapter Yahoo.", false, 501);
   }
-  async getAnalystConsensus(_symbol: string): Promise<never> {
-    void _symbol;
-    throw new ProviderError(this.name, "PLAN_RESTRICTED", "Consensus analisti non esposto dall'adapter Yahoo.", false, 501);
+  async getAnalystConsensus(symbol: string) {
+    return providerResult(this.name, await yahooFinanceClient.analystConsensus(symbol), { freshness: "cached", freshnessType: "END_OF_DAY", quality: "partial" });
   }
   async getEarningsCalendar(_from: string, _to: string, _symbol?: string): Promise<never> {
     void [_from, _to, _symbol];
     throw new ProviderError(this.name, "PLAN_RESTRICTED", "Calendario earnings non esposto dall'adapter Yahoo.", false, 501);
   }
-  async getDividendCalendar(_from: string, _to: string, _symbol?: string): Promise<never> {
-    void [_from, _to, _symbol];
-    throw new ProviderError(this.name, "PLAN_RESTRICTED", "Calendario dividendi non esposto dall'adapter Yahoo.", false, 501);
+  async getDividendCalendar(from: string, to: string, symbol?: string) {
+    if (!symbol) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Yahoo richiede un simbolo per lo storico dividendi.", false, 400);
+    return providerResult(this.name, await yahooFinanceClient.dividendHistory(symbol, from, to), { freshness: "cached", freshnessType: "END_OF_DAY", quality: "partial" });
   }
   async getEconomicCalendar(_from: string, _to: string): Promise<never> {
     void [_from, _to];

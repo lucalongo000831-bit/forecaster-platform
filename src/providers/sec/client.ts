@@ -30,7 +30,7 @@ export async function secArchiveText(url: URL) {
   const configuration = getSecConfiguration();
   if (!configuration.configured) throw new ProviderError("sec-edgar", "NOT_CONFIGURED", "SEC EDGAR non configurato.", false, 503);
   if (url.protocol !== "https:" || url.hostname !== "www.sec.gov" || !url.pathname.startsWith("/Archives/edgar/data/")) throw new ProviderError("sec-edgar", "UNSUPPORTED_SYMBOL", "URL archivio SEC non consentito.", false, 422);
-  const response = await coordinatedProviderRequest("sec-edgar", () => fetch(url, { headers: { "User-Agent": configuration.headers["User-Agent"], Accept: "application/xml,text/xml" }, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(16_000) }));
-  if (!response.ok) throw new ProviderError("sec-edgar", response.status === 404 ? "NOT_FOUND" : response.status === 429 ? "RATE_LIMITED" : "UPSTREAM_UNAVAILABLE", "Documento Form 4 SEC non disponibile.", response.status === 429 || response.status >= 500, response.status === 404 ? 404 : 502);
+  const response = await coordinatedProviderRequest("sec-edgar", () => fetch(url, { headers: { "User-Agent": configuration.headers["User-Agent"], Accept: "application/xhtml+xml,text/html,application/xml,text/xml" }, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(20_000) }));
+  if (!response.ok) throw new ProviderError("sec-edgar", response.status === 404 ? "NOT_FOUND" : response.status === 429 ? "RATE_LIMITED" : "UPSTREAM_UNAVAILABLE", "Documento SEC ufficiale non disponibile.", response.status === 429 || response.status >= 500, response.status === 404 ? 404 : 502);
   return response.text();
 }

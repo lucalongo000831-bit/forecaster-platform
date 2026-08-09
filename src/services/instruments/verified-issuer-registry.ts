@@ -22,7 +22,8 @@ const records: VerifiedIssuerRecord[] = [
     legalName: "Stellantis N.V.",
     countryCode: "NL",
     cik: "0001605484",
-    lei: null,
+    // GLEIF record 549300LKT9PW7ZIBDF31, status ISSUED, verified 2026-08-10.
+    lei: "549300LKT9PW7ZIBDF31",
     isin: "NL00150001Q9",
     reportingCurrency: "EUR",
     comparableHistoryStartDate: "2021-01-01",
@@ -31,7 +32,7 @@ const records: VerifiedIssuerRecord[] = [
       { symbol: "STLAM", providerSymbol: "STLAM.MI", exchange: "Euronext Milan", mic: "XMIL", currency: "EUR", countryCode: "IT", primary: true, verificationUrl: "https://www.stellantis.com/en/investors/stock-and-shareholder-info/stock-info" },
       { symbol: "STLAP", providerSymbol: "STLAP.PA", exchange: "Euronext Paris", mic: "XPAR", currency: "EUR", countryCode: "FR", primary: false, verificationUrl: "https://www.stellantis.com/en/investors/stock-and-shareholder-info/stock-info" },
     ],
-    issuerProviderSymbols: { "sec-edgar": "0001605484", finnhub: "STLA" },
+    issuerProviderSymbols: { "sec-edgar": "0001605484", finnhub: "STLA", yahoo: "STLA" },
   },
 ];
 

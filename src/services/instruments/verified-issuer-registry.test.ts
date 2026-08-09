@@ -12,5 +12,7 @@ describe("verified issuer registry", () => {
     expect(nyse).toBe(milan);
     expect(verifiedIssuerByLegalName("Stellantis NV")).toBe(milan);
     expect(milan?.isin).toBe("NL00150001Q9");
+    expect(milan?.lei).toBe("549300LKT9PW7ZIBDF31");
+    expect(milan?.issuerProviderSymbols.yahoo).toBe("STLA");
   });
 });

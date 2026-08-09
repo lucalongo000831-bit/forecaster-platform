@@ -22,6 +22,7 @@ import { MassiveMarketDataAdapter } from "./market-data/massive-adapter";
 import { YahooMarketDataAdapter } from "./market-data/yahoo-adapter";
 import { EodhdMarketDataAdapter } from "./market-data/eodhd-adapter";
 import { finnhubCompanyAdapter } from "./finnhub/company-adapter";
+import { yahooFinanceClient } from "@/services/yahoo/yahoo-finance-client";
 import type {
   FundamentalsProvider,
   MarketDataProvider,
@@ -51,7 +52,8 @@ const capabilityBlocks = new Map<string, number>();
 function unique<T>(values: T[]) { return [...new Set(values)]; }
 
 function mappedSymbol(instrument: ResolvedInstrument, provider: ProviderName) {
-  return instrument.mappings.find((mapping) => mapping.provider === provider)?.symbol ?? instrument.canonicalSymbol;
+  const candidates = instrument.mappings.filter((mapping) => mapping.provider === provider);
+  return candidates.find((mapping) => mapping.providerInstrumentId?.startsWith("issuer-alias:"))?.symbol ?? candidates[0]?.symbol ?? instrument.canonicalSymbol;
 }
 
 async function firstAvailable<T>(operation: string, symbol: string | undefined, candidates: Array<{ name: ProviderName; configured: boolean; supported: boolean; task: () => Promise<ProviderResult<T>> }>) {
@@ -156,6 +158,14 @@ export class FinancialProviderRouter {
     })));
   }
 
+  supplementalFundamentalsForInstrument(instrument: ResolvedInstrument) {
+    const adapter = fundamentalAdapters.yahoo;
+    const symbol = mappedSymbol(instrument, "yahoo");
+    return providerCached(`fundamentals:supplemental:yahoo:${instrument.issuer?.cik ?? symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("supplemental-fundamentals", symbol, [
+      { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getFundamentals(symbol) },
+    ]));
+  }
+
   statements(symbolInput: string, kind: StatementKind, period: StatementPeriod, limit = 5) {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.fundamentalOrder();
@@ -217,6 +227,7 @@ export class FinancialProviderRouter {
     return providerCached(`peers:${symbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, () => firstAvailable("peers", symbol, [
       { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getPeers(symbol) },
       { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !symbol.startsWith("^") && !symbol.endsWith("-USD"), task: async () => providerResult("finnhub", await finnhubCompanyAdapter.getPeers(symbol), { freshness: "cached", freshnessType: "END_OF_DAY" }) },
+      { name: "yahoo", configured: fundamentalAdapters.yahoo.isConfigured(), supported: fundamentalAdapters.yahoo.supportsSymbol(symbol), task: async () => providerResult("yahoo", await yahooFinanceClient.relatedSymbols(symbol), { freshness: "cached", freshnessType: "END_OF_DAY", quality: "partial" }) },
     ]));
   }
 
@@ -225,14 +236,17 @@ export class FinancialProviderRouter {
     const fmpSymbol = mappedSymbol(instrument, "fmp");
     const finnhubSymbol = mappedSymbol(instrument, "finnhub");
     return providerCached(`peers:issuer:${instrument.issuer?.cik ?? instrument.canonicalSymbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, async () => {
-      const result = await firstAvailable("peers", instrument.canonicalSymbol, [
-        { name: fmp.name, configured: fmp.isConfigured(), supported: fmp.supportsSymbol(fmpSymbol), task: () => fmp.getPeers(fmpSymbol) },
-        { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !finnhubSymbol.startsWith("^") && !finnhubSymbol.endsWith("-USD"), task: async () => providerResult("finnhub", await finnhubCompanyAdapter.getPeers(finnhubSymbol), { freshness: "cached", freshnessType: "END_OF_DAY" }) },
-      ]);
       const issuerListings = new Set([instrument.canonicalSymbol, ...instrument.mappings.map((mapping) => mapping.symbol), ...(instrument.listings?.flatMap((listing) => [listing.symbol, listing.providerSymbol]) ?? [])].map((value) => value.toUpperCase()));
-      const data = result.data.filter((symbol) => !issuerListings.has(symbol.toUpperCase()));
-      if (!data.length) throw new ProviderError(result.meta.provider, "NOT_FOUND", "Il provider ha restituito soltanto listing dello stesso issuer, non peer economici.", false, 404);
-      return { ...result, data };
+      const economicPeers = <T extends ProviderResult<string[]>>(result: T) => {
+        const data = result.data.filter((symbol) => !issuerListings.has(symbol.toUpperCase()));
+        if (!data.length) throw new ProviderError(result.meta.provider, "NOT_FOUND", "Il provider ha restituito soltanto listing dello stesso issuer, non peer economici.", false, 404);
+        return { ...result, data };
+      };
+      return firstAvailable("peers", instrument.canonicalSymbol, [
+        { name: fmp.name, configured: fmp.isConfigured(), supported: fmp.supportsSymbol(fmpSymbol), task: async () => economicPeers(await fmp.getPeers(fmpSymbol)) },
+        { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !finnhubSymbol.startsWith("^") && !finnhubSymbol.endsWith("-USD"), task: async () => economicPeers(providerResult("finnhub", await finnhubCompanyAdapter.getPeers(finnhubSymbol), { freshness: "cached", freshnessType: "END_OF_DAY" })) },
+        { name: "yahoo", configured: fundamentalAdapters.yahoo.isConfigured(), supported: fundamentalAdapters.yahoo.supportsSymbol(mappedSymbol(instrument, "yahoo")), task: async () => economicPeers(providerResult("yahoo", await yahooFinanceClient.relatedSymbols(mappedSymbol(instrument, "yahoo")), { freshness: "cached", freshnessType: "END_OF_DAY", quality: "partial" })) },
+      ]);
     });
   }
 

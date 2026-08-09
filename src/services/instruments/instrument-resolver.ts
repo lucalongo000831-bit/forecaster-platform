@@ -26,7 +26,7 @@ function map(provider: ProviderName, symbol: string, exchangeCode: string | null
 
 export async function resolveInstrument(symbolInput: string): Promise<ResolvedInstrument> {
   const symbol = normalizeSymbol(decodeURIComponent(symbolInput));
-  return (await providerCached(`instrument-resolution:${symbol}`, { freshSeconds: 30 * 86_400, staleSeconds: 60 * 86_400 }, async () => {
+  return (await providerCached(`instrument-resolution:v2:${symbol}`, { freshSeconds: 30 * 86_400, staleSeconds: 60 * 86_400 }, async () => {
     const warnings: string[] = []; const mappings: ProviderSymbolMapping[] = [map("yahoo", symbol, null, null, 1)];
     let name = symbol; let exchange: string | null = null; let currency: string | null = null; let countryCode: string | null = null; let sector: string | null = null; let industry: string | null = null; let website: string | null = null; let cik: string | null = null; let coinGeckoId: string | null = null; let quoteType: string | null = null;
     if (symbol.endsWith("-USD")) {
@@ -49,7 +49,7 @@ export async function resolveInstrument(symbolInput: string): Promise<ResolvedIn
       if (verified) {
         cik = verified.cik;
         countryCode = countryCode ?? verified.countryCode;
-        mappings.push(...Object.entries(verified.issuerProviderSymbols).flatMap(([provider, providerSymbol]) => providerSymbol && !mappings.some((item) => item.provider === provider && item.symbol === providerSymbol) ? [map(provider as ProviderName, providerSymbol, provider === "sec-edgar" ? "SEC" : exchange, provider === "sec-edgar" ? providerSymbol : null, 1)] : []));
+        mappings.push(...Object.entries(verified.issuerProviderSymbols).flatMap(([provider, providerSymbol]) => providerSymbol && !mappings.some((item) => item.provider === provider && item.symbol === providerSymbol) ? [map(provider as ProviderName, providerSymbol, provider === "sec-edgar" ? "SEC" : exchange, provider === "sec-edgar" ? providerSymbol : `issuer-alias:${providerSymbol}`, 1)] : []));
       }
     }
     const kind = kindFor(symbol, quoteType);
