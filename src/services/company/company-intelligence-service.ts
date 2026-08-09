@@ -78,7 +78,7 @@ async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntellig
   const profileStage = await runCompanyStage("LoadCompanyProfile", () => financialProviderRouter.profile(symbol));
   stages.push(profileStage.stage);
   const profile = profileStage.data?.data ?? null;
-  const { instrumentType, applicable } = classifyCompanyInstrument(symbol, profile?.quoteType, quote.data.quoteType);
+  const { instrumentType, applicable } = classifyCompanyInstrument(symbol, profile?.quoteType, quote.data.quoteType, profile?.name ?? quote.data.name);
   const sources: CompanySource[] = [{ provider: quote.meta.provider, label: `${symbol} market quote`, url: null, timestamp: quote.meta.sourceTimestamp, kind: "FACT" }, ...profileSource(profile, profileStage.data?.meta.provider ?? null)];
   if (!applicable) {
     const unavailableQuality: CompanyDataQuality = { score: 100, confidence: "HIGH", completeness: 100, stale: false, checks: [{ code: "INSTRUMENT_APPLICABILITY", status: "PASS", message: `Corporate analysis is not applicable to ${instrumentType}.` }], missingFields: [], divergences: [] };
