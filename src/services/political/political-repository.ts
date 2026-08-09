@@ -2,6 +2,7 @@ import "server-only";
 
 import { eq } from "drizzle-orm";
 import { getDatabase, isDatabaseConfigured, politicalFilings, politicalSyncStates, politicalTransactions, politicians } from "@/db";
+import { structuredLog } from "@/lib/server/logger";
 import { ensureInstrument } from "@/services/account/instrument-repository";
 import type { PoliticalTransaction, Politician } from "@/types";
 
@@ -28,7 +29,13 @@ export async function persistPoliticalTransactions(input: { transactions: Politi
 }
 
 export async function getPoliticalSyncHealth() {
-  if (!isDatabaseConfigured()) return { databaseConfigured: false, lastSync: null, houseRecords: 0, senateRecords: 0, mappedInstruments: 0, unresolvedAssets: 0, duplicatesRemoved: 0, latestDisclosure: null, fmpStatus: "RUNTIME_ONLY" };
-  const row = (await getDatabase().select().from(politicalSyncStates).where(eq(politicalSyncStates.key, "fmp-congressional")).limit(1))[0];
-  return { databaseConfigured: true, lastSync: row?.lastSuccessfulSync?.toISOString() ?? null, houseRecords: row?.houseRecords ?? 0, senateRecords: row?.senateRecords ?? 0, mappedInstruments: row?.mappedInstruments ?? 0, unresolvedAssets: row?.unresolvedAssets ?? 0, duplicatesRemoved: row?.duplicatesRemoved ?? 0, latestDisclosure: row?.latestDisclosure?.toISOString() ?? null, fmpStatus: row?.providerStatus ?? "NOT_SYNCED" };
+  const empty = { lastSync: null, houseRecords: 0, senateRecords: 0, mappedInstruments: 0, unresolvedAssets: 0, duplicatesRemoved: 0, latestDisclosure: null };
+  if (!isDatabaseConfigured()) return { databaseConfigured: false, databaseStatus: "NOT_CONFIGURED", ...empty, fmpStatus: "RUNTIME_ONLY" };
+  try {
+    const row = (await getDatabase().select().from(politicalSyncStates).where(eq(politicalSyncStates.key, "fmp-congressional")).limit(1))[0];
+    return { databaseConfigured: true, databaseStatus: "AVAILABLE", lastSync: row?.lastSuccessfulSync?.toISOString() ?? null, houseRecords: row?.houseRecords ?? 0, senateRecords: row?.senateRecords ?? 0, mappedInstruments: row?.mappedInstruments ?? 0, unresolvedAssets: row?.unresolvedAssets ?? 0, duplicatesRemoved: row?.duplicatesRemoved ?? 0, latestDisclosure: row?.latestDisclosure?.toISOString() ?? null, fmpStatus: row?.providerStatus ?? "NOT_SYNCED" };
+  } catch (error) {
+    structuredLog("warn", "political.health.persistence_unavailable", { errorType: error instanceof Error ? error.name : "UnknownError" });
+    return { databaseConfigured: true, databaseStatus: "UNAVAILABLE", ...empty, fmpStatus: "RUNTIME_ONLY" };
+  }
 }
