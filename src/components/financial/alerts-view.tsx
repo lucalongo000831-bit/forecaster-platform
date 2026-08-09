@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AccountAlert, AccountNotification } from "@/types";
 
 type Envelope<T> = { data?: T; error?: { message?: string } };
-const alertTypes = ["PRICE_ABOVE", "PRICE_BELOW", "PERCENT_CHANGE", "VOLUME_ANOMALY", "RSI", "MACD_CROSS", "BREAKOUT", "BREAKDOWN", "NEW_SIGNAL", "SIGNAL_CHANGE", "TARGET_REACHED", "STOP_REACHED", "EARNINGS", "DIVIDEND", "HIGH_RELEVANCE_NEWS", "GEOPOLITICAL_EVENT", "PORTFOLIO_RISK"];
+const alertTypes = ["PRICE_ABOVE", "PRICE_BELOW", "PERCENT_CHANGE", "VOLUME_ANOMALY", "RSI", "MACD_CROSS", "BREAKOUT", "BREAKDOWN", "NEW_SIGNAL", "SIGNAL_CHANGE", "TARGET_REACHED", "STOP_REACHED", "EARNINGS", "DIVIDEND", "HIGH_RELEVANCE_NEWS", "GEOPOLITICAL_EVENT", "PORTFOLIO_RISK", "POLITICAL_PURCHASE_DISCLOSURE", "POLITICAL_SALE_DISCLOSURE", "POLITICAL_CLUSTER", "POLITICAL_WATCHLIST_ACTIVITY", "POLITICAL_DIRECTION_CHANGE"];
 
 export function AlertsView() {
   const [alerts, setAlerts] = useState<AccountAlert[]>([]); const [notifications, setNotifications] = useState<AccountNotification[]>([]); const [modal, setModal] = useState(false); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");

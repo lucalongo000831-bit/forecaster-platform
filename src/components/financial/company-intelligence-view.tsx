@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, BookOpen, Building2, CalendarDays, CheckCircle2, CircleDollarSign, Compass, Gauge, Landmark, Scale, ShieldAlert, Sparkles, Target } from "lucide-react";
 import { formatCompactNumber, formatCurrency } from "@/lib";
-import type { CompanyConfidence, CompanyIntelligenceReport, ScoreDetail } from "@/types";
+import type { CompanyConfidence, CompanyIntelligenceReport, PoliticalActivitySummary, ScoreDetail } from "@/types";
 import { CompanyReportActions } from "./company-report-actions";
 
 const na = "DATO NON DISPONIBILE";
@@ -14,11 +14,11 @@ function ScoreCard({ label, detail }: { label: string; detail: ScoreDetail }) { 
 function Section({ id, title, icon, children, open = false }: { id: string; title: string; icon: React.ReactNode; children: React.ReactNode; open?: boolean }) { return <details className="ci-section" id={id} open={open}><summary><span className="ci-section-icon">{icon}</span><strong>{title}</strong><span className="ci-expand">Espandi</span></summary><div className="ci-section-body">{children}</div></details>; }
 function Confidence({ value }: { value: CompanyConfidence }) { return <span className={`ci-confidence ci-${value.toLowerCase()}`}>{value.replaceAll("_", " ")}</span>; }
 
-export function CompanyIntelligenceView({ report }: { report: CompanyIntelligenceReport }) {
+export function CompanyIntelligenceView({ report, political = null }: { report: CompanyIntelligenceReport; political?: PoliticalActivitySummary | null }) {
   if (!report.applicable) return <div className="container-shell page-stack"><div className="card p-8"><span className="page-kicker">Company Intelligence</span><h1 className="page-title mt-3">NON APPLICABILE</h1><p className="muted mt-4">L’analisi aziendale non è applicabile allo strumento {report.instrumentType}. Nessun bilancio o valore societario è stato inventato.</p></div></div>;
   const annual = report.historical.filter((row) => row.period === "annual").slice(0, 10);
   const valuation = report.valuation; const risks = report.risks; const quality = report.quality;
-  const nav = [["summary","Sintesi"],["quality","Qualità"],["financials","Bilanci"],["valuation","Valutazione"],["horizons","Orizzonti"],["risk","Rischi"],["sources","Fonti"]];
+  const nav = [["summary","Sintesi"],["quality","Qualità"],["financials","Bilanci"],["valuation","Valutazione"],["horizons","Orizzonti"],["risk","Rischi"],...(political ? [["political","Congress"]] : []),["sources","Fonti"]];
   return <div className="container-shell ci-page">
     <section className="ci-summary" id="summary">
       <div className="ci-summary-copy"><span className="insight-badge"><Sparkles size={14}/>Company Intelligence</span><h1>{verdictLabel(report.verdict)}</h1><p>{report.thesis.verdict}. Analisi buy-side non personalizzata, costruita sui dati disponibili con priorità al downside.</p><div className="ci-summary-meta"><span>{report.symbol}</span><span>{report.exchange}</span><span>{report.sector ?? na}</span><Confidence value={report.confidence}/></div></div>
@@ -78,6 +78,10 @@ export function CompanyIntelligenceView({ report }: { report: CompanyIntelligenc
     <Section id="macro" title="Macroeconomia e geopolitica" icon={<Landmark size={18}/>}>
       {report.macro ? <><div className="ci-metric-grid"><Metric label="Sensibilità macro" value={`${score(report.macro.macroSensitivityScore)}/100`}/><Metric label="Rischio geopolitico" value={`${score(report.macro.geopoliticalRiskScore)}/100`}/><Metric label="Tassi" value={report.macro.rateSensitivity}/><Metric label="Inflazione" value={report.macro.inflationSensitivity}/><Metric label="Valuta" value={report.macro.currencySensitivity}/><Metric label="Commodity" value={report.macro.commoditySensitivity}/></div><p className="muted mt-4 text-sm">{report.macro.limitations.join(" ")}</p></> : <p>{na}</p>}
     </Section>
+    {political && <Section id="political" title="Congressional disclosures" icon={<Landmark size={18}/>}>
+      <div className="ci-metric-grid"><Metric label="Attività 90 giorni" value={`${political.politicalActivityScore.toFixed(0)}/100`} note={`Intensità ${political.activityIntensityScore.toFixed(0)}/100`}/><Metric label="Direzione disclosure" value={verdictLabel(political.direction)} note={`Score ${political.directionScore.toFixed(0)}/100`}/><Metric label="Acquisti / vendite" value={`${political.purchaseCount} / ${political.saleCount}`} note={`${political.uniquePoliticians} membri unici`}/><Metric label="Intervallo acquisti" value={`${formatCurrency(political.purchaseMin, report.currency)} — ${formatCurrency(political.purchaseMax, report.currency)}`}/><Metric label="Ritardo mediano" value={political.medianDisclosureDelay === null ? na : `${political.medianDisclosureDelay.toFixed(0)} giorni`} note={`Ultima disclosure ${political.lastDisclosureDate ?? na}`}/><Metric label="Qualità dati" value={`${political.dataCompleteness.toFixed(0)}/100`} note={`Confidenza ${verdictLabel(political.confidence)}`}/></div>
+      <p className="muted mt-4 text-xs">Contesto informativo separato dal punteggio Company Intelligence: sono disclosure pubbliche, non portafogli completi né segnali di copy-trading. Le analisi temporali partono dalla data di pubblicazione, non dalla data della transazione.</p>
+    </Section>}
     <Section id="calendar" title="Calendario operativo" icon={<CalendarDays size={18}/>}>
       <div className="ci-calendar">{report.operationalCalendar.slice(0, 31).map((day) => <div className={day.elevatedRisk ? "risk" : ""} key={day.date}><strong>{day.date.slice(8)}</strong><span>{day.orientation}</span><small>{day.events[0]?.title ?? "Modello / nessun evento certo"}</small></div>)}</div>
     </Section>

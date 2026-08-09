@@ -1,7 +1,8 @@
-import { PoliticalView } from "@/components/financial/political-view";
-import { financialDataService } from "@/services";
+import { PoliticalCompanyIntelligenceView } from "@/components/financial/political-company-intelligence-view";
+import { getSymbolPoliticalIntelligence } from "@/services/political";
 
 export default async function PoliticalPage({ params }: { params: Promise<{ market: string; symbol: string }> }) {
-  const data = await financialDataService.getPoliticalActivity(await params);
-  return <PoliticalView data={data}/>;
+  const { symbol } = await params;
+  const report = await getSymbolPoliticalIntelligence(symbol, { period: "90D", page: 1, pageSize: 20 });
+  return <PoliticalCompanyIntelligenceView initialReport={report}/>;
 }

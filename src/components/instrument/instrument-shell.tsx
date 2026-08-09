@@ -11,7 +11,7 @@ import { useKairoChat } from "@/components/ai/kairo-chat-provider";
 const tabs = [
   ["overview", "Overview"], ["analysis", "Analisi completa"], ["signal", "Signals"], ["forecast", "Forecast"], ["targets", "Targets"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
   ["overbought-oversold", "Momentum"], ["fundamentals/analysis", "Fundamentals"],
-  ["political", "Policy"], ["news", "Newsroom"],
+  ["political", "Political"], ["news", "Newsroom"],
 ] as const;
 
 export function InstrumentShell({ children, instrument }: { children: React.ReactNode; instrument: InstrumentProfile }) {

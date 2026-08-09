@@ -6,6 +6,7 @@ import { financialProviderRouter } from "@/providers";
 import { getSignalAnalysis } from "@/services/analysis/signal-service";
 import { getTechnicalAnalysis } from "@/services/analysis/technical-service";
 import { InternalNotificationChannel } from "@/services/notifications";
+import { getSymbolPoliticalIntelligence } from "@/services/political";
 import { listPortfolios } from "./portfolio-service";
 
 interface Evaluation { triggered: boolean; observed: number | string | boolean | null; message: string; available: boolean }
@@ -43,10 +44,27 @@ export async function evaluateActiveAlerts(limit = 100) {
         result = { triggered: relevance >= (threshold || .7), observed: relevance, available: news.length > 0, message: `${record.symbol}: high-relevance news (${relevance.toFixed(2)})` };
       } else if (alert.type === "GEOPOLITICAL_EVENT") {
         result = { triggered: false, observed: null, available: false, message: "No verified geopolitical event provider is configured" };
+      } else if (["POLITICAL_PURCHASE_DISCLOSURE", "POLITICAL_SALE_DISCLOSURE", "POLITICAL_CLUSTER", "POLITICAL_WATCHLIST_ACTIVITY", "POLITICAL_DIRECTION_CHANGE"].includes(alert.type) && record.symbol) {
+        const report = await getSymbolPoliticalIntelligence(record.symbol, { period: "30D", page: 1, pageSize: 100 });
+        const previousDisclosure = typeof configuration.lastPoliticalDisclosureDate === "string" ? configuration.lastPoliticalDisclosureDate : null;
+        const previousDirection = typeof configuration.lastPoliticalDirection === "string" ? configuration.lastPoliticalDirection : null;
+        const side = alert.type === "POLITICAL_PURCHASE_DISCLOSURE" ? "PURCHASE" : alert.type === "POLITICAL_SALE_DISCLOSURE" ? "SALE" : null;
+        const matching = report.transactions.find((row) => side === "PURCHASE" ? row.transactionType === "PURCHASE" : side === "SALE" ? row.transactionType.startsWith("SALE") : true);
+        const latestDisclosure = matching?.disclosureDate ?? report.summary.lastDisclosureDate;
+        const newDisclosure = Boolean(latestDisclosure && previousDisclosure && latestDisclosure > previousDisclosure);
+        if (alert.type === "POLITICAL_CLUSTER") {
+          const cluster = report.clusters[0]; const observed = cluster?.lastDisclosureDate ?? null;
+          result = { triggered: Boolean(cluster && previousDisclosure && cluster.strength !== "NONE" && cluster.lastDisclosureDate > previousDisclosure), observed, available: true, message: `${record.symbol}: cluster disclosure ${cluster ? `${cluster.direction.toLowerCase()} (${cluster.uniquePoliticians} membri)` : "non rilevato"}` };
+        } else if (alert.type === "POLITICAL_DIRECTION_CHANGE") {
+          result = { triggered: previousDirection !== null && previousDirection !== report.summary.direction, observed: report.summary.direction, available: report.totalTransactions > 0, message: `${record.symbol}: direzione disclosure ${report.summary.direction.replaceAll("_", " ").toLowerCase()}` };
+        } else {
+          result = { triggered: newDisclosure, observed: latestDisclosure, available: report.totalTransactions > 0, message: `${record.symbol}: ${side ? side.toLowerCase() : "nuova attività"} divulgata il ${latestDisclosure ?? "N/A"}` };
+        }
       } else if (alert.type === "PORTFOLIO_RISK") {
         const portfolios = await listPortfolios(alert.userId); const concentration = Math.max(0, ...portfolios.map((portfolio) => portfolio.concentration)); result = { triggered: concentration >= (threshold || 35), observed: concentration, available: portfolios.length > 0, message: `Portfolio concentration ${concentration.toFixed(2)}%` };
       }
-      const nextConfiguration = { ...configuration, lastObserved: result.observed, lastOutcome: result.available ? result.triggered ? "TRIGGERED" : "CLEAR" : "UNAVAILABLE", ...(alert.type === "MACD_CROSS" ? { lastMacdHistogram: result.observed } : {}), ...(["NEW_SIGNAL", "SIGNAL_CHANGE"].includes(alert.type) ? { lastSignal: result.observed } : {}) };
+      const politicalAlert = alert.type.startsWith("POLITICAL_");
+      const nextConfiguration = { ...configuration, lastObserved: result.observed, lastOutcome: result.available ? result.triggered ? "TRIGGERED" : "CLEAR" : "UNAVAILABLE", ...(alert.type === "MACD_CROSS" ? { lastMacdHistogram: result.observed } : {}), ...(["NEW_SIGNAL", "SIGNAL_CHANGE"].includes(alert.type) ? { lastSignal: result.observed } : {}), ...(politicalAlert ? { lastPoliticalDisclosureDate: typeof result.observed === "string" && /^\d{4}-\d{2}-\d{2}$/.test(result.observed) ? result.observed : configuration.lastPoliticalDisclosureDate, lastPoliticalDirection: alert.type === "POLITICAL_DIRECTION_CHANGE" ? result.observed : configuration.lastPoliticalDirection } : {}) };
       if (result.triggered) {
         const delivered = await internalChannel.deliver({ alertId: alert.id, deduplicationKey: `${alert.type}:${String(result.observed)}:${now.toISOString().slice(0, 10)}`, payload: { message: result.message, observed: result.observed, threshold, evaluatedAt: now.toISOString(), channel: "internal" } });
         if (delivered.delivered) { triggered += 1; await database.update(alerts).set({ status: "TRIGGERED", configuration: nextConfiguration, lastEvaluatedAt: now, triggeredAt: now, updatedAt: now }).where(eq(alerts.id, alert.id)); }

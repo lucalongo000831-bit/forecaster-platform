@@ -18,6 +18,7 @@ import { GlobalRiskNavIndicator } from "@/components/financial/global-risk-nav-i
 const railItems = [
   ["/dashboard", "Control room", LayoutDashboard], ["/search", "Discover", Search],
   ["/global-markets", "Global markets", Globe2],
+  ["/political-intelligence", "Political intelligence", Landmark],
   ["/calendar", "Calendar", CalendarDays], ["/watchlists", "Watchlists", Star],
   ["/portfolio", "Portfolio", PieChart], ["/alerts", "Alerts", Bell], ["/backtest", "Backtest lab", FlaskConical], ["/settings", "Preferences", Settings],
 ] as const;
@@ -48,6 +49,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
   const launcherItems = [
     ["/watchlists", "Watchlists", Star], ["/calendar", "Calendar", CalendarDays],
     ["/global-markets", "Global markets", Globe2],
+    ["/political-intelligence", "Political intelligence", Landmark],
     [instrumentPath(data.primaryInstrument, "signal"), "Signals", Sparkles],
     [instrumentPath(data.primaryInstrument, "forecast"), "Forecast", TrendingUp],
     [instrumentPath(data.primaryInstrument, "targets"), "Targets & risk", CircleDollarSign],
@@ -55,7 +57,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     [instrumentPath(data.primaryInstrument, "pattern"), "Patterns", BarChart3],
     [instrumentPath(data.primaryInstrument, "overbought-oversold"), "Momentum", Gauge],
     [instrumentPath(data.primaryInstrument, "fundamentals/analysis"), "Fundamentals", Activity],
-    [instrumentPath(data.primaryInstrument, "political"), "Policy flow", Landmark],
+    [instrumentPath(data.primaryInstrument, "political"), "Congressional disclosures", Landmark],
     [instrumentPath(data.primaryInstrument, "news"), "Briefings", Newspaper],
     [instrumentPath(data.primaryInstrument, "fundamentals/transcripts"), "Transcripts", BookOpen],
     ["/portfolio", "Portfolio", CircleDollarSign], ["/search", "Discover", Search],
