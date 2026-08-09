@@ -15,6 +15,10 @@ describe("asset-specific intelligence", () => {
     expect(classifyAssetIntelligenceKind("AAPL", "EQUITY")).toBeNull();
   });
 
+  it("uses an explicit fund name when a provider misclassifies the quote type", () => {
+    expect(classifyAssetIntelligenceKind("SPY", "EQUITY", "SPDR S&P 500 ETF Trust")).toBe("ETF");
+  });
+
   it("calculates aligned daily-return correlation from real-shaped OHLC series", () => {
     expect(calculateReturnCorrelation(series(1), series(2))).toBeGreaterThan(0.99);
   });

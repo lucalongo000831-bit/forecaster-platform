@@ -22,6 +22,13 @@ describe("classifyCompanyInstrument", () => {
     });
   });
 
+  it("rejects a fund when the provider omits its ETF flag but the verified name identifies it", () => {
+    expect(classifyCompanyInstrument("SPY", "EQUITY", "EQUITY", "SPDR S&P 500 ETF Trust")).toEqual({
+      instrumentType: "ETF",
+      applicable: false,
+    });
+  });
+
   it("fails closed for an unknown instrument type", () => {
     expect(classifyCompanyInstrument("UNKNOWN", null, null)).toEqual({
       instrumentType: "UNKNOWN",

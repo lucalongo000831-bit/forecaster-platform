@@ -9,11 +9,11 @@ import { getTechnicalAnalysis } from "./technical-service";
 import { getNewsIntelligence } from "@/services/intelligence/news-service";
 import { getCryptoDataBundle, getEtfDataBundle } from "@/services/financial/data-bundle-service";
 
-export function classifyAssetIntelligenceKind(symbol: string, quoteType: string): AssetIntelligenceKind | null {
+export function classifyAssetIntelligenceKind(symbol: string, quoteType: string, name?: string | null): AssetIntelligenceKind | null {
   const type = quoteType.toUpperCase();
   if (symbol.endsWith("-USD") || type.includes("CRYPTO")) return "CRYPTO";
   if (symbol.startsWith("^") || type === "INDEX") return "INDEX";
-  if (type === "ETF") return "ETF";
+  if (type === "ETF" || /\bETF\b|\bEXCHANGE[- ]TRADED FUND\b|\bSPDR\b|\bISHARES\b/i.test(name ?? "")) return "ETF";
   return null;
 }
 
@@ -40,7 +40,7 @@ export async function getAssetIntelligence(symbolInput: string): Promise<AssetIn
   const symbol = normalizeSymbol(decodeURIComponent(symbolInput));
   const quote = await financialProviderRouter.quote(symbol);
   const profile = await financialProviderRouter.profile(symbol).catch(() => null);
-  const kind = classifyAssetIntelligenceKind(symbol, profile?.data.quoteType ?? quote.data.quoteType);
+  const kind = classifyAssetIntelligenceKind(symbol, profile?.data.quoteType ?? quote.data.quoteType, profile?.data.name ?? quote.data.name);
   if (!kind) return null;
   const benchmark = kind === "CRYPTO" && symbol !== "BTC-USD" ? "BTC-USD" : "^IXIC";
   const [technical, seasonality, news, forecast, priceChart, bitcoinChart, nasdaqChart, specializedBundle] = await Promise.all([
