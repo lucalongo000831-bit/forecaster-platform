@@ -22,6 +22,8 @@
     "test:political": "node --env-file-if-exists=.env.local scripts/test-political-intelligence.mjs",
     "political:backfill": "node --env-file-if-exists=.env.local scripts/political-backfill.mjs",
     "test:company-smoke": "node scripts/test-company-intelligence.mjs",
+    "test:stlam": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-stlam-complete-coverage.ts",
+    "issuer:backfill": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/issuer-backfill.ts",
     "test:openai": "node --env-file-if-exists=.env.local scripts/verify-openai.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

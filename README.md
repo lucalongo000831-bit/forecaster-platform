@@ -151,6 +151,8 @@ Operational APIs:
 
 All financial and operational route handlers use the Node.js runtime. Symbols are normalized and length-limited and support dots, dashes, `^`, `=` and exchange suffixes such as `BRK-B`, `^GSPC`, `BTC-USD`, `EURUSD=X`, `ENI.MI` and `STLAM.MI`.
 
+The European multi-listing reference implementation is documented in [Stellantis complete coverage](docs/STELLANTIS_COMPLETE_COVERAGE.md), with separate [data lineage](docs/STLAM_DATA_LINEAGE.md), [automotive metrics](docs/STLAM_AUTOMOTIVE_METRICS.md), [financial reconciliation](docs/STLAM_FINANCIAL_RECONCILIATION.md) and [remaining gaps](docs/STLAM_REMAINING_GAPS.md).
+
 ## Data truth and provenance
 
 Provider results include provider, fetch time, source time, freshness, quality and fallback metadata. Calculated outputs include model version, calculation time, data timestamp, completeness/confidence and limitations.

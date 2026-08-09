@@ -1,5 +1,7 @@
 # Stellantis Complete Coverage — final report
 
+> Historical first-pass report. Superseded by [STELLANTIS_COMPLETE_COVERAGE.md](./STELLANTIS_COMPLETE_COVERAGE.md) and the field-by-field [STLAM_REMAINING_GAPS.md](./STLAM_REMAINING_GAPS.md). Its earlier “core-field” percentage is not comparable with Completeness V2 and must not be used as the current coverage result.
+
 ## Outcome
 
 The Stellantis initiative resolves `STLAM.MI` as one economic issuer and keeps issuer-level financial statements separate from listing-level market data. The live local verification on 2026-08-09 produced:

@@ -17,7 +17,7 @@ These gaps are intentionally visible and must not be replaced by demo or inferre
 
 | Field / instrument | Reason | Providers attempted | Calculation dependency | Possible future source |
 |---|---|---|---|---|
-| STLAM.MI complete official ESEF history | official filing entry point is unresolved while ESEF ingestion is disabled | EODHD, FMP, Yahoo, ESEF | issuer LEI plus normalized filing facts | ESMA or the relevant national OAM |
+| STLAM.MI complete official ESEF history | LEI is resolved, but no authoritative ESEF package URL has been attached to the issuer | EODHD, FMP, Yahoo, SEC, ESEF | validated package plus normalized filing facts | ESMA or the relevant national OAM |
 | European UCITS ETF full holdings | configured Finnhub plan/listing coverage varies | Finnhub, FMP, Yahoo | verified fund identifier and holdings weights | licensed ETF holdings feed |
 | BTC-USD on-chain flows | no configured provider has an on-chain contract | CoinGecko, Yahoo, Massive | wallet-labelled chain data | dedicated on-chain provider |
 | Non-US insider transactions | disclosure regime and machine-readable coverage vary | Finnhub, FMP, local profile providers | verified issuer identity and official disclosure feed | national official register |
