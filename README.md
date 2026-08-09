@@ -117,6 +117,8 @@ Global Markets is available at `/global-markets` with public normalized reads un
 
 Company Intelligence is available at `/instrument/[market]/[symbol]/analysis` and through `/api/company/resolve`, the section endpoints under `/api/company/[symbol]/**`, report export, refresh, custom DCF and decision backtesting. Public sections share one aggregate abuse budget and one cached report pipeline; costly mutations and production exports use tighter authentication/limit controls.
 
+Political Intelligence is available globally at `/political-intelligence`, per instrument at `/instrument/[market]/[symbol]/political`, and per disclosure identity at `/politicians/[id]`. It uses FMP House and Senate disclosures, preserves statutory amount ranges and disclosure delays, and makes records available to analytics only from their public disclosure date. Normalized reads are exposed through `/api/political-intelligence`, `/api/political-intelligence/politicians/[id]`, and `/api/political-intelligence/health`.
+
 Private APIs include:
 
 - `/api/auth/{register,login,logout,session}`
@@ -162,7 +164,7 @@ Company, ETF and crypto acquisition is consolidated in typed data bundles. Issue
 - `DEMO`: test/development fixtures only; production routes do not silently load mock financial values.
 - `UNAVAILABLE`: no verified source or insufficient input; never silently fabricated.
 
-Personal portfolio and watchlist values are never substituted with mock account records. Political disclosures, full call transcripts and verified geopolitical event feeds remain unavailable until an appropriate licensed source is configured.
+Personal portfolio and watchlist values are never substituted with mock account records. Political disclosures require a configured FMP plan; full call transcripts and verified geopolitical event feeds remain unavailable until an appropriate licensed source is configured.
 
 ## Security
 
@@ -199,6 +201,7 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Live provider implementation report](docs/LIVE_PROVIDER_IMPLEMENTATION_REPORT.md)
 - [Complete field coverage audit](docs/DATA_COVERAGE_AUDIT.md), [coverage implementation](docs/COMPLETE_DATA_COVERAGE_REPORT.md) and [remaining data gaps](docs/REMAINING_DATA_GAPS.md)
 - [Global Risk engine](docs/GLOBAL_RISK_ENGINE.md), [methodology](docs/GLOBAL_RISK_MODEL_METHODOLOGY.md), [data sources](docs/GLOBAL_MARKETS_DATA_SOURCES.md), [editorial workflow](docs/GLOBAL_MARKET_BRIEF.md) and [future editorial AI boundary](docs/FUTURE_AUTOMATED_EDITORIAL_AI.md)
+- [Political Intelligence](docs/POLITICAL_INTELLIGENCE.md), [data model](docs/POLITICAL_DATA_MODEL.md), [backtest methodology](docs/POLITICAL_BACKTEST_METHODOLOGY.md), [data lineage](docs/POLITICAL_DATA_LINEAGE.md), [limitations](docs/POLITICAL_DISCLOSURE_LIMITATIONS.md) and [implementation report](docs/POLITICAL_INTELLIGENCE_IMPLEMENTATION_REPORT.md)
 
 ## Disclaimer
 
