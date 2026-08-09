@@ -7,6 +7,7 @@ import { getForecastAnalysis } from "./forecast-service";
 import { getSeasonalityAnalysis } from "./seasonality-service";
 import { getTechnicalAnalysis } from "./technical-service";
 import { getNewsIntelligence } from "@/services/intelligence/news-service";
+import { getCryptoDataBundle, getEtfDataBundle } from "@/services/financial/data-bundle-service";
 
 export function classifyAssetIntelligenceKind(symbol: string, quoteType: string): AssetIntelligenceKind | null {
   const type = quoteType.toUpperCase();
@@ -42,7 +43,7 @@ export async function getAssetIntelligence(symbolInput: string): Promise<AssetIn
   const kind = classifyAssetIntelligenceKind(symbol, profile?.data.quoteType ?? quote.data.quoteType);
   if (!kind) return null;
   const benchmark = kind === "CRYPTO" && symbol !== "BTC-USD" ? "BTC-USD" : "^IXIC";
-  const [technical, seasonality, news, forecast, priceChart, bitcoinChart, nasdaqChart] = await Promise.all([
+  const [technical, seasonality, news, forecast, priceChart, bitcoinChart, nasdaqChart, specializedBundle] = await Promise.all([
     getTechnicalAnalysis(symbol, "1m", benchmark).catch(() => null),
     getSeasonalityAnalysis(symbol, "20Y").catch(() => null),
     getNewsIntelligence(symbol, 30).catch(() => null),
@@ -50,20 +51,23 @@ export async function getAssetIntelligence(symbolInput: string): Promise<AssetIn
     financialProviderRouter.analyticsChart(symbol, "1Y", "1d").catch(() => null),
     symbol === "BTC-USD" ? Promise.resolve(null) : financialProviderRouter.analyticsChart("BTC-USD", "1Y", "1d").catch(() => null),
     symbol === "^IXIC" ? Promise.resolve(null) : financialProviderRouter.analyticsChart("^IXIC", "1Y", "1d").catch(() => null),
+    kind === "CRYPTO" ? getCryptoDataBundle(symbol).catch(() => null) : kind === "ETF" ? getEtfDataBundle(symbol).catch(() => null) : Promise.resolve(null),
   ]);
   const analysis = technical?.analysis ?? null;
   const bestMonth = seasonality?.monthly.filter((item) => item.mean !== null).sort((a, b) => (b.mean ?? -Infinity) - (a.mean ?? -Infinity))[0]?.label ?? null;
   const worstMonth = seasonality?.monthly.filter((item) => item.mean !== null).sort((a, b) => (a.mean ?? Infinity) - (b.mean ?? Infinity))[0]?.label ?? null;
+  const cryptoBundle = kind === "CRYPTO" && specializedBundle && "global" in specializedBundle ? specializedBundle : null;
+  const etfBundle = kind === "ETF" && specializedBundle && "profile" in specializedBundle && !("global" in specializedBundle) ? specializedBundle : null;
   const unavailable = [
-    ...(kind === "ETF" ? ["AUM, expense ratio, holdings and geographic exposure are not available from the configured responses."] : []),
+    ...(etfBundle?.missing.map((item) => `${item.field}: ${item.message} (${item.reason}).`) ?? (kind === "ETF" ? ["Profilo ETF non disponibile presso il provider configurato."] : [])),
     ...(kind === "INDEX" ? ["Index breadth is not available from the configured providers."] : []),
-    ...(quote.data.marketCap === null && kind === "CRYPTO" ? ["Crypto market capitalization is not present in the current primary snapshot."] : []),
+    ...(cryptoBundle?.missing.map((item) => `${item.field}: ${item.message} (${item.reason}).`) ?? (kind === "CRYPTO" ? ["Fondamentali crypto non disponibili presso CoinGecko."] : [])),
     ...(!technical ? ["Technical history is temporarily unavailable."] : []),
     ...(!news ? ["Attributed news sentiment is temporarily unavailable."] : []),
   ];
   return {
     kind, symbol, name: profile?.data.name ?? quote.data.name, exchange: quote.data.exchange, currency: quote.data.currency,
-    price: quote.data.price, changePercent: quote.data.changePercent, marketCap: quote.data.marketCap, volume: quote.data.volume,
+    price: quote.data.price, changePercent: quote.data.changePercent, marketCap: cryptoBundle?.profile?.marketCap ?? quote.data.marketCap, volume: cryptoBundle?.profile?.volume24h ?? quote.data.volume,
     marketState: kind === "CRYPTO" ? "OPEN_24_7" : quote.data.marketState, provider: quote.meta.provider, freshnessType: quote.meta.freshnessType,
     sourceTimestamp: quote.meta.sourceTimestamp,
     technical: analysis ? { score: analysis.score, trend: analysis.trend.score >= 65 ? "BULLISH" : analysis.trend.score <= 35 ? "BEARISH" : "NEUTRAL", rsi: analysis.momentum.rsi14.value, macd: analysis.momentum.macd, sma20: analysis.trend.sma["20"].value, sma50: analysis.trend.sma["50"].value, sma200: analysis.trend.sma["200"].value, volatility: analysis.volatility.annualized20, drawdown: analysis.volatility.maximumDrawdown, support: analysis.structure.support20, resistance: analysis.structure.resistance20, relativeVolume: analysis.volume.relative20 } : null,
@@ -71,6 +75,8 @@ export async function getAssetIntelligence(symbolInput: string): Promise<AssetIn
     seasonality: seasonality ? { quality: seasonality.quality, years: seasonality.availableYears, bestMonth, worstMonth } : null,
     sentiment: { score: news?.analysis.aggregate.averageSentiment ?? null, positive: news?.analysis.aggregate.positive ?? 0, neutral: news?.analysis.aggregate.neutral ?? 0, negative: news?.analysis.aggregate.negative ?? 0, provider: news?.meta.provider ?? null },
     forecast: forecast ? { bear: forecast.analysis.percentiles.p10, base: forecast.analysis.percentiles.p50, bull: forecast.analysis.percentiles.p90, probabilityUp: forecast.analysis.probabilityAboveCurrentPrice, confidence: forecast.analysis.confidence, target: analysis?.structure.resistance20 ?? null, invalidation: analysis?.structure.support20 ?? null, horizon: forecast.analysis.horizon } : null,
+    assetProfile: cryptoBundle?.profile ? { provider: "coingecko", marketCapRank: cryptoBundle.profile.marketCapRank, circulatingSupply: cryptoBundle.profile.circulatingSupply, totalSupply: cryptoBundle.profile.totalSupply, maxSupply: cryptoBundle.profile.maxSupply, allTimeHigh: cryptoBundle.profile.allTimeHigh, allTimeHighDate: cryptoBundle.profile.allTimeHighDate, assetsUnderManagement: null, expenseRatio: null, nav: null, holdingsCount: null, topHoldings: [] } : etfBundle?.profile ? { provider: "finnhub", marketCapRank: null, circulatingSupply: null, totalSupply: null, maxSupply: null, allTimeHigh: null, allTimeHighDate: null, assetsUnderManagement: etfBundle.profile.assetsUnderManagement, expenseRatio: etfBundle.profile.expenseRatio, nav: etfBundle.profile.nav, holdingsCount: etfBundle.profile.holdings.length, topHoldings: etfBundle.profile.holdings.slice(0, 10).map((holding) => ({ name: holding.name, symbol: holding.symbol, weight: holding.weight })) } : null,
+    globalContext: cryptoBundle?.global ?? null,
     unavailable, calculatedAt: new Date().toISOString(),
   };
 }

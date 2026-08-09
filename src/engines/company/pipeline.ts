@@ -1,4 +1,5 @@
 import type { CompanyPipelineStage, PipelineStageStatus } from "@/types";
+import { ProviderError } from "@/providers";
 
 export interface StageResult<T> {
   data: T | null;
@@ -22,10 +23,17 @@ export async function runCompanyStage<T>(name: string, task: () => Promise<T>, o
       },
     };
   } catch (error) {
+    const message = error instanceof ProviderError
+      ? error.code === "RATE_LIMITED" ? "Provider rate limit reached; fallback data was not available."
+        : error.code === "PLAN_RESTRICTED" || error.code === "UNAUTHORIZED" ? "Configured provider plan does not expose this dataset."
+          : error.code === "NOT_FOUND" ? "The requested field was not reported by the configured providers."
+            : error.code === "UNSUPPORTED_SYMBOL" ? "The provider cannot map this listing or identifier."
+              : "Provider temporarily unavailable after controlled retries."
+      : "Stage unavailable; the remaining analysis continued.";
     return {
       data: null,
       error,
-      stage: { name, status: "failed", durationMs: Date.now() - startedAt, message: "Stage unavailable; the remaining analysis continued." },
+      stage: { name, status: "failed", durationMs: Date.now() - startedAt, message },
     };
   }
 }

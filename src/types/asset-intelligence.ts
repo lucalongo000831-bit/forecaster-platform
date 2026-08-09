@@ -32,6 +32,21 @@ export interface AssetIntelligenceReport {
   seasonality: { quality: string; years: number; bestMonth: string | null; worstMonth: string | null } | null;
   sentiment: { score: number | null; positive: number; neutral: number; negative: number; provider: string | null };
   forecast: { bear: number; base: number; bull: number; probabilityUp: number; confidence: number; target: number | null; invalidation: number | null; horizon: string } | null;
+  assetProfile?: {
+    provider: "coingecko" | "finnhub";
+    marketCapRank: number | null;
+    circulatingSupply: number | null;
+    totalSupply: number | null;
+    maxSupply: number | null;
+    allTimeHigh: number | null;
+    allTimeHighDate: string | null;
+    assetsUnderManagement: number | null;
+    expenseRatio: number | null;
+    nav: number | null;
+    holdingsCount: number | null;
+    topHoldings: Array<{ name: string; symbol: string | null; weight: number | null }>;
+  } | null;
+  globalContext?: Record<string, number | null> | null;
   unavailable: string[];
   calculatedAt: string;
 }

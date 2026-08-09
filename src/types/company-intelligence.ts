@@ -370,6 +370,8 @@ export interface CompanyIntelligenceReport {
   macro: CompanyMacroAnalysis | null;
   thesis: { verdict: string; whyItMayWork: string[]; whyItMayFail: string[]; monitor: string[] };
   sources: CompanySource[];
+  fieldProvenance?: import("@/providers/types").FieldProvenance[];
+  missingData?: import("./data-coverage").MissingDataDetail[];
   limitations: string[];
   pipeline: CompanyPipelineStage[];
   modelVersion: string;
