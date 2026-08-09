@@ -7,6 +7,8 @@ describe("server environment", () => {
     expect(env.YAHOO_FINANCE_ENABLED).toBe(true);
     expect(env.ENABLE_DEMO_DATA).toBe(false);
     expect(env.ENABLE_KAIRO_AI).toBe(false);
+    expect(env.ENABLE_ESEF_INGESTION).toBe(false);
+    expect(env.COINGECKO_API_MODE).toBe("pro");
     expect(env.MARKET_DATA_PRIMARY_PROVIDER).toBe("massive");
   });
 
@@ -21,9 +23,18 @@ describe("server environment", () => {
       FMP_API_KEY: "test-value",
       ALPHA_VANTAGE_API_KEY: "test-value",
       MASSIVE_API_KEY: "test-value",
+      EODHD_API_TOKEN: "test-value",
+      FINNHUB_API_KEY: "test-value",
+      COINGECKO_API_KEY: "test-value",
+      SEC_USER_AGENT: "KAIRO test contact@example.test",
     });
-    expect(status).toMatchObject({ databaseConfigured: true, fmpConfigured: true, alphaVantageConfigured: true, massiveConfigured: true });
+    expect(status).toMatchObject({ databaseConfigured: true, fmpConfigured: true, alphaVantageConfigured: true, massiveConfigured: true, eodhdConfigured: true, finnhubConfigured: true, coinGeckoConfigured: true, secConfigured: true });
     expect(Object.values(status).every((value) => typeof value === "boolean")).toBe(true);
+  });
+
+  it("validates CoinGecko mode and non-empty SEC identification", () => {
+    expect(getServerEnvironment({ NODE_ENV: "test", COINGECKO_API_MODE: "demo", SEC_USER_AGENT: "KAIRO test contact@example.test" })).toMatchObject({ COINGECKO_API_MODE: "demo", SEC_USER_AGENT: "KAIRO test contact@example.test" });
+    expect(() => getServerEnvironment({ NODE_ENV: "test", COINGECKO_API_MODE: "enterprise" })).toThrow("Configurazione server non valida");
   });
 
   it("rejects provider base URLs outside the explicit HTTPS allowlist", () => {
