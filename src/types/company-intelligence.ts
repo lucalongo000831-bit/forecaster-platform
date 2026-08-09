@@ -129,6 +129,10 @@ export interface MoatCategoryAssessment {
   present: boolean | null;
   strength: "STRONG" | "MODERATE" | "WEAK" | "NONE" | "UNCERTAIN";
   durationYears: number | null;
+  assessment?: string;
+  evidence?: string[];
+  counterEvidence?: string[];
+  quantitativeSupport?: Record<string, number | null>;
   quantitativeEvidence: string[];
   qualitativeEvidence: string[];
   threats: string[];
@@ -180,10 +184,12 @@ export interface ValuationScenario {
 export interface ReverseDcfAnalysis {
   applicable: boolean;
   impliedFcfGrowth: number | null;
+  impliedRevenueCagr?: number | null;
+  impliedNormalizedMargin?: number | null;
   explicitYears: number;
   discountRate: number | null;
   terminalGrowth: number | null;
-  classification: "PRUDENT" | "REASONABLE" | "DEMANDING" | "VERY_AGGRESSIVE" | "UNSUSTAINABLE" | "UNAVAILABLE";
+  classification: "VERY_LOW_EXPECTATIONS" | "CONSERVATIVE" | "REASONABLE" | "DEMANDING" | "AGGRESSIVE" | "UNAVAILABLE";
   explanation: string;
   confidence: CompanyConfidence;
   warnings: string[];
@@ -199,6 +205,8 @@ export interface CompanyValuation {
   fairValue: number | null;
   prudentFairValue: number | null;
   marginOfSafety: number | null;
+  normalized?: { revenue: number | null; operatingMargin: number | null; netIncome: number | null; freeCashFlow: number | null; method: string; periods: string[] };
+  marginOfSafetyByScenario?: { bear: number | null; base: number | null; bull: number | null; composite: number | null };
   operationalPrices: {
     veryInteresting: [number, number] | null;
     interesting: [number, number] | null;
@@ -283,14 +291,71 @@ export interface CompanyRiskItem {
   id: string;
   category: string;
   description: string;
-  probability: "LOW" | "MEDIUM" | "HIGH";
+  probability: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
   impact: "LOW" | "MEDIUM" | "HIGH";
   horizon: string;
   trend: "IMPROVING" | "STABLE" | "WORSENING" | "UNKNOWN";
   mitigations: string[];
   indicators: string[];
   sources: string[];
+  lastUpdated?: string | null;
   confidence: CompanyConfidence;
+}
+
+export interface AutomotiveSegmentAnalysis {
+  name: string;
+  revenue: number | null;
+  shareOfRevenue: number | null;
+  revenueGrowth: number | null;
+  adjustedOperatingIncome: number | null;
+  adjustedOperatingMargin: number | null;
+  shipments: number | null;
+  shipmentGrowth: number | null;
+}
+
+export interface AutomotiveAnalysis {
+  applicable: boolean;
+  adjustedOperatingIncome: number | null;
+  adjustedOperatingMargin: number | null;
+  industrialFreeCashFlow: number | null;
+  consolidatedFreeCashFlow: number | null;
+  industrialNetFinancialPosition: number | null;
+  consolidatedNetDebt: number | null;
+  consolidatedShipments: number | null;
+  shipmentGrowth: number | null;
+  inventoryDays: number | null;
+  capexToRevenue: number | null;
+  assetTurnover: number | null;
+  cyclicalityScore: number | null;
+  downcycleSensitivity: "LOW" | "MEDIUM" | "HIGH" | "UNKNOWN";
+  segments: AutomotiveSegmentAnalysis[];
+  brandPortfolio: string[];
+  centralizedDesignAndManufacturing: boolean;
+  dealerFinanceOffering: boolean;
+  evidence: string[];
+  limitations: string[];
+  confidence: CompanyConfidence;
+  sourceUrl: string | null;
+  modelVersion: string;
+}
+
+export type CoverageFieldStatus = "AVAILABLE" | "PARTIAL" | "MISSING" | "INSUFFICIENT_EVIDENCE" | "SOURCE_ERROR" | "NOT_APPLICABLE";
+export interface CoverageField {
+  field: string;
+  section: string;
+  status: CoverageFieldStatus;
+  source: string | null;
+  reason: string | null;
+}
+export interface SectionCoverage { section: string; available: number; applicable: number; total: number; percentage: number; status: "AVAILABLE" | "PARTIAL" | "MISSING" | "NOT_APPLICABLE"; }
+export interface CompanyCoverageReport {
+  rawDataCoverage: number;
+  applicableDataCoverage: number;
+  fields: CoverageField[];
+  sections: SectionCoverage[];
+  missingFields: string[];
+  calculatedAt: string;
+  modelVersion: string;
 }
 
 export interface CompanyRedFlag {
@@ -384,6 +449,10 @@ export interface CompanyIntelligenceReport {
   operationalCalendar: OperationalCalendarDay[];
   risks: CompanyRiskRegister | null;
   macro: CompanyMacroAnalysis | null;
+  automotive?: AutomotiveAnalysis | null;
+  coverage?: CompanyCoverageReport;
+  forecast?: import("@/engines/forecast").ForecastAnalysis | null;
+  ownership?: import("./data-coverage").AnalysisDataBundle["ownership"];
   thesis: { verdict: string; whyItMayWork: string[]; whyItMayFail: string[]; monitor: string[] };
   sources: CompanySource[];
   fieldProvenance?: import("@/providers/types").FieldProvenance[];

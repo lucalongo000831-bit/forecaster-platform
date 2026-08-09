@@ -11,3 +11,5 @@ export * from "./macro-news";
 export * from "./verdict";
 export * from "./ownership-dividend";
 export * from "./decision-validation";
+export * from "./automotive";
+export * from "./coverage";

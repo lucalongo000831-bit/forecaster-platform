@@ -123,6 +123,12 @@ export interface AnalysisDataBundle {
   peers: string[];
   insiderTransactions: Array<Record<string, unknown>>;
   dividends: Array<Record<string, unknown>>;
+  ownership: {
+    institutions: Array<{ organization: string; reportDate: string; percentHeld: number; position: number; value: number }>;
+    institutionalOwnership: number | null;
+    insiderOwnership: number | null;
+    institutionsCount: number | null;
+  } | null;
   insiderSignal: { score: number | null; netShares: number | null; purchases: number; sales: number; confidence: "LOW" | "MEDIUM" | "HIGH" };
   dividendAnalytics: { payments: number; trailingAmount: number | null; growthRate: number | null; regularity: number | null };
   provenance: FieldProvenance[];
