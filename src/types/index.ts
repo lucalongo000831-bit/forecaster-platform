@@ -6,3 +6,4 @@ export type * from "./company-intelligence";
 export type * from "./asset-intelligence";
 export type * from "./data-coverage";
 export type * from "./global-market-brief";
+export type * from "./political-intelligence";

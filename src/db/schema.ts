@@ -23,6 +23,11 @@ export const signalCategory = pgEnum("signal_category", ["STRONG_SELL", "SELL", 
 export const alertStatus = pgEnum("alert_status", ["ACTIVE", "TRIGGERED", "PAUSED", "EXPIRED", "DISABLED"]);
 export const backtestStatus = pgEnum("backtest_status", ["QUEUED", "RUNNING", "COMPLETED", "FAILED"]);
 export const transactionType = pgEnum("transaction_type", ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "FEE", "SPLIT"]);
+export const politicalChamber = pgEnum("political_chamber", ["HOUSE", "SENATE", "UNKNOWN"]);
+export const politicalParty = pgEnum("political_party", ["DEMOCRATIC", "REPUBLICAN", "INDEPENDENT", "OTHER", "UNKNOWN"]);
+export const politicalOwnerType = pgEnum("political_owner_type", ["SELF", "SPOUSE", "DEPENDENT", "JOINT", "TRUST", "OTHER", "UNKNOWN"]);
+export const politicalTransactionKind = pgEnum("political_transaction_kind", ["PURCHASE", "SALE_FULL", "SALE_PARTIAL", "SALE", "EXCHANGE", "OPTION", "OTHER", "UNKNOWN"]);
+export const politicalVerificationStatus = pgEnum("political_verification_status", ["PROVIDER_ONLY", "OFFICIAL_SOURCE_VERIFIED", "SOURCE_MISMATCH", "PENDING", "UNVERIFIABLE"]);
 
 const createdUpdated = () => ({
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -477,6 +482,78 @@ export const providerHealthSnapshots = pgTable("provider_health_snapshots", {
   errorCode: varchar("error_code", { length: 80 }),
   checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("provider_health_time_idx").on(table.provider, table.checkedAt)]);
+
+export const politicians = pgTable("politicians", {
+  id: varchar("id", { length: 80 }).primaryKey(),
+  normalizedName: varchar("normalized_name", { length: 220 }).notNull(),
+  displayName: varchar("display_name", { length: 220 }).notNull(),
+  chamber: politicalChamber("chamber").default("UNKNOWN").notNull(),
+  party: politicalParty("party").default("UNKNOWN").notNull(),
+  state: varchar("state", { length: 80 }),
+  district: varchar("district", { length: 120 }),
+  activeStatus: varchar("active_status", { length: 20 }).default("UNKNOWN").notNull(),
+  sourceIdentifiers: jsonb("source_identifiers").$type<Record<string, string>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("politicians_normalized_identity_unique").on(table.normalizedName, table.chamber, table.state), index("politicians_name_idx").on(table.displayName)]);
+
+export const politicalFilings = pgTable("political_filings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  politicianId: varchar("politician_id", { length: 80 }).references(() => politicians.id, { onDelete: "cascade" }).notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  sourceId: varchar("source_id", { length: 220 }).notNull(),
+  filingType: varchar("filing_type", { length: 80 }),
+  disclosureDate: timestamp("disclosure_date", { withTimezone: true }).notNull(),
+  sourceUrl: text("source_url"),
+  amendment: boolean("amendment").default(false).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("political_filings_provider_source_unique").on(table.provider, table.sourceId), index("political_filings_politician_date_idx").on(table.politicianId, table.disclosureDate)]);
+
+export const politicalTransactions = pgTable("political_transactions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sourceId: varchar("source_id", { length: 220 }).notNull(),
+  fingerprint: varchar("fingerprint", { length: 80 }).notNull(),
+  politicianId: varchar("politician_id", { length: 80 }).references(() => politicians.id, { onDelete: "cascade" }).notNull(),
+  filingId: uuid("filing_id").references(() => politicalFilings.id, { onDelete: "set null" }),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  canonicalIssuerId: uuid("canonical_issuer_id").references(() => issuers.id, { onDelete: "set null" }),
+  chamber: politicalChamber("chamber").notNull(), party: politicalParty("party").notNull(), state: varchar("state", { length: 80 }), district: varchar("district", { length: 120 }), ownerType: politicalOwnerType("owner_type").notNull(),
+  assetName: text("asset_name").notNull(), assetType: varchar("asset_type", { length: 120 }), rawTicker: varchar("raw_ticker", { length: 100 }), symbol: varchar("symbol", { length: 100 }), sector: varchar("sector", { length: 160 }),
+  transactionType: politicalTransactionKind("transaction_type").notNull(), transactionDate: timestamp("transaction_date", { withTimezone: true }).notNull(), disclosureDate: timestamp("disclosure_date", { withTimezone: true }).notNull(), marketAvailableDate: timestamp("market_available_date", { withTimezone: true }).notNull(), disclosureDelayDays: integer("disclosure_delay_days").notNull(),
+  amountMin: numeric("amount_min", { precision: 38, scale: 4 }), amountMax: numeric("amount_max", { precision: 38, scale: 4 }), amountRangeRaw: varchar("amount_range_raw", { length: 160 }), estimatedAmount: numeric("estimated_amount", { precision: 38, scale: 4 }), amountMethod: varchar("amount_method", { length: 32 }).notNull(),
+  priceAtTransaction: numeric("price_at_transaction", { precision: 30, scale: 10 }), priceAtDisclosure: numeric("price_at_disclosure", { precision: 30, scale: 10 }), currentPrice: numeric("current_price", { precision: 30, scale: 10 }), sharesEstimate: numeric("shares_estimate", { precision: 38, scale: 10 }),
+  source: text("source").notNull(), sourceUrl: text("source_url"), filingType: varchar("filing_type", { length: 80 }), provider: varchar("provider", { length: 40 }).notNull(), fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(), verified: boolean("verified").default(false).notNull(), verificationStatus: politicalVerificationStatus("verification_status").notNull(), resolutionStatus: varchar("resolution_status", { length: 32 }).notNull(), amendment: boolean("amendment").default(false).notNull(),
+  rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().default({}).notNull(), ...createdUpdated(),
+}, (table) => [uniqueIndex("political_transactions_fingerprint_unique").on(table.fingerprint), index("political_transactions_politician_idx").on(table.politicianId), index("political_transactions_instrument_disclosure_idx").on(table.instrumentId, table.disclosureDate), index("political_transactions_transaction_date_idx").on(table.transactionDate), index("political_transactions_disclosure_date_idx").on(table.disclosureDate), index("political_transactions_chamber_type_idx").on(table.chamber, table.transactionType), index("political_transactions_issuer_idx").on(table.canonicalIssuerId), index("political_transactions_created_idx").on(table.createdAt)]);
+
+export const politicalActivitySnapshots = pgTable("political_activity_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(), instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "cascade" }), period: varchar("period", { length: 16 }).notNull(), purchaseCount: integer("purchase_count").notNull(), saleCount: integer("sale_count").notNull(), purchaseMin: numeric("purchase_min", { precision: 38, scale: 4 }).notNull(), purchaseMax: numeric("purchase_max", { precision: 38, scale: 4 }).notNull(), saleMin: numeric("sale_min", { precision: 38, scale: 4 }).notNull(), saleMax: numeric("sale_max", { precision: 38, scale: 4 }).notNull(), uniqueBuyers: integer("unique_buyers").notNull(), uniqueSellers: integer("unique_sellers").notNull(), houseCount: integer("house_count").notNull(), senateCount: integer("senate_count").notNull(), clusterBuying: varchar("cluster_buying", { length: 16 }).notNull(), clusterSelling: varchar("cluster_selling", { length: 16 }).notNull(), intensityScore: numeric("intensity_score", { precision: 8, scale: 4 }).notNull(), direction: varchar("direction", { length: 32 }).notNull(), confidence: varchar("confidence", { length: 20 }).notNull(), payload: jsonb("payload").$type<Record<string, unknown>>().notNull(), modelVersion: varchar("model_version", { length: 80 }).notNull(), calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull(), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("political_activity_instrument_period_time_idx").on(table.instrumentId, table.period, table.calculatedAt)]);
+
+export const politicalTradePerformances = pgTable("political_trade_performances", {
+  id: uuid("id").defaultRandom().primaryKey(), politicalTransactionId: uuid("political_transaction_id").references(() => politicalTransactions.id, { onDelete: "cascade" }).notNull(), benchmarkSymbol: varchar("benchmark_symbol", { length: 64 }).notNull(), marketAvailableDate: timestamp("market_available_date", { withTimezone: true }).notNull(), payload: jsonb("payload").$type<Record<string, unknown>>().notNull(), classification: varchar("classification", { length: 32 }).notNull(), modelVersion: varchar("model_version", { length: 80 }).notNull(), calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull(),
+}, (table) => [uniqueIndex("political_performance_transaction_model_unique").on(table.politicalTransactionId, table.modelVersion), index("political_performance_available_date_idx").on(table.marketAvailableDate)]);
+
+export const politicalClusters = pgTable("political_clusters", {
+  id: varchar("id", { length: 100 }).primaryKey(), instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "set null" }), symbol: varchar("symbol", { length: 64 }), direction: varchar("direction", { length: 16 }).notNull(), strength: varchar("strength", { length: 16 }).notNull(), windowDays: integer("window_days").notNull(), uniquePoliticians: integer("unique_politicians").notNull(), transactionCount: integer("transaction_count").notNull(), estimatedAmount: numeric("estimated_amount", { precision: 38, scale: 4 }).notNull(), firstDisclosureDate: timestamp("first_disclosure_date", { withTimezone: true }).notNull(), lastDisclosureDate: timestamp("last_disclosure_date", { withTimezone: true }).notNull(), payload: jsonb("payload").$type<Record<string, unknown>>().notNull(), modelVersion: varchar("model_version", { length: 80 }).notNull(), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("political_cluster_instrument_date_idx").on(table.instrumentId, table.lastDisclosureDate), index("political_cluster_strength_idx").on(table.strength, table.lastDisclosureDate)]);
+
+export const politicalDataVerifications = pgTable("political_data_verifications", {
+  id: uuid("id").defaultRandom().primaryKey(), politicalTransactionId: uuid("political_transaction_id").references(() => politicalTransactions.id, { onDelete: "cascade" }).notNull(), status: politicalVerificationStatus("status").notNull(), sourceUrl: text("source_url"), providerPayload: jsonb("provider_payload").$type<Record<string, unknown>>().default({}).notNull(), officialPayload: jsonb("official_payload").$type<Record<string, unknown>>().default({}).notNull(), conflicts: jsonb("conflicts").$type<Array<Record<string, unknown>>>().default([]).notNull(), verifiedAt: timestamp("verified_at", { withTimezone: true }), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("political_verification_transaction_idx").on(table.politicalTransactionId, table.createdAt), index("political_verification_status_idx").on(table.status)]);
+
+export const politicalLeaderboardSnapshots = pgTable("political_leaderboard_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(), period: varchar("period", { length: 16 }).notNull(), payload: jsonb("payload").$type<Record<string, unknown>>().notNull(), dataCompleteness: numeric("data_completeness", { precision: 8, scale: 4 }).notNull(), modelVersion: varchar("model_version", { length: 80 }).notNull(), calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull(), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("political_leaderboard_period_time_idx").on(table.period, table.calculatedAt)]);
+
+export const politicalAssetAliases = pgTable("political_asset_aliases", {
+  id: uuid("id").defaultRandom().primaryKey(), rawAlias: varchar("raw_alias", { length: 320 }).notNull(), normalizedAlias: varchar("normalized_alias", { length: 320 }).notNull(), instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "cascade" }).notNull(), confidence: numeric("confidence", { precision: 8, scale: 6 }).notNull(), source: varchar("source", { length: 80 }).notNull(), active: boolean("active").default(true).notNull(), ...createdUpdated(),
+}, (table) => [uniqueIndex("political_asset_alias_unique").on(table.normalizedAlias), index("political_asset_alias_instrument_idx").on(table.instrumentId)]);
+
+export const politicalSyncStates = pgTable("political_sync_states", {
+  key: varchar("key", { length: 80 }).primaryKey(), lastSuccessfulSync: timestamp("last_successful_sync", { withTimezone: true }), houseRecords: integer("house_records").default(0).notNull(), senateRecords: integer("senate_records").default(0).notNull(), mappedInstruments: integer("mapped_instruments").default(0).notNull(), unresolvedAssets: integer("unresolved_assets").default(0).notNull(), duplicatesRemoved: integer("duplicates_removed").default(0).notNull(), latestDisclosure: timestamp("latest_disclosure", { withTimezone: true }), providerStatus: varchar("provider_status", { length: 24 }).default("UNKNOWN").notNull(), metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(), ...createdUpdated(),
+});
 
 export const analysisDataBundleSnapshots = pgTable("analysis_data_bundle_snapshots", {
   id: uuid("id").defaultRandom().primaryKey(),

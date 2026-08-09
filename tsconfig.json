@@ -37,6 +37,8 @@
   ],
   "exclude": [
     "node_modules",
-    "services/realtime-gateway"
+    "services/realtime-gateway",
+    "**/* 2.ts",
+    "**/* 2.tsx"
   ]
 }

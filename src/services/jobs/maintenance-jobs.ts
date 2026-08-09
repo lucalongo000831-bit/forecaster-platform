@@ -6,6 +6,7 @@ import { financialProviderRouter } from "@/providers";
 import { evaluateActiveAlerts } from "@/services/account";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
 import { getGlobalRiskCurrent } from "@/services/global-risk";
+import { syncPoliticalDisclosures } from "@/services/political";
 import { runJob } from "./job-runner";
 
 const LIQUID_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "^GSPC", "^IXIC", "BTC-USD", "ETH-USD", "ENI.MI", "STLAM.MI"];
@@ -29,6 +30,10 @@ export function runAlertEvaluationJob() {
   return runJob("alert-evaluation", async () => isDatabaseConfigured() ? evaluateActiveAlerts(100) : { skipped: true, reason: "database-not-configured" }, { timeoutMs: 45_000, lockSeconds: 60 });
 }
 
+export function runPoliticalDisclosureSyncJob() {
+  return runJob("political-disclosure-sync", () => syncPoliticalDisclosures({ limit: 100 }), { timeoutMs: 52_000, lockSeconds: 120 });
+}
+
 export function runCleanupJob() {
   return runJob("retention-cleanup", async () => {
     if (!isDatabaseConfigured()) return { skipped: true, reason: "database-not-configured" };
@@ -44,6 +49,6 @@ export function runCleanupJob() {
 }
 
 export async function runDailyJobs() {
-  const [market, alerts, cleanup] = await Promise.all([runMarketRefreshJob(), runAlertEvaluationJob(), runCleanupJob()]);
-  return { market, alerts, cleanup };
+  const [market, political, alerts, cleanup] = await Promise.all([runMarketRefreshJob(), runPoliticalDisclosureSyncJob(), runAlertEvaluationJob(), runCleanupJob()]);
+  return { market, political, alerts, cleanup };
 }

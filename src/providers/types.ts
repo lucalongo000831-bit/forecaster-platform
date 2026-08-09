@@ -152,17 +152,26 @@ export interface EconomicEvent {
 
 export interface PoliticalDisclosure {
   id: string;
+  sourceId: string;
   politician: string;
-  chamber: "SENATE" | "HOUSE";
+  chamber: "SENATE" | "HOUSE" | "UNKNOWN";
+  party: string | null;
+  state: string | null;
+  district: string | null;
   symbol: string | null;
   asset: string;
-  transactionType: "PURCHASE" | "SALE" | "EXCHANGE" | "OTHER";
+  assetType: string | null;
+  transactionType: "PURCHASE" | "SALE_FULL" | "SALE_PARTIAL" | "SALE" | "EXCHANGE" | "OPTION" | "OTHER" | "UNKNOWN";
+  rawTransactionType: string | null;
   transactionDate: string;
   disclosureDate: string | null;
   amountRange: string | null;
   ownership: string | null;
   capitalGains: number | null;
   sourceUrl: string | null;
+  filingId: string | null;
+  filingType: string | null;
+  amendment: boolean;
 }
 
 export interface MacroObservation {

@@ -232,7 +232,7 @@ export class FinancialProviderRouter {
   capabilities(): ProviderCapability[] {
     return [
       { provider: "yahoo", configured: marketAdapters.yahoo.isConfigured(), capabilities: ["search", "quote", "historical-bars", "profile", "summary-fundamentals", "ticker-news", "global-symbols"], limitations: ["non-official API", "no historical statements in adapter", "quotes may be delayed"] },
-      { provider: "fmp", configured: marketAdapters.fmp.isConfigured(), capabilities: ["profile", "statements", "ratios", "analyst-consensus", "earnings-calendar", "dividends-calendar", "economic-calendar", "quote-fallback"], limitations: ["endpoint availability depends on subscription", "daily fallback bars"] },
+      { provider: "fmp", configured: marketAdapters.fmp.isConfigured(), capabilities: ["profile", "statements", "ratios", "analyst-consensus", "earnings-calendar", "dividends-calendar", "economic-calendar", "house-disclosures", "senate-disclosures", "quote-fallback"], limitations: ["endpoint availability depends on subscription", "congressional disclosures may be delayed and amount-ranged", "daily fallback bars"] },
       { provider: "alpha-vantage", configured: newsAdapters["alpha-vantage"].isConfigured(), capabilities: ["ticker-news", "topic-news", "sentiment"], limitations: ["strict free-tier quotas", "coverage varies by symbol"] },
       { provider: "massive", configured: marketAdapters.massive.isConfigured(), capabilities: ["US snapshots", "US aggregate bars", "US market status", "US search"], limitations: ["US adapter only", "realtime depends on subscription", "5 calls/minute conservative limit"] },
     ];

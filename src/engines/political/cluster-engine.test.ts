@@ -1,0 +1,10 @@
+import { describe, expect, it } from "vitest";
+import { PoliticalClusterEngine } from "./cluster-engine";
+import { politicalTransaction } from "./test-fixtures";
+
+describe("PoliticalClusterEngine", () => {
+  it("does not call repeated activity by one politician a cluster", () => { const rows = [politicalTransaction({ id: "1", fingerprint: "1" }), politicalTransaction({ id: "2", fingerprint: "2", disclosureDate: "2025-01-21" })]; expect(new PoliticalClusterEngine().analyze(rows, new Date("2025-01-22"))).toHaveLength(0); });
+  it("detects independently disclosed buying by multiple politicians", () => { const rows = Array.from({ length: 5 }, (_, index) => politicalTransaction({ id: String(index), fingerprint: String(index), politicianId: `p${index}`, disclosureDate: `2025-01-${String(20 + index).padStart(2, "0")}` })); const [cluster] = new PoliticalClusterEngine(30).analyze(rows, new Date("2025-01-25")); expect(cluster?.direction).toBe("PURCHASE"); expect(cluster?.uniquePoliticians).toBe(5); expect(["MODERATE", "STRONG"]).toContain(cluster?.strength); });
+  it("keeps purchase and sale clusters separate", () => { const rows = [politicalTransaction({ id: "1", fingerprint: "1", politicianId: "p1" }), politicalTransaction({ id: "2", fingerprint: "2", politicianId: "p2" }), politicalTransaction({ id: "3", fingerprint: "3", politicianId: "p3", transactionType: "SALE" }), politicalTransaction({ id: "4", fingerprint: "4", politicianId: "p4", transactionType: "SALE" })]; expect(new PoliticalClusterEngine().analyze(rows, new Date("2025-01-22")).map((item) => item.direction).sort()).toEqual(["PURCHASE", "SALE"]); });
+  it("downweights spouse-estimated value without discarding the disclosure", () => { const rows = [politicalTransaction({ id: "1", fingerprint: "1", politicianId: "p1", ownerType: "SPOUSE", estimatedAmount: 100_000 }), politicalTransaction({ id: "2", fingerprint: "2", politicianId: "p2", estimatedAmount: 100_000 })]; expect(new PoliticalClusterEngine().analyze(rows, new Date("2025-01-22"))[0]?.estimatedAmount).toBe(180_000); });
+});

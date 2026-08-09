@@ -6,19 +6,10 @@ import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import { fmpGet, numberValue, stringValue } from "../fmp/client";
 import { providerResult } from "../metadata";
 import type { PoliticalDisclosure, PoliticalProvider } from "../types";
+import { normalizePoliticalTransactionType, stablePoliticalId } from "@/engines/political";
 
 function transactionType(value: string | null): PoliticalDisclosure["transactionType"] {
-  const normalized = value?.toLowerCase() ?? "";
-  if (normalized.includes("purchase") || normalized.includes("buy")) return "PURCHASE";
-  if (normalized.includes("sale") || normalized.includes("sell")) return "SALE";
-  if (normalized.includes("exchange")) return "EXCHANGE";
-  return "OTHER";
-}
-
-function stableId(parts: Array<string | null>) {
-  let hash = 5381;
-  for (const character of parts.join(":")) hash = Math.imul(hash, 33) ^ character.charCodeAt(0);
-  return `political-${(hash >>> 0).toString(16)}`;
+  return normalizePoliticalTransactionType(value);
 }
 
 export function mapDisclosure(row: Record<string, unknown>, chamber: PoliticalDisclosure["chamber"]): PoliticalDisclosure | null {
@@ -31,19 +22,30 @@ export function mapDisclosure(row: Record<string, unknown>, chamber: PoliticalDi
   const symbol = stringValue(row, "symbol", "ticker");
   const disclosureDate = stringValue(row, "disclosureDate", "disclosure_date", "filingDate");
   const rawType = stringValue(row, "transactionType", "transaction_type", "type");
+  const filingId = stringValue(row, "filingId", "filing_id", "documentId", "docID");
+  const sourceId = stringValue(row, "id", "sourceId", "transactionId") ?? stablePoliticalId(politician, symbol, transactionDate, disclosureDate, rawType, filingId);
   return {
-    id: stableId([politician, symbol, transactionDate, disclosureDate, rawType]),
+    id: `political-${sourceId}`,
+    sourceId,
     politician,
     chamber,
+    party: stringValue(row, "party", "partyName"),
+    state: stringValue(row, "state", "stateCode"),
+    district: stringValue(row, "district", "office"),
     symbol,
     asset,
+    assetType: stringValue(row, "assetType", "asset_type", "securityType"),
     transactionType: transactionType(rawType),
+    rawTransactionType: rawType,
     transactionDate: transactionDate.slice(0, 10),
     disclosureDate: disclosureDate?.slice(0, 10) ?? null,
     amountRange: stringValue(row, "amount", "amountRange", "amount_range"),
     ownership: stringValue(row, "owner", "ownership", "assetType"),
     capitalGains: numberValue(row, "capitalGainsOver200USD", "capitalGains"),
     sourceUrl: safeExternalHttpsUrl(stringValue(row, "link", "url")),
+    filingId,
+    filingType: stringValue(row, "filingType", "filing_type", "formType"),
+    amendment: Boolean(stringValue(row, "amendment", "filingType", "filing_type")?.toLowerCase().includes("amend")),
   };
 }
 
@@ -54,7 +56,9 @@ export class FmpPoliticalAdapter implements PoliticalProvider {
   private async request(chamber: PoliticalDisclosure["chamber"], symbolInput?: string, limit = 100) {
     const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
     const endpoint = chamber === "SENATE" ? (symbol ? "senate-trades" : "senate-latest") : (symbol ? "house-trades" : "house-latest");
-    const rows = await fmpGet(endpoint, symbol ? { symbol } : { page: 0, limit: Math.min(100, Math.max(1, limit)) }, `political:${chamber.toLowerCase()}`);
+    // FMP returns 402 for larger congressional-disclosure pages on some plans.
+    // A conservative page preserves live availability; deeper history comes from controlled pagination/backfill.
+    const rows = await fmpGet(endpoint, symbol ? { symbol } : { page: 0, limit: Math.min(20, Math.max(1, limit)) }, `political:${chamber.toLowerCase()}`);
     const data = rows.flatMap((row) => {
       const mapped = mapDisclosure(row, chamber);
       return mapped ? [mapped] : [];
