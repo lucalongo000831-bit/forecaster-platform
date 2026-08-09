@@ -69,3 +69,9 @@ export async function requireUser() {
   if (!user) throw new AppError("UNAUTHENTICATED", "Autenticazione richiesta", 401);
   return user;
 }
+
+export async function requireAdmin() {
+  const user = await requireUser();
+  if (user.role !== "ADMIN") throw new AppError("FORBIDDEN", "Administrator access required", 403);
+  return user;
+}

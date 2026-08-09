@@ -15,6 +15,7 @@ The product identity and assets are replaceable. The project does not scrape the
 - Protected health endpoints, cron jobs, structured logs, request IDs, rate limiting and data provenance.
 - Buy-side Company Intelligence with historical statement validation, earnings/FCF quality, evidence-based company scoring, moat and management analysis, reverse DCF, bear/base/bull DCF, downside-first risks, horizons through 20 years, operational calendar, PDF/CSV reports and point-in-time decision validation.
 - Asset-specific Crypto, ETF and Index Intelligence, with technicals, risk, seasonality, attributed sentiment and probabilistic scenarios instead of inapplicable corporate DCF metrics.
+- Global Markets risk monitoring with a versioned deterministic stress model, systemic-transmission rules, historical alert timeline and a separately labelled manual editorial brief workflow.
 - Ask Kairo code is preserved but parked behind `ENABLE_KAIRO_AI=false`; the financial platform works without an OpenAI key.
 
 ## Technology
@@ -105,6 +106,8 @@ Core boundaries:
 
 Public market APIs include `/api/market/{search,quote,quotes,chart,profile,fundamentals,statements,analyst,news,status,events,political,macro}`, `/api/analysis/{technical,fundamental,seasonality,signal,targets,risk,forecast}`, `/api/intelligence/news`, `/api/calendar` and `/api/backtests`.
 
+Global Markets is available at `/global-markets` with public normalized reads under `/api/global-risk/{current,history,components,triggers}` and `/api/global-market-brief/{current,history}`. Forced risk calculation and editorial draft/parse/publish/archive operations require an authenticated same-origin request and tighter rate limits.
+
 Company Intelligence is available at `/instrument/[market]/[symbol]/analysis` and through `/api/company/resolve`, the section endpoints under `/api/company/[symbol]/**`, report export, refresh, custom DCF and decision backtesting. Public sections share one aggregate abuse budget and one cached report pipeline; costly mutations and production exports use tighter authentication/limit controls.
 
 Private APIs include:
@@ -185,6 +188,7 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Future Ask Kairo reactivation](docs/FUTURE_KAIRO_AI.md)
 - [Massive streaming gateway](docs/REALTIME_GATEWAY_SETUP.md)
 - [Live provider implementation report](docs/LIVE_PROVIDER_IMPLEMENTATION_REPORT.md)
+- [Global Risk engine](docs/GLOBAL_RISK_ENGINE.md), [methodology](docs/GLOBAL_RISK_MODEL_METHODOLOGY.md), [data sources](docs/GLOBAL_MARKETS_DATA_SOURCES.md), [editorial workflow](docs/GLOBAL_MARKET_BRIEF.md) and [future editorial AI boundary](docs/FUTURE_AUTOMATED_EDITORIAL_AI.md)
 
 ## Disclaimer
 

@@ -1,0 +1,22 @@
+import { describe, expect, it } from "vitest";
+import { buildComponent, calculateWeightedScore, deriveTrend, GlobalStressEngine, hasEditorialDivergence, metric, statusForScore, SystemicStressEngine, type GlobalRiskComponent, type GlobalRiskComponentKey } from ".";
+
+const keys: GlobalRiskComponentKey[] = ["VOLATILITY", "CREDIT", "LIQUIDITY", "RATES", "MARKET_BREADTH", "EQUITY_STRESS", "CROSS_ASSET", "MACRO", "GEOPOLITICS"];
+function component(key: GlobalRiskComponentKey, score: number | null, completeness = score === null ? 0 : 100): GlobalRiskComponent { const result = buildComponent(key, key, [metric(`${key}-metric`, key, score, score)], "Test component"); return { ...result, score, completeness }; }
+function input(components: GlobalRiskComponent[]) { return { components, history: { oneDay: 40, fiveDay: 35, twentyDay: 30, previousScore: 39, previousStatus: "YELLOW" as const, lastStatusChangeAt: null }, sources: [{ provider: "test", category: "MARKET" as const, asOf: new Date().toISOString(), freshness: "REALTIME", available: true }] }; }
+
+describe("GlobalStressEngine", () => {
+  it("normalizes score to 0-100 and applies configured weights", () => { const components = keys.map((key) => component(key, 50)); expect(calculateWeightedScore(components)).toEqual({ score: 50, completeness: 100 }); expect(new GlobalStressEngine().calculate(input(components)).score).toBe(50); });
+  it("does not treat missing data as zero", () => { const components = keys.map((key, index) => component(key, index < 2 ? 60 : null)); const result = calculateWeightedScore(components); expect(result.score).toBe(60); expect(result.completeness).toBe(30); });
+  it.each([[0, "GREEN"], [24, "GREEN"], [25, "YELLOW"], [49, "YELLOW"], [50, "ORANGE"], [74, "ORANGE"], [75, "RED"], [100, "RED"]] as const)("maps score %s to %s", (score, expected) => expect(statusForScore(score)).toBe(expected));
+  it("uses 1D, 5D and 20D references for trend", () => { expect(deriveTrend(55, { oneDay: 40, fiveDay: 35, twentyDay: 30, previousScore: 40, previousStatus: "YELLOW", lastStatusChangeAt: null })).toBe("RAPIDLY_DETERIORATING"); expect(deriveTrend(25, { oneDay: 35, fiveDay: 40, twentyDay: 45, previousScore: 35, previousStatus: "YELLOW", lastStatusChangeAt: null })).toBe("IMPROVING"); });
+  it("orders drivers, emits deterministic stabilizers and configured triggers", () => { const result = new GlobalStressEngine().calculate(input(keys.map((key, index) => component(key, index === 0 ? 90 : index === 1 ? 10 : 35)))); expect(result.riskDrivers[0]?.component).toBe("VOLATILITY"); expect(result.stabilizingFactors.some((value) => value.includes("CREDIT"))).toBe(true); expect(result.escalationTriggers.length).toBeGreaterThan(4); });
+  it("reduces confidence when providers are down", () => { const base = input(keys.map((key) => component(key, 40))); const result = new GlobalStressEngine().calculate({ ...base, sources: [{ provider: "massive", category: "MARKET", asOf: null, freshness: "UNAVAILABLE", available: false }, { provider: "alpha-vantage", category: "NEWS", asOf: null, freshness: "UNAVAILABLE", available: false }] }); expect(["VERY_LOW", "LOW", "MEDIUM"]).toContain(result.confidence); });
+});
+
+describe("SystemicStressEngine", () => {
+  it("does not call an equity-only selloff systemic", () => { expect(new SystemicStressEngine().evaluate([component("EQUITY_STRESS", 95), component("VOLATILITY", 85), ...keys.filter((key) => !["EQUITY_STRESS", "VOLATILITY"].includes(key)).map((key) => component(key, 20))])).not.toBe("ACTIVE"); });
+  it("requires independent critical blocks and a transmission channel", () => { expect(new SystemicStressEngine().evaluate(keys.map((key) => component(key, ["CREDIT", "LIQUIDITY", "VOLATILITY", "CROSS_ASSET"].includes(key) ? 85 : 30)))).toBe("ACTIVE"); });
+});
+
+describe("editorial divergence", () => { it("flags different assessments only", () => { expect(hasEditorialDivergence("YELLOW", "GREEN")).toBe(true); expect(hasEditorialDivergence("YELLOW", "YELLOW")).toBe(false); expect(hasEditorialDivergence("YELLOW", "UNAVAILABLE")).toBe(false); }); });

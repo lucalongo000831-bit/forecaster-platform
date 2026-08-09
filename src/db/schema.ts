@@ -545,3 +545,80 @@ export const aiToolCalls = pgTable("ai_tool_calls", {
   metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("ai_tool_call_conversation_time_idx").on(table.conversationId, table.createdAt)]);
+
+export const globalRiskSnapshots = pgTable("global_risk_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  status: varchar("status", { length: 16 }).notNull(),
+  score: numeric("score", { precision: 8, scale: 4 }).notNull(),
+  systemicStress: varchar("systemic_stress", { length: 16 }).notNull(),
+  trend: varchar("trend", { length: 32 }).notNull(),
+  confidence: varchar("confidence", { length: 20 }).notNull(),
+  dataCompleteness: numeric("data_completeness", { precision: 8, scale: 4 }).notNull(),
+  volatilityScore: numeric("volatility_score", { precision: 8, scale: 4 }),
+  creditScore: numeric("credit_score", { precision: 8, scale: 4 }),
+  liquidityScore: numeric("liquidity_score", { precision: 8, scale: 4 }),
+  ratesScore: numeric("rates_score", { precision: 8, scale: 4 }),
+  breadthScore: numeric("breadth_score", { precision: 8, scale: 4 }),
+  equityScore: numeric("equity_score", { precision: 8, scale: 4 }),
+  crossAssetScore: numeric("cross_asset_score", { precision: 8, scale: 4 }),
+  macroScore: numeric("macro_score", { precision: 8, scale: 4 }),
+  newsRiskScore: numeric("news_risk_score", { precision: 8, scale: 4 }),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  modelVersion: varchar("model_version", { length: 80 }).notNull(),
+  inputTimestamp: timestamp("input_timestamp", { withTimezone: true }).notNull(),
+  calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("global_risk_calculated_idx").on(table.calculatedAt), index("global_risk_status_idx").on(table.status, table.calculatedAt)]);
+
+export const globalRiskComponentSnapshots = pgTable("global_risk_component_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  snapshotId: uuid("snapshot_id").references(() => globalRiskSnapshots.id, { onDelete: "cascade" }).notNull(),
+  component: varchar("component", { length: 40 }).notNull(),
+  score: numeric("score", { precision: 8, scale: 4 }),
+  weight: numeric("weight", { precision: 8, scale: 6 }).notNull(),
+  contribution: numeric("contribution", { precision: 8, scale: 4 }).notNull(),
+  completeness: numeric("completeness", { precision: 8, scale: 4 }).notNull(),
+  dataType: varchar("data_type", { length: 24 }).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("global_risk_component_snapshot_idx").on(table.snapshotId, table.component)]);
+
+export const globalRiskTriggers = pgTable("global_risk_triggers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  snapshotId: uuid("snapshot_id").references(() => globalRiskSnapshots.id, { onDelete: "cascade" }).notNull(),
+  triggerKey: varchar("trigger_key", { length: 80 }).notNull(),
+  direction: varchar("direction", { length: 20 }).notNull(),
+  label: text("label").notNull(),
+  threshold: text("threshold").notNull(),
+  active: boolean("active").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("global_risk_trigger_snapshot_idx").on(table.snapshotId, table.direction)]);
+
+export const globalMarketBriefs = pgTable("global_market_briefs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  slug: varchar("slug", { length: 80 }).notNull(),
+  currentVersion: integer("current_version").default(0).notNull(),
+  state: varchar("state", { length: 20 }).default("DRAFT").notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("global_market_brief_slug_unique").on(table.slug), index("global_market_brief_state_idx").on(table.state, table.publishedAt)]);
+
+export const globalMarketBriefVersions = pgTable("global_market_brief_versions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  briefId: uuid("brief_id").references(() => globalMarketBriefs.id, { onDelete: "cascade" }).notNull(),
+  version: integer("version").notNull(),
+  state: varchar("state", { length: 20 }).default("DRAFT").notNull(),
+  title: varchar("title", { length: 240 }).notNull(),
+  reportDate: timestamp("report_date", { withTimezone: true }).notNull(),
+  status: varchar("status", { length: 16 }).notNull(),
+  systemicStress: varchar("systemic_stress", { length: 16 }).notNull(),
+  riskTrend: varchar("risk_trend", { length: 32 }).notNull(),
+  summary: text("summary").notNull(),
+  rawText: text("raw_text").notNull(),
+  parsedData: jsonb("parsed_data").$type<Record<string, unknown>>().notNull(),
+  publishedBy: uuid("published_by").references(() => users.id, { onDelete: "set null" }),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [uniqueIndex("global_market_brief_version_unique").on(table.briefId, table.version), index("global_market_brief_version_published_idx").on(table.state, table.publishedAt)]);

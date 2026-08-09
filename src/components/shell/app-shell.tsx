@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity, BarChart3, Bell, BookOpen, CalendarDays, ChevronLeft,
-  CircleDollarSign, Command, Gauge, Grid3X3, Landmark, LayoutDashboard, Menu,
+  CircleDollarSign, Command, Gauge, Globe2, Grid3X3, Landmark, LayoutDashboard, Menu,
   FlaskConical, MessageCircle, Newspaper, PieChart, Search, Settings, Sparkles, Star,
   TrendingUp, UserRound,
 } from "lucide-react";
@@ -13,9 +13,11 @@ import { instrumentPath } from "@/lib";
 import { useMarketSearch } from "@/lib/use-market-search";
 import type { SearchInstrument, ShellData } from "@/types";
 import { useKairoChat } from "@/components/ai/kairo-chat-provider";
+import { GlobalRiskNavIndicator } from "@/components/financial/global-risk-nav-indicator";
 
 const railItems = [
   ["/dashboard", "Control room", LayoutDashboard], ["/search", "Discover", Search],
+  ["/global-markets", "Global markets", Globe2],
   ["/calendar", "Calendar", CalendarDays], ["/watchlists", "Watchlists", Star],
   ["/portfolio", "Portfolio", PieChart], ["/alerts", "Alerts", Bell], ["/backtest", "Backtest lab", FlaskConical], ["/settings", "Preferences", Settings],
 ] as const;
@@ -45,6 +47,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
   const matches = marketMatches.map((item) => ({ name: item.name, meta: `${item.symbol} · ${item.venue}`, href: item.href, source: item.source }));
   const launcherItems = [
     ["/watchlists", "Watchlists", Star], ["/calendar", "Calendar", CalendarDays],
+    ["/global-markets", "Global markets", Globe2],
     [instrumentPath(data.primaryInstrument, "signal"), "Signals", Sparkles],
     [instrumentPath(data.primaryInstrument, "forecast"), "Forecast", TrendingUp],
     [instrumentPath(data.primaryInstrument, "targets"), "Targets & risk", CircleDollarSign],
@@ -78,7 +81,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
           <button className="rail-toggle" onClick={() => setRailCollapsed(!railCollapsed)} aria-label="Toggle navigation"><ChevronLeft className={railCollapsed ? "rotate-180" : ""}/></button>
         </div>
         <div className="rail-section-label">Workspace</div>
-        <nav className="rail-nav">{railItems.map(([href, label, Icon]) => <Link key={href} href={href} onClick={() => setMobileRail(false)} className={`rail-link ${pathname === href ? "active" : ""}`}><Icon size={20}/><span>{label}</span></Link>)}</nav>
+        <nav className="rail-nav">{railItems.map(([href, label, Icon]) => <Link key={href} href={href} onClick={() => setMobileRail(false)} className={`rail-link ${pathname === href ? "active" : ""}`}><Icon size={20}/><span>{label}</span>{href === "/global-markets" && <GlobalRiskNavIndicator/>}</Link>)}</nav>
         <div className="rail-divider"/>
         <button className="lens-card" onClick={() => openKairo("Genera il Daily Market Narrative di oggi con regime, indici, mover, earnings, macro, news, rischi geopolitici e rilevanza per la watchlist.")}>
           <span className="lens-icon"><Sparkles size={18}/></span>

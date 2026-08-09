@@ -5,6 +5,7 @@ import { alertEvents, calculationRuns, getDatabase, isDatabaseConfigured, provid
 import { financialProviderRouter } from "@/providers";
 import { evaluateActiveAlerts } from "@/services/account";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
+import { getGlobalRiskCurrent } from "@/services/global-risk";
 import { runJob } from "./job-runner";
 
 const LIQUID_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "^GSPC", "^IXIC", "BTC-USD", "ETH-USD", "ENI.MI", "STLAM.MI"];
@@ -18,6 +19,7 @@ export function runMarketRefreshJob() {
       ...LIQUID_SYMBOLS.slice(0, 4).map((symbol) => financialProviderRouter.fundamentals(symbol)),
       ...LIQUID_SYMBOLS.slice(0, 4).map((symbol) => financialProviderRouter.news(symbol, 20)),
       getMarketCalendar(day(-1), day(30)),
+      getGlobalRiskCurrent({ force: true }),
     ]);
     return { attempted: results.length, fulfilled: results.filter((result) => result.status === "fulfilled").length, rejected: results.filter((result) => result.status === "rejected").length };
   }, { timeoutMs: 52_000, lockSeconds: 60 });
