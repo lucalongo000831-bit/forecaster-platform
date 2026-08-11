@@ -148,11 +148,15 @@ export async function ingestCftcPositioning() {
       try {
         const result = await cftcAdapter.latest(dataset, 1_000); fetched += result.data.length;
         await persistRawProviderRecord({ provider: "cftc", dataset: "positioning", entityKey: dataset, payload: { rows: result.data }, schemaVersion: "cftc-cot-v1" });
-        for (const row of result.data) {
-          const reportDate = textOf(row, "report_date_as_yyyy_mm_dd", "report_date"); const contract = textOf(row, "contract_market_name", "market_and_exchange_names", "commodity_name"); if (!reportDate || !contract) continue;
+        const positioningRows = result.data.flatMap((row) => {
+          const reportDate = textOf(row, "report_date_as_yyyy_mm_dd", "report_date"); const contract = textOf(row, "contract_market_name", "market_and_exchange_names", "commodity_name"); if (!reportDate || !contract) return [];
           if (!latest || reportDate > latest) latest = reportDate;
           const long = valueOf(row, "m_money_positions_long_all", "asset_mgr_positions_long_all", "noncomm_positions_long_all"); const short = valueOf(row, "m_money_positions_short_all", "asset_mgr_positions_short_all", "noncomm_positions_short_all"); const category = dataset === "disaggregatedFuturesOnly" ? "MANAGED_MONEY" : "ASSET_MANAGER"; const sourceId = `${dataset}:${textOf(row, "cftc_contract_market_code") ?? contract}:${reportDate}:${category}`;
-          const stored = await getDatabase().insert(positioningObservations).values({ market: textOf(row, "market_and_exchange_names", "contract_market_name") ?? contract, contract, category, long: long === null ? null : String(long), short: short === null ? null : String(short), spreading: valueOf(row, "m_money_positions_spread_all")?.toString() ?? null, net: long !== null && short !== null ? String(long - short) : null, openInterest: valueOf(row, "open_interest_all")?.toString() ?? null, reportDate: new Date(reportDate), publishedAt: new Date(new Date(reportDate).getTime() + 3 * 86_400_000), availableAt: new Date(new Date(reportDate).getTime() + 3 * 86_400_000), source: "cftc", sourceId, metadata: { dataset } }).onConflictDoNothing({ target: [positioningObservations.source, positioningObservations.sourceId] }).returning({ id: positioningObservations.id }); inserted += stored.length;
+          const reportTimestamp = new Date(reportDate); if (Number.isNaN(reportTimestamp.getTime())) return [];
+          return [{ market: textOf(row, "market_and_exchange_names", "contract_market_name") ?? contract, contract, category, long: long === null ? null : String(long), short: short === null ? null : String(short), spreading: valueOf(row, "m_money_positions_spread_all")?.toString() ?? null, net: long !== null && short !== null ? String(long - short) : null, openInterest: valueOf(row, "open_interest_all")?.toString() ?? null, reportDate: reportTimestamp, publishedAt: new Date(reportTimestamp.getTime() + 3 * 86_400_000), availableAt: new Date(reportTimestamp.getTime() + 3 * 86_400_000), source: "cftc", sourceId, metadata: { dataset } }];
+        });
+        for (const batch of chunksOf(positioningRows)) {
+          const stored = await getDatabase().insert(positioningObservations).values(batch).onConflictDoNothing({ target: [positioningObservations.source, positioningObservations.sourceId] }).returning({ id: positioningObservations.id }); inserted += stored.length;
         }
       } catch { errors += 1; }
     }
