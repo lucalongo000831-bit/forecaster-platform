@@ -141,7 +141,7 @@ function valueOf(row: Record<string, unknown>, ...keys: string[]) { for (const k
 function textOf(row: Record<string, unknown>, ...keys: string[]) { for (const key of keys) if (typeof row[key] === "string" && row[key]) return row[key] as string; return null; }
 
 export async function ingestCftcPositioning() {
-  const runId = await beginRun("cftc-positioning", "positioning", "cftc", "0 22 * * 5"); let fetched = 0; let inserted = 0; let errors = 0;
+  const runId = await beginRun("cftc-positioning", "positioning", "cftc", "0 22 * * 5"); let fetched = 0; let inserted = 0; let errors = 0; let latest: string | null = null;
   try {
     if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, fetched, inserted };
     for (const dataset of ["disaggregatedFuturesOnly", "tradersInFinancialFuturesOnly"] as const) {
@@ -150,12 +150,16 @@ export async function ingestCftcPositioning() {
         await persistRawProviderRecord({ provider: "cftc", dataset: "positioning", entityKey: dataset, payload: { rows: result.data }, schemaVersion: "cftc-cot-v1" });
         for (const row of result.data) {
           const reportDate = textOf(row, "report_date_as_yyyy_mm_dd", "report_date"); const contract = textOf(row, "contract_market_name", "market_and_exchange_names", "commodity_name"); if (!reportDate || !contract) continue;
+          if (!latest || reportDate > latest) latest = reportDate;
           const long = valueOf(row, "m_money_positions_long_all", "asset_mgr_positions_long_all", "noncomm_positions_long_all"); const short = valueOf(row, "m_money_positions_short_all", "asset_mgr_positions_short_all", "noncomm_positions_short_all"); const category = dataset === "disaggregatedFuturesOnly" ? "MANAGED_MONEY" : "ASSET_MANAGER"; const sourceId = `${dataset}:${textOf(row, "cftc_contract_market_code") ?? contract}:${reportDate}:${category}`;
           const stored = await getDatabase().insert(positioningObservations).values({ market: textOf(row, "market_and_exchange_names", "contract_market_name") ?? contract, contract, category, long: long === null ? null : String(long), short: short === null ? null : String(short), spreading: valueOf(row, "m_money_positions_spread_all")?.toString() ?? null, net: long !== null && short !== null ? String(long - short) : null, openInterest: valueOf(row, "open_interest_all")?.toString() ?? null, reportDate: new Date(reportDate), publishedAt: new Date(new Date(reportDate).getTime() + 3 * 86_400_000), availableAt: new Date(new Date(reportDate).getTime() + 3 * 86_400_000), source: "cftc", sourceId, metadata: { dataset } }).onConflictDoNothing({ target: [positioningObservations.source, positioningObservations.sourceId] }).returning({ id: positioningObservations.id }); inserted += stored.length;
         }
       } catch { errors += 1; }
     }
-    const status: IngestionStatus = errors === 0 ? "COMPLETED" : errors < 2 ? "PARTIAL" : "FAILED"; await watermark("cftc", "positioning", errors < 2, null, { errors }); await finishRun(runId, status, { fetched, inserted, errors }); return { status, fetched, inserted, errors };
+    const sourceSucceeded = errors < 2; const status: IngestionStatus = errors === 0 ? "COMPLETED" : sourceSucceeded ? "PARTIAL" : "FAILED";
+    await watermark("cftc", "positioning", sourceSucceeded, latest, { errors });
+    await publishDatasetSnapshot({ dataset: "positioning", payload: { provider: "cftc", datasets: ["disaggregatedFuturesOnly", "tradersInFinancialFuturesOnly"], latest }, recordCount: fetched, coverage: (2 - errors) / 2 * 100, sourceSucceeded, schemaValid: true, allowVerifiedEmpty: false, sourceTimestamp: latest, expiresAt: new Date(Date.now() + 9 * 86_400_000).toISOString(), freshness: errors ? "CACHED" : "FRESH", schemaVersion: "cftc-positioning-v2" });
+    await finishRun(runId, status, { fetched, inserted, errors }); return { status, fetched, inserted, errors, latest };
   } catch (error) { await finishRun(runId, "FAILED", { fetched, inserted, errors: errors + 1 }); throw error; }
 }
 
@@ -179,7 +183,10 @@ export async function ingestMarketauxNews() {
       }
       if (entities.length) await getDatabase().insert(newsEntities).values(entities.map((entity) => ({ newsItemId: stored.id, ...entity, confidence: null })));
     }
-    await watermark("marketaux", "news", true, result.data.data.map((item) => item.published_at).sort().at(-1) ?? null); await finishRun(runId, "COMPLETED", { fetched: result.data.data.length, inserted }); return { status: "COMPLETED" as const, fetched: result.data.data.length, inserted };
+    const latest = result.data.data.map((item) => item.published_at).sort().at(-1) ?? null;
+    await watermark("marketaux", "news", true, latest);
+    await publishDatasetSnapshot({ dataset: "news", payload: { provider: "marketaux", latest, fetched: result.data.data.length }, recordCount: result.data.data.length, coverage: result.data.data.length ? 100 : null, sourceSucceeded: true, schemaValid: true, allowVerifiedEmpty: false, sourceTimestamp: latest, expiresAt: new Date(Date.now() + 2 * 3_600_000).toISOString(), freshness: "FRESH", schemaVersion: "marketaux-news-v2" });
+    await finishRun(runId, "COMPLETED", { fetched: result.data.data.length, inserted }); return { status: "COMPLETED" as const, fetched: result.data.data.length, inserted, latest };
   } catch (error) { await watermark("marketaux", "news", false); await finishRun(runId, "FAILED", { errors: 1 }); throw error; }
 }
 
