@@ -61,7 +61,7 @@ export async function ingestFredEconomicData(options: { start?: string; seriesKe
     if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, reason: "database-not-configured", fetched, inserted };
     for (const definition of fredDefinitions) {
       try {
-        const result = await fredAdapter.observations(definition.externalId, options.start ?? new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10));
+        const result = await fredAdapter.observations(definition.externalId, options.start ?? new Date(Date.now() - 800 * 86_400_000).toISOString().slice(0, 10));
         const seriesId = await upsertSeries(definition); fetched += result.data.observations.length;
         await persistRawProviderRecord({ provider: "fred", dataset: "economic_observations", externalId: definition.externalId, entityKey: definition.key, payload: result.data as unknown as Record<string, unknown>, schemaVersion: "fred-observations-v1" });
         const observationRows = result.data.observations.flatMap((observation) => {
