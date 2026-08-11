@@ -7,6 +7,8 @@ const unverifiedQuota = (provider: ProviderQuotaPolicy["provider"]): ProviderQuo
   requestsPerDay: null,
   burstLimit: null,
   reservedRequests: null,
+  backgroundBudget: null,
+  interactiveBudget: null,
   enabled: false,
   notes: "Limiti e piano da verificare prima dell'attivazione operativa.",
 });
@@ -18,4 +20,11 @@ export const providerQuotaPolicies: readonly ProviderQuotaPolicy[] = [
   unverifiedQuota("eia"),
   unverifiedQuota("marketaux"),
   unverifiedQuota("openfigi"),
+  unverifiedQuota("gleif"),
+  unverifiedQuota("treasury"),
+  unverifiedQuota("ecb"),
+  unverifiedQuota("eurostat"),
+  unverifiedQuota("cftc"),
+  unverifiedQuota("house"),
+  { ...unverifiedQuota("senate"), notes: "Nessuna API ufficiale stabile: adapter disabilitato, nessun bypass anti-bot." },
 ];

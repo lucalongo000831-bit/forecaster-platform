@@ -1,4 +1,4 @@
-export type KairoDataV2ProviderName = "fred" | "bls" | "bea" | "eia" | "marketaux" | "openfigi";
+export type KairoDataV2ProviderName = "fred" | "bls" | "bea" | "eia" | "marketaux" | "openfigi" | "gleif" | "treasury" | "ecb" | "eurostat" | "cftc" | "house" | "senate";
 
 export enum ProviderHealthStatus {
   HEALTHY = "HEALTHY",
@@ -16,6 +16,8 @@ export interface ProviderQuotaPolicy {
   requestsPerDay: number | null;
   burstLimit: number | null;
   reservedRequests: number | null;
+  backgroundBudget: number | null;
+  interactiveBudget: number | null;
   enabled: boolean;
   notes: string;
 }

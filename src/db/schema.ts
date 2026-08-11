@@ -483,6 +483,260 @@ export const providerHealthSnapshots = pgTable("provider_health_snapshots", {
   checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("provider_health_time_idx").on(table.provider, table.checkedAt)]);
 
+export const providerRuns = pgTable("provider_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  operation: varchar("operation", { length: 100 }).notNull(),
+  priority: varchar("priority", { length: 16 }).default("NORMAL").notNull(),
+  status: varchar("status", { length: 30 }).notNull(),
+  httpStatus: integer("http_status"),
+  latencyMs: integer("latency_ms"),
+  recordsFetched: integer("records_fetched").default(0).notNull(),
+  recordsStored: integer("records_stored").default(0).notNull(),
+  errorClass: varchar("error_class", { length: 40 }),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+}, (table) => [index("provider_runs_provider_time_idx").on(table.provider, table.startedAt), index("provider_runs_dataset_status_idx").on(table.dataset, table.status)]);
+
+export const providerQuotaStates = pgTable("provider_quota_states", {
+  provider: varchar("provider", { length: 40 }).primaryKey(),
+  minuteCount: integer("minute_count").default(0).notNull(),
+  hourCount: integer("hour_count").default(0).notNull(),
+  dayCount: integer("day_count").default(0).notNull(),
+  reservedRemaining: integer("reserved_remaining"),
+  windowMinute: timestamp("window_minute", { withTimezone: true }),
+  windowHour: timestamp("window_hour", { withTimezone: true }),
+  windowDay: timestamp("window_day", { withTimezone: true }),
+  circuitState: varchar("circuit_state", { length: 24 }).default("UNKNOWN").notNull(),
+  circuitOpenUntil: timestamp("circuit_open_until", { withTimezone: true }),
+  lastRateLimitedAt: timestamp("last_rate_limited_at", { withTimezone: true }),
+  failuresToday: integer("failures_today").default(0).notNull(),
+  ...createdUpdated(),
+});
+
+export const providerWatermarks = pgTable("provider_watermarks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  lastAttempt: timestamp("last_attempt", { withTimezone: true }),
+  lastSuccessfulSync: timestamp("last_successful_sync", { withTimezone: true }),
+  lastExternalTimestamp: timestamp("last_external_timestamp", { withTimezone: true }),
+  cursor: text("cursor"),
+  latestRecordId: varchar("latest_record_id", { length: 220 }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("provider_watermark_unique").on(table.provider, table.dataset), index("provider_watermark_sync_idx").on(table.lastSuccessfulSync)]);
+
+export const rawProviderRecords = pgTable("raw_provider_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  externalId: varchar("external_id", { length: 240 }),
+  entityKey: varchar("entity_key", { length: 240 }).notNull(),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  issuerId: uuid("issuer_id").references(() => issuers.id, { onDelete: "set null" }),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+  sourceUrl: text("source_url"),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  sourcePublishedAt: timestamp("source_published_at", { withTimezone: true }),
+  schemaVersion: varchar("schema_version", { length: 40 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [uniqueIndex("raw_provider_payload_unique").on(table.provider, table.dataset, table.payloadHash), index("raw_provider_entity_idx").on(table.entityKey, table.fetchedAt), index("raw_provider_instrument_idx").on(table.instrumentId, table.dataset)]);
+
+export const rawSourceDocuments = pgTable("raw_source_documents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  source: varchar("source", { length: 60 }).notNull(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  externalId: varchar("external_id", { length: 240 }).notNull(),
+  entityKey: varchar("entity_key", { length: 240 }).notNull(),
+  contentHash: varchar("content_hash", { length: 64 }).notNull(),
+  mediaType: varchar("media_type", { length: 120 }),
+  sourceUrl: text("source_url"),
+  payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  availableAt: timestamp("available_at", { withTimezone: true }),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  schemaVersion: varchar("schema_version", { length: 40 }).notNull(),
+}, (table) => [uniqueIndex("raw_source_document_unique").on(table.source, table.externalId, table.contentHash), index("raw_source_document_entity_idx").on(table.entityKey, table.publishedAt)]);
+
+export const normalizedMarketObservations = pgTable("normalized_market_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  instrumentId: uuid("instrument_id").references(() => instruments.id, { onDelete: "cascade" }).notNull(),
+  metric: varchar("metric", { length: 80 }).notNull(),
+  value: numeric("value", { precision: 38, scale: 12 }),
+  unit: varchar("unit", { length: 40 }),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  effectiveAt: timestamp("effective_at", { withTimezone: true }),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  status: varchar("status", { length: 32 }).default("AVAILABLE").notNull(),
+  schemaVersion: varchar("schema_version", { length: 40 }).notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [uniqueIndex("normalized_market_observation_unique").on(table.instrumentId, table.metric, table.observedAt, table.provider), index("normalized_market_metric_time_idx").on(table.instrumentId, table.metric, table.observedAt)]);
+
+export const economicSeries = pgTable("economic_series", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  internalKey: varchar("internal_key", { length: 100 }).notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  externalSeriesId: varchar("external_series_id", { length: 160 }).notNull(),
+  country: varchar("country", { length: 8 }),
+  category: varchar("category", { length: 60 }).notNull(),
+  frequency: varchar("frequency", { length: 24 }).notNull(),
+  unit: varchar("unit", { length: 80 }),
+  importance: varchar("importance", { length: 16 }).default("MEDIUM").notNull(),
+  transform: varchar("transform", { length: 24 }).default("LEVEL").notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("economic_series_internal_unique").on(table.internalKey), uniqueIndex("economic_series_provider_external_unique").on(table.provider, table.externalSeriesId)]);
+
+export const normalizedEconomicObservations = pgTable("normalized_economic_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  seriesId: uuid("series_id").references(() => economicSeries.id, { onDelete: "cascade" }).notNull(),
+  value: numeric("value", { precision: 38, scale: 12 }),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  effectiveAt: timestamp("effective_at", { withTimezone: true }),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  status: varchar("status", { length: 32 }).default("AVAILABLE").notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  schemaVersion: varchar("schema_version", { length: 40 }).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+}, (table) => [uniqueIndex("economic_observation_unique").on(table.seriesId, table.observedAt, table.availableAt, table.provider), index("economic_observation_series_time_idx").on(table.seriesId, table.observedAt)]);
+
+export const economicReleaseEvents = pgTable("economic_release_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  seriesId: uuid("series_id").references(() => economicSeries.id, { onDelete: "set null" }),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  sourceId: varchar("source_id", { length: 220 }).notNull(),
+  title: text("title").notNull(),
+  country: varchar("country", { length: 8 }),
+  importance: varchar("importance", { length: 16 }).default("MEDIUM").notNull(),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  availableAt: timestamp("available_at", { withTimezone: true }),
+  actual: numeric("actual", { precision: 38, scale: 12 }),
+  forecast: numeric("forecast", { precision: 38, scale: 12 }),
+  previous: numeric("previous", { precision: 38, scale: 12 }),
+  status: varchar("status", { length: 32 }).default("AVAILABLE").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("economic_release_provider_source_unique").on(table.provider, table.sourceId), index("economic_release_time_idx").on(table.scheduledAt, table.country)]);
+
+export const positioningObservations = pgTable("positioning_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  market: varchar("market", { length: 120 }).notNull(),
+  contract: varchar("contract", { length: 180 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(),
+  long: numeric("long", { precision: 38, scale: 4 }),
+  short: numeric("short", { precision: 38, scale: 4 }),
+  spreading: numeric("spreading", { precision: 38, scale: 4 }),
+  net: numeric("net", { precision: 38, scale: 4 }),
+  openInterest: numeric("open_interest", { precision: 38, scale: 4 }),
+  reportDate: timestamp("report_date", { withTimezone: true }).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+  availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+  source: varchar("source", { length: 60 }).notNull(),
+  sourceId: varchar("source_id", { length: 220 }).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [uniqueIndex("positioning_source_record_unique").on(table.source, table.sourceId), index("positioning_contract_date_idx").on(table.contract, table.reportDate)]);
+
+export const dataSnapshots = pgTable("data_snapshots", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  entityKey: varchar("entity_key", { length: 240 }).default("global").notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  freshness: varchar("freshness", { length: 24 }).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  recordCount: integer("record_count").notNull(),
+  coverage: numeric("coverage", { precision: 8, scale: 4 }),
+  sourceTimestamp: timestamp("source_timestamp", { withTimezone: true }),
+  calculatedAt: timestamp("calculated_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  schemaVersion: varchar("schema_version", { length: 40 }).notNull(),
+  modelVersion: varchar("model_version", { length: 80 }),
+  published: boolean("published").default(false).notNull(),
+  qualityReasons: jsonb("quality_reasons").$type<string[]>().default([]).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("data_snapshot_dataset_time_idx").on(table.dataset, table.entityKey, table.calculatedAt), index("data_snapshot_published_idx").on(table.published, table.dataset)]);
+
+export const lastKnownGood = pgTable("last_known_good", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  entityKey: varchar("entity_key", { length: 240 }).default("global").notNull(),
+  snapshotId: uuid("snapshot_id").references(() => dataSnapshots.id, { onDelete: "restrict" }).notNull(),
+  promotedAt: timestamp("promoted_at", { withTimezone: true }).defaultNow().notNull(),
+  validUntil: timestamp("valid_until", { withTimezone: true }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("last_known_good_dataset_entity_unique").on(table.dataset, table.entityKey), index("last_known_good_snapshot_idx").on(table.snapshotId)]);
+
+export const dataConflicts = pgTable("data_conflicts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  entityKey: varchar("entity_key", { length: 240 }).notNull(),
+  field: varchar("field", { length: 220 }).notNull(),
+  primarySource: varchar("primary_source", { length: 60 }).notNull(),
+  alternateSource: varchar("alternate_source", { length: 60 }).notNull(),
+  primaryValue: jsonb("primary_value").$type<unknown>(),
+  alternateValue: jsonb("alternate_value").$type<unknown>(),
+  resolution: varchar("resolution", { length: 40 }).default("UNRESOLVED").notNull(),
+  detectedAt: timestamp("detected_at", { withTimezone: true }).defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+}, (table) => [index("data_conflict_dataset_idx").on(table.dataset, table.entityKey, table.detectedAt)]);
+
+export const dataQualityRecords = pgTable("data_quality_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  entityKey: varchar("entity_key", { length: 240 }).default("global").notNull(),
+  snapshotId: uuid("snapshot_id").references(() => dataSnapshots.id, { onDelete: "set null" }),
+  status: varchar("status", { length: 32 }).notNull(),
+  coverage: numeric("coverage", { precision: 8, scale: 4 }),
+  freshnessScore: numeric("freshness_score", { precision: 8, scale: 4 }),
+  sourceQuality: numeric("source_quality", { precision: 8, scale: 4 }),
+  conflictRate: numeric("conflict_rate", { precision: 8, scale: 4 }),
+  mappingRate: numeric("mapping_rate", { precision: 8, scale: 4 }),
+  anomalies: jsonb("anomalies").$type<string[]>().default([]).notNull(),
+  evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("data_quality_dataset_time_idx").on(table.dataset, table.entityKey, table.evaluatedAt)]);
+
+export const ingestionJobs = pgTable("ingestion_jobs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  dataset: varchar("dataset", { length: 100 }).notNull(),
+  provider: varchar("provider", { length: 40 }),
+  schedule: varchar("schedule", { length: 80 }),
+  enabled: boolean("enabled").default(true).notNull(),
+  priority: varchar("priority", { length: 16 }).default("BACKGROUND").notNull(),
+  configuration: jsonb("configuration").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("ingestion_job_name_unique").on(table.name), index("ingestion_job_dataset_idx").on(table.dataset, table.enabled)]);
+
+export const ingestionRuns = pgTable("ingestion_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  jobId: uuid("job_id").references(() => ingestionJobs.id, { onDelete: "set null" }),
+  jobName: varchar("job_name", { length: 120 }).notNull(),
+  provider: varchar("provider", { length: 40 }),
+  status: varchar("status", { length: 30 }).notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  recordsFetched: integer("records_fetched").default(0).notNull(),
+  recordsInserted: integer("records_inserted").default(0).notNull(),
+  recordsUpdated: integer("records_updated").default(0).notNull(),
+  recordsSkipped: integer("records_skipped").default(0).notNull(),
+  errors: integer("errors").default(0).notNull(),
+  watermark: jsonb("watermark").$type<Record<string, unknown>>().default({}).notNull(),
+  errorClass: varchar("error_class", { length: 40 }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+}, (table) => [index("ingestion_run_job_time_idx").on(table.jobName, table.startedAt), index("ingestion_run_status_idx").on(table.status, table.startedAt)]);
+
 export const politicians = pgTable("politicians", {
   id: varchar("id", { length: 80 }).primaryKey(),
   normalizedName: varchar("normalized_name", { length: 220 }).notNull(),

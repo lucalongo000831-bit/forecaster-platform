@@ -57,6 +57,13 @@
       "when": 1786305066547,
       "tag": "0007_last_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786477450406,
+      "tag": "0008_kairo_data_architecture_v2",
+      "breakpoints": true
     }
   ]
 }
