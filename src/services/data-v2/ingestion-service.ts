@@ -6,7 +6,8 @@ import {
   newsEntities, newsItems, normalizedEconomicObservations, positioningObservations, providerWatermarks,
 } from "@/db";
 import { structuredLog } from "@/lib/server/logger";
-import { cftcAdapter, fredAdapter, marketauxAdapter, numericValue } from "@/providers/data-v2";
+import { blsAdapter, cftcAdapter, fredAdapter, marketauxAdapter, numericValue } from "@/providers/data-v2";
+import { ProviderGatewayError } from "@/providers/gateway-v2";
 import { economicSeriesRegistry, seriesByProvider, type EconomicSeriesDefinition } from "@/providers/data-v2/series-registry";
 import { persistRawProviderRecord, publishDatasetSnapshot } from "./snapshot-repository";
 
@@ -51,11 +52,14 @@ async function upsertSeries(definition: EconomicSeriesDefinition) {
 
 export async function ingestFredEconomicData(options: { start?: string; seriesKeys?: string[] } = {}) {
   const runId = await beginRun("fred-economic-observations", "economic_observations", "fred", "0 */6 * * *");
-  const definitions = seriesByProvider("fred").filter((item) => !options.seriesKeys?.length || options.seriesKeys.includes(item.key));
-  let fetched = 0; let inserted = 0; let errors = 0; let latest: string | null = null;
+  const fredDefinitions = seriesByProvider("fred").filter((item) => !options.seriesKeys?.length || options.seriesKeys.includes(item.key));
+  const blsDefinitions = seriesByProvider("bls").filter((item) => !options.seriesKeys?.length || options.seriesKeys.includes(item.key));
+  const definitions = [...fredDefinitions, ...blsDefinitions];
+  let fetched = 0; let inserted = 0; let successfulSeries = 0; let latest: string | null = null;
+  let fredSuccessful = 0; let blsSuccessful = 0;
   try {
     if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, reason: "database-not-configured", fetched, inserted };
-    for (const definition of definitions) {
+    for (const definition of fredDefinitions) {
       try {
         const result = await fredAdapter.observations(definition.externalId, options.start ?? new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10));
         const seriesId = await upsertSeries(definition); fetched += result.data.observations.length;
@@ -70,13 +74,44 @@ export async function ingestFredEconomicData(options: { start?: string; seriesKe
           const stored = await getDatabase().insert(normalizedEconomicObservations).values(batch).onConflictDoNothing({ target: [normalizedEconomicObservations.seriesId, normalizedEconomicObservations.observedAt, normalizedEconomicObservations.availableAt, normalizedEconomicObservations.provider] }).returning({ id: normalizedEconomicObservations.id });
           inserted += stored.length;
         }
-      } catch (error) { errors += 1; structuredLog("warn", "ingestion.fred.series_failed", { series: definition.key, code: error instanceof Error ? error.name : "UNKNOWN" }); }
+        successfulSeries += 1; fredSuccessful += 1;
+      } catch (error) {
+        structuredLog("warn", "ingestion.fred.series_failed", { series: definition.key, code: error instanceof ProviderGatewayError ? error.errorClass : error instanceof Error ? error.name : "UNKNOWN" });
+        if (error instanceof ProviderGatewayError && ["TIMEOUT", "AUTH_ERROR", "RATE_LIMIT", "UPSTREAM_5XX"].includes(error.errorClass)) break;
+      }
     }
-    const sourceSucceeded = errors < definitions.length; await watermark("fred", "economic_observations", sourceSucceeded, latest, { series: definitions.length, errors });
-    await publishDatasetSnapshot({ dataset: "economic_observations", payload: { provider: "fred", series: definitions.map((item) => item.key), latest }, recordCount: fetched, coverage: definitions.length ? (definitions.length - errors) / definitions.length * 100 : null, sourceSucceeded, schemaValid: true, allowVerifiedEmpty: false, sourceTimestamp: latest, expiresAt: new Date(Date.now() + 48 * 3_600_000).toISOString(), freshness: errors ? "CACHED" : "FRESH", schemaVersion: "economic-snapshot-v1" });
-    const status: IngestionStatus = errors ? sourceSucceeded ? "PARTIAL" : "FAILED" : "COMPLETED"; await finishRun(runId, status, { fetched, inserted, errors }, { latest, series: definitions.length });
+    if (blsDefinitions.length) {
+      try {
+        const currentYear = new Date().getUTCFullYear();
+        const result = await blsAdapter.series(blsDefinitions.map((item) => item.externalId), currentYear - 2, currentYear);
+        await persistRawProviderRecord({ provider: "bls", dataset: "economic_observations", entityKey: blsDefinitions.map((item) => item.key).join(":"), payload: result.data as unknown as Record<string, unknown>, schemaVersion: "bls-timeseries-v2" });
+        const availableAt = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+        for (const providerSeries of result.data.Results.series) {
+          const definition = blsDefinitions.find((item) => item.externalId === providerSeries.seriesID); if (!definition) continue;
+          const seriesId = await upsertSeries(definition);
+          const observationRows = providerSeries.data.flatMap((observation) => {
+            const month = /^M(0[1-9]|1[0-2])$/.exec(observation.period)?.[1]; const value = numericValue(observation.value); if (!month) return [];
+            const observedAt = new Date(`${observation.year}-${month}-01T00:00:00Z`); if (Number.isNaN(observedAt.getTime())) return [];
+            const observedDate = observedAt.toISOString().slice(0, 10); if (!latest || observedDate > latest) latest = observedDate;
+            return [{ seriesId, value: value === null ? null : String(value), observedAt, effectiveAt: observedAt, availableAt, status: value === null ? "INSUFFICIENT_DATA" as const : "AVAILABLE" as const, provider: "bls", schemaVersion: "economic-observation-v2", metadata: { periodName: observation.periodName, footnotes: observation.footnotes ?? [] } }];
+          });
+          fetched += observationRows.length;
+          for (const batch of chunksOf(observationRows)) {
+            const stored = await getDatabase().insert(normalizedEconomicObservations).values(batch).onConflictDoNothing({ target: [normalizedEconomicObservations.seriesId, normalizedEconomicObservations.observedAt, normalizedEconomicObservations.availableAt, normalizedEconomicObservations.provider] }).returning({ id: normalizedEconomicObservations.id });
+            inserted += stored.length;
+          }
+          successfulSeries += 1; blsSuccessful += 1;
+        }
+      } catch (error) {
+        structuredLog("warn", "ingestion.bls.series_failed", { code: error instanceof ProviderGatewayError ? error.errorClass : error instanceof Error ? error.name : "UNKNOWN" });
+      }
+    }
+    const errors = Math.max(0, definitions.length - successfulSeries); const sourceSucceeded = successfulSeries > 0;
+    await Promise.all([watermark("fred", "economic_observations", fredSuccessful > 0, latest, { series: fredDefinitions.length, successful: fredSuccessful }), watermark("bls", "economic_observations", blsSuccessful > 0, latest, { series: blsDefinitions.length, successful: blsSuccessful })]);
+    await publishDatasetSnapshot({ dataset: "economic_observations", payload: { providers: [fredSuccessful ? "fred" : null, blsSuccessful ? "bls" : null].filter(Boolean), series: definitions.map((item) => item.key), latest }, recordCount: fetched, coverage: definitions.length ? successfulSeries / definitions.length * 100 : null, sourceSucceeded, schemaValid: true, allowVerifiedEmpty: false, sourceTimestamp: latest, expiresAt: new Date(Date.now() + 48 * 3_600_000).toISOString(), freshness: errors ? "CACHED" : "FRESH", schemaVersion: "economic-snapshot-v2" });
+    const status: IngestionStatus = errors ? sourceSucceeded ? "PARTIAL" : "FAILED" : "COMPLETED"; await finishRun(runId, status, { fetched, inserted, errors }, { latest, series: definitions.length, successfulSeries, fredSuccessful, blsSuccessful });
     return { status, fetched, inserted, errors, latest };
-  } catch (error) { await finishRun(runId, "FAILED", { fetched, inserted, errors: errors + 1 }); throw error; }
+  } catch (error) { await finishRun(runId, "FAILED", { fetched, inserted, errors: Math.max(1, definitions.length - successfulSeries) }); throw error; }
 }
 
 export async function ingestFredReleaseCalendar(from: string, to: string) {
