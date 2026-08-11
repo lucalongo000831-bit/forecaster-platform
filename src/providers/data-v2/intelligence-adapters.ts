@@ -7,8 +7,8 @@ import { officialJson } from "./http";
 
 const cftcSchema = z.array(z.record(z.string(), z.unknown()));
 const marketauxArticleSchema = z.object({
-  uuid: z.string(), title: z.string(), description: z.string().nullable().optional(), url: z.url(), image_url: z.url().nullable().optional(), language: z.string().optional(), published_at: z.string(), source: z.string().optional(),
-  entities: z.array(z.object({ symbol: z.string().optional(), name: z.string().optional(), exchange: z.string().optional(), exchange_long: z.string().optional(), country: z.string().optional(), type: z.string().optional(), industry: z.string().optional(), match_score: z.number().nullable().optional(), sentiment_score: z.number().nullable().optional() }).passthrough()).default([]),
+  uuid: z.string(), title: z.string(), description: z.string().nullable().optional(), url: z.url(), image_url: z.url().nullable().optional(), language: z.string().nullable().optional(), published_at: z.string(), source: z.string().nullable().optional(),
+  entities: z.array(z.object({ symbol: z.string().nullable().optional(), name: z.string().nullable().optional(), exchange: z.string().nullable().optional(), exchange_long: z.string().nullable().optional(), country: z.string().nullable().optional(), type: z.string().nullable().optional(), industry: z.string().nullable().optional(), match_score: z.number().nullable().optional(), sentiment_score: z.number().nullable().optional() }).passthrough()).default([]),
   similar: z.array(z.unknown()).optional(), snippet: z.string().nullable().optional(),
 }).passthrough();
 const marketauxSchema = z.object({ data: z.array(marketauxArticleSchema), meta: z.record(z.string(), z.unknown()).optional() }).passthrough();
