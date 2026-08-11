@@ -45,6 +45,21 @@ interface CachedGatewayResult<T> { result: GatewayResult<T>; freshUntil: number;
 
 const pending = new Map<string, Promise<GatewayResult<unknown>>>();
 const circuits = new Map<string, CircuitRuntime>();
+const telemetryTimeoutMs = 2_000;
+
+async function recordBestEffort(operation: Promise<unknown>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, telemetryTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function circuit(provider: string) {
   const value = circuits.get(provider) ?? { failures: 0, openUntil: 0, state: "UNKNOWN" as GatewayCircuitState };
@@ -94,7 +109,10 @@ async function executeUncached<T>(input: GatewayExecuteInput<T>): Promise<Gatewa
       if (!parsed.success) throw new ProviderGatewayError("SCHEMA_ERROR", "Provider schema validation failed", false, null);
       state.failures = 0; state.openUntil = 0; state.state = "HEALTHY";
       const result: GatewayResult<T> = { data: parsed.data, provider: input.provider, status: "AVAILABLE", isFallback: false, fetchedAt: new Date().toISOString() };
-      await Promise.all([recordRun(input as GatewayExecuteInput<unknown>, startedAt, "COMPLETED"), recordQuota(input.provider)]);
+      await Promise.all([
+        recordBestEffort(recordRun(input as GatewayExecuteInput<unknown>, startedAt, "COMPLETED")),
+        recordBestEffort(recordQuota(input.provider)),
+      ]);
       return result;
     } catch (error) {
       lastError = classify(error);
@@ -106,7 +124,10 @@ async function executeUncached<T>(input: GatewayExecuteInput<T>): Promise<Gatewa
   state.failures += 1;
   state.state = lastError?.errorClass === "RATE_LIMIT" ? "RATE_LIMITED" : "DEGRADED";
   if (state.failures >= 3) { state.openUntil = Date.now() + 60_000; state.state = "OFFLINE"; }
-  await Promise.all([recordRun(input as GatewayExecuteInput<unknown>, startedAt, "FAILED", lastError ?? undefined), recordQuota(input.provider, lastError ?? undefined)]);
+  await Promise.all([
+    recordBestEffort(recordRun(input as GatewayExecuteInput<unknown>, startedAt, "FAILED", lastError ?? undefined)),
+    recordBestEffort(recordQuota(input.provider, lastError ?? undefined)),
+  ]);
   const fallback = await input.fallback?.();
   if (fallback !== null && fallback !== undefined) return { data: fallback, provider: input.provider, status: "STALE", isFallback: true, fetchedAt: new Date().toISOString() };
   throw lastError ?? new ProviderGatewayError("UNKNOWN", "Provider request failed", true);

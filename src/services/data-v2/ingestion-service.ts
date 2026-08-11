@@ -11,6 +11,13 @@ import { economicSeriesRegistry, seriesByProvider, type EconomicSeriesDefinition
 import { persistRawProviderRecord, publishDatasetSnapshot } from "./snapshot-repository";
 
 type IngestionStatus = "COMPLETED" | "PARTIAL" | "FAILED" | "SKIPPED";
+const databaseBatchSize = 500;
+
+function chunksOf<T>(rows: T[], size = databaseBatchSize) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) chunks.push(rows.slice(index, index + size));
+  return chunks;
+}
 
 async function ensureJob(name: string, dataset: string, provider: string | null, schedule: string | null) {
   if (!isDatabaseConfigured()) return null;
@@ -53,11 +60,15 @@ export async function ingestFredEconomicData(options: { start?: string; seriesKe
         const result = await fredAdapter.observations(definition.externalId, options.start ?? new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10));
         const seriesId = await upsertSeries(definition); fetched += result.data.observations.length;
         await persistRawProviderRecord({ provider: "fred", dataset: "economic_observations", externalId: definition.externalId, entityKey: definition.key, payload: result.data as unknown as Record<string, unknown>, schemaVersion: "fred-observations-v1" });
-        for (const observation of result.data.observations) {
-          const value = numericValue(observation.value); const observedAt = new Date(`${observation.date}T00:00:00Z`); if (Number.isNaN(observedAt.getTime())) continue;
+        const observationRows = result.data.observations.flatMap((observation) => {
+          const value = numericValue(observation.value); const observedAt = new Date(`${observation.date}T00:00:00Z`); if (Number.isNaN(observedAt.getTime())) return [];
           const availableAt = observation.realtime_start ? new Date(`${observation.realtime_start}T00:00:00Z`) : observedAt;
-          const rows = await getDatabase().insert(normalizedEconomicObservations).values({ seriesId, value: value === null ? null : String(value), observedAt, effectiveAt: observedAt, availableAt, status: value === null ? "INSUFFICIENT_DATA" : "AVAILABLE", provider: "fred", schemaVersion: "economic-observation-v1", metadata: { realtimeStart: observation.realtime_start, realtimeEnd: observation.realtime_end } }).onConflictDoNothing({ target: [normalizedEconomicObservations.seriesId, normalizedEconomicObservations.observedAt, normalizedEconomicObservations.availableAt, normalizedEconomicObservations.provider] }).returning({ id: normalizedEconomicObservations.id });
-          inserted += rows.length; if (!latest || observation.date > latest) latest = observation.date;
+          if (!latest || observation.date > latest) latest = observation.date;
+          return [{ seriesId, value: value === null ? null : String(value), observedAt, effectiveAt: observedAt, availableAt, status: value === null ? "INSUFFICIENT_DATA" as const : "AVAILABLE" as const, provider: "fred", schemaVersion: "economic-observation-v1", metadata: { realtimeStart: observation.realtime_start, realtimeEnd: observation.realtime_end } }];
+        });
+        for (const batch of chunksOf(observationRows)) {
+          const stored = await getDatabase().insert(normalizedEconomicObservations).values(batch).onConflictDoNothing({ target: [normalizedEconomicObservations.seriesId, normalizedEconomicObservations.observedAt, normalizedEconomicObservations.availableAt, normalizedEconomicObservations.provider] }).returning({ id: normalizedEconomicObservations.id });
+          inserted += stored.length;
         }
       } catch (error) { errors += 1; structuredLog("warn", "ingestion.fred.series_failed", { series: definition.key, code: error instanceof Error ? error.name : "UNKNOWN" }); }
     }
@@ -72,10 +83,20 @@ export async function ingestFredReleaseCalendar(from: string, to: string) {
   const runId = await beginRun("fred-release-calendar", "economic_release_events", "fred", "15 */6 * * *"); let inserted = 0;
   try {
     if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, inserted };
-    const result = await fredAdapter.releaseDates(from, to); const rows = result.data.release_dates;
-    await persistRawProviderRecord({ provider: "fred", dataset: "economic_release_dates", entityKey: `${from}:${to}`, payload: result.data as unknown as Record<string, unknown>, schemaVersion: "fred-release-dates-v1" });
-    for (const release of rows) {
-      const sourceId = `${release.release_id}:${release.date}`; const stored = await getDatabase().insert(economicReleaseEvents).values({ provider: "fred", sourceId, title: release.release_name, country: "US", importance: "HIGH", scheduledAt: new Date(`${release.date}T13:30:00Z`), status: "AVAILABLE", metadata: { releaseId: release.release_id, timePrecision: "DATE_WITH_DEFAULT_TIME" } }).onConflictDoUpdate({ target: [economicReleaseEvents.provider, economicReleaseEvents.sourceId], set: { title: release.release_name, scheduledAt: new Date(`${release.date}T13:30:00Z`), updatedAt: new Date() } }).returning({ id: economicReleaseEvents.id }); inserted += stored.length;
+    const rows: Array<{ release_id: number; release_name: string; date: string }> = [];
+    let offset = 0; let totalAvailable = 0;
+    do {
+      const result = await fredAdapter.releaseDates(from, to, offset); totalAvailable = result.data.count;
+      rows.push(...result.data.release_dates.filter((release) => release.date >= from && release.date <= to));
+      const oldestDate = result.data.release_dates.at(-1)?.date;
+      offset += result.data.release_dates.length;
+      if (!result.data.release_dates.length || (oldestDate && oldestDate < from)) break;
+    } while (offset < totalAvailable && offset < 10_000);
+    await persistRawProviderRecord({ provider: "fred", dataset: "economic_release_dates", entityKey: `${from}:${to}`, payload: { from, to, totalAvailable, rows }, schemaVersion: "fred-release-dates-v2" });
+    const eventRows = rows.map((release) => ({ provider: "fred", sourceId: `${release.release_id}:${release.date}`, title: release.release_name, country: "US", importance: "HIGH" as const, scheduledAt: new Date(`${release.date}T13:30:00Z`), status: "AVAILABLE" as const, metadata: { releaseId: release.release_id, timePrecision: "DATE_WITH_DEFAULT_TIME" } }));
+    for (const batch of chunksOf(eventRows)) {
+      const stored = await getDatabase().insert(economicReleaseEvents).values(batch).onConflictDoNothing({ target: [economicReleaseEvents.provider, economicReleaseEvents.sourceId] }).returning({ id: economicReleaseEvents.id });
+      inserted += stored.length;
     }
     await watermark("fred", "economic_release_events", true, rows.at(-1)?.date ?? null, { from, to }); await finishRun(runId, "COMPLETED", { fetched: rows.length, inserted }); return { status: "COMPLETED" as const, fetched: rows.length, inserted };
   } catch (error) { await watermark("fred", "economic_release_events", false); await finishRun(runId, "FAILED", { errors: 1 }); throw error; }

@@ -28,11 +28,11 @@ export class FredAdapter {
     return providerGatewayV2.execute({ provider: "fred", dataset: "economic_observations", operation: "series_observations", requestKey: `${seriesId}:${start ?? "latest"}`, schema: fredSchema, task: () => officialJson(url, {}, config.timeoutMs), cache: { freshSeconds: 3_600, staleSeconds: 86_400 }, retryCount: 1, requestMetadata: { url } });
   }
 
-  async releaseDates(start: string, end: string) {
+  async releaseDates(start: string, end: string, offset = 0) {
     const config = getKairoDataV2ProviderConfigs().fred; const url = new URL("/fred/releases/dates", config.baseUrl);
-    url.searchParams.set("api_key", requireValue(config.apiKey, "FRED")); url.searchParams.set("file_type", "json"); url.searchParams.set("realtime_start", start); url.searchParams.set("realtime_end", end); url.searchParams.set("include_release_dates_with_no_data", "true");
-    const schema = z.object({ release_dates: z.array(z.object({ release_id: z.number(), release_name: z.string(), date: z.string() }).passthrough()) }).passthrough();
-    return providerGatewayV2.execute({ provider: "fred", dataset: "economic_release_dates", operation: "release_dates", requestKey: `${start}:${end}`, schema, task: () => officialJson(url, {}, config.timeoutMs), cache: { freshSeconds: 21_600, staleSeconds: 172_800 }, requestMetadata: { url } });
+    url.searchParams.set("api_key", requireValue(config.apiKey, "FRED")); url.searchParams.set("file_type", "json"); url.searchParams.set("realtime_start", start); url.searchParams.set("realtime_end", end); url.searchParams.set("include_release_dates_with_no_data", "true"); url.searchParams.set("limit", "1000"); url.searchParams.set("offset", String(Math.max(0, offset))); url.searchParams.set("order_by", "release_date"); url.searchParams.set("sort_order", "desc");
+    const schema = z.object({ count: z.number(), offset: z.number(), limit: z.number(), release_dates: z.array(z.object({ release_id: z.number(), release_name: z.string(), date: z.string() }).passthrough()) }).passthrough();
+    return providerGatewayV2.execute({ provider: "fred", dataset: "economic_release_dates", operation: "release_dates", requestKey: `${start}:${end}:${offset}`, schema, task: () => officialJson(url, {}, config.timeoutMs), cache: { freshSeconds: 21_600, staleSeconds: 172_800 }, requestMetadata: { url } });
   }
 }
 
