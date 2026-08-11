@@ -21,9 +21,12 @@ export interface MarketCalendarEvent {
 }
 
 export interface CalendarAvailability {
-  status: "AVAILABLE" | "UNAVAILABLE";
+  status: import("./data-architecture-v2").DataStatus;
   provider: string | null;
   reason: string | null;
+  count: number | null;
+  lastUpdated: string | null;
+  isLastKnownGood: boolean;
 }
 
 export interface MarketCalendarAnalysis {

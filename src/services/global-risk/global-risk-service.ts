@@ -3,7 +3,7 @@ import "server-only";
 import {
   BreadthEngine, CreditStressEngine, CrossAssetStressEngine, EquityStressEngine, GlobalStressEngine,
   LiquidityStressEngine, MacroStressEngine, NewsRiskEngine, RatesStressEngine, VolatilityStressEngine,
-  average, metric, round, scale,
+  average, buildComponent, metric, round, scale,
   type CrossAssetRow, type EquityMarketRow, type GlobalRiskComponent, type GlobalRiskHistoryPoint, type GlobalRiskSnapshot, type GlobalRiskSource, type RiskMetric,
 } from "@/engines/global-risk";
 import { cacheDelete, cacheGet, cacheSet } from "@/lib/server/redis";
@@ -11,7 +11,7 @@ import { structuredLog } from "@/lib/server/logger";
 import { financialProviderRouter } from "@/providers";
 import type { MacroObservation, ProviderNewsItem, ProviderResult } from "@/providers/types";
 import type { MarketChartDto, MarketQuoteDto } from "@/types";
-import { loadGlobalRiskHistory, loadGlobalRiskHistoryReference, loadLatestGlobalRiskSnapshot, persistGlobalRiskSnapshot } from "./global-risk-repository";
+import { loadGlobalRiskHistory, loadGlobalRiskHistoryReference, loadLatestGlobalRiskSnapshot, loadPersistentGlobalInputs, persistGlobalRiskSnapshot } from "./global-risk-repository";
 import { marketSeriesStats, rollingCorrelation, type MarketSeriesStats } from "./market-math";
 
 const CACHE_KEY = "global-risk:current:v1";
@@ -98,26 +98,56 @@ function newsMetrics(news: ProviderNewsItem[] | null): RiskMetric[] { if (!news)
   metric("news_volume", "Risk-news volume", news.length, scale(news.length, 5, 50), { displayValue: String(news.length), dataType: "DIRECT", source: "Alpha Vantage / provider news", detail: [...topics].slice(0, 6).join(", ") || "No classified topics" }),
 ]; }
 
+type PersistentInputs = Awaited<ReturnType<typeof loadPersistentGlobalInputs>>;
+function latestEconomic(inputs: PersistentInputs, key: string) { return inputs.economic.filter((item) => item.key === key && item.value !== null).sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime()); }
+function energyMetrics(inputs: PersistentInputs, charts: Map<string, ChartRecord>): RiskMetric[] {
+  const inventory = latestEconomic(inputs, "us_crude_inventory"); const gas = latestEconomic(inputs, "us_gas_storage"); const oil = statsFor(charts, "USO");
+  const change = (rows: typeof inventory) => rows.length > 1 ? rows[0]!.value! - rows[1]!.value! : null;
+  return [
+    metric("crude_inventory_change", "Crude inventory trend", change(inventory), absoluteStress(change(inventory), 1_000, 15_000), { displayValue: fmt(change(inventory), " kb"), dataType: inventory.length > 1 ? "DIRECT" : "UNAVAILABLE", source: "EIA", asOf: inventory[0]?.observedAt.toISOString() ?? null }),
+    metric("gas_storage_change", "Natural gas storage trend", change(gas), absoluteStress(change(gas), 20, 150), { displayValue: fmt(change(gas), " Bcf"), dataType: gas.length > 1 ? "DIRECT" : "UNAVAILABLE", source: "EIA", asOf: gas[0]?.observedAt.toISOString() ?? null }),
+    metric("energy_price_trend", "Energy price proxy 1M", oil?.oneMonth ?? null, absoluteStress(oil?.oneMonth, 5, 25), { displayValue: fmt(oil?.oneMonth ?? null, "%"), dataType: oil ? "PROXY" : "UNAVAILABLE", source: "USO price proxy" }),
+  ];
+}
+
+function positioningMetrics(inputs: PersistentInputs): RiskMetric[] {
+  const byContract = new Map<string, typeof inputs.positioning>(); for (const row of inputs.positioning) byContract.set(row.contract, [...(byContract.get(row.contract) ?? []), row]);
+  const current = [...byContract.values()].map((rows) => rows.sort((a, b) => b.reportDate.getTime() - a.reportDate.getTime())[0]!).filter(Boolean); const ratios = current.map((row) => row.net !== null && row.openInterest ? row.net / row.openInterest * 100 : null).filter((value): value is number => value !== null);
+  const crowding = ratios.length ? Math.max(...ratios.map(Math.abs)) : null; const changes = [...byContract.values()].map((rows) => rows.length > 1 && rows[0]!.net !== null && rows[1]!.net !== null ? rows[0]!.net! - rows[1]!.net! : null).filter((value): value is number => value !== null); const weeklyChange = changes.length ? changes.reduce((sum, value) => sum + Math.abs(value), 0) / changes.length : null;
+  return [
+    metric("cot_crowding", "COT maximum net/open-interest", crowding, scale(crowding, 15, 55), { displayValue: fmt(crowding, "%"), dataType: crowding === null ? "UNAVAILABLE" : "DIRECT", source: "CFTC COT", asOf: current[0]?.reportDate.toISOString() ?? null }),
+    metric("cot_weekly_change", "COT average weekly net change", weeklyChange, weeklyChange === null ? null : scale(weeklyChange, 1_000, 100_000), { displayValue: fmt(weeklyChange), dataType: weeklyChange === null ? "UNAVAILABLE" : "KAIRO_CALCULATED", source: "CFTC COT" }),
+  ];
+}
+
+function persistentNewsMetrics(inputs: PersistentInputs, fallback: ProviderNewsItem[] | null) {
+  if (!inputs.news.length) return newsMetrics(fallback);
+  const cutoff = Date.now() - 48 * 3_600_000; const recent = inputs.news.filter((item) => item.publishedAt.getTime() >= cutoff); const sample = recent.length ? recent : inputs.news.slice(0, 50); const sentiments = sample.map((item) => item.sentiment).filter((value): value is number => value !== null); const sentiment = average(sentiments); const negativeShare = sentiments.length ? sentiments.filter((value) => value < -0.15).length / sentiments.length * 100 : null; const riskTerms = /war|sanction|conflict|crisis|default|attack|tariff|recession/i; const riskVolume = sample.filter((item) => riskTerms.test(item.title)).length;
+  return [metric("news_sentiment", "Overall news sentiment", sentiment, sentiment === null ? null : scale(-sentiment, -0.1, 0.5), { displayValue: fmt(sentiment), dataType: sentiment === null ? "UNAVAILABLE" : "DIRECT", source: "Marketaux persisted", asOf: sample[0]?.publishedAt.toISOString() ?? null }), metric("negative_share", "Negative news share", negativeShare, scale(negativeShare, 10, 70), { displayValue: fmt(negativeShare, "%"), source: "KAIRO calculated" }), metric("risk_news_volume", "Risk-topic article volume", riskVolume, scale(riskVolume, 2, 25), { displayValue: String(riskVolume), dataType: "KAIRO_CALCULATED", source: "Marketaux persisted" })];
+}
+
 async function collectGlobalRisk(): Promise<GlobalRiskSnapshot> {
   const now = new Date(); const from = now.toISOString().slice(0, 10); const to = new Date(now.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
-  const [quotesSettled, chartSettled, macroSettled, newsSettled, calendarSettled, history, latest] = await Promise.all([
+  const [quotesSettled, chartSettled, macroSettled, newsSettled, calendarSettled, history, latest, persistentInputs] = await Promise.all([
     financialProviderRouter.quotes(QUOTE_SYMBOLS).then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
     Promise.allSettled(CHART_SYMBOLS.map((symbol) => financialProviderRouter.analyticsChart(symbol, "1Y", "1d"))),
     Promise.allSettled(["INFLATION", "RATES", "GDP", "EMPLOYMENT"].map((indicator) => financialProviderRouter.macroIndicator(indicator as MacroObservation["indicator"]))),
     financialProviderRouter.topicNews(["economy", "financial_markets", "energy", "technology", "finance", "regulation", "blockchain", "manufacturing"], 50).then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
     financialProviderRouter.economicCalendar(from, to).then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
-    loadGlobalRiskHistoryReference(now), loadLatestGlobalRiskSnapshot(),
+    loadGlobalRiskHistoryReference(now), loadLatestGlobalRiskSnapshot(), loadPersistentGlobalInputs(),
   ]);
   const quotesResult = quotesSettled.status === "fulfilled" ? quotesSettled.value : null; const quotes = quoteMap(quotesResult); const charts = seriesMap(chartSettled);
   const macroResults = macroSettled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []); const macro = macroResults.map((result) => result.data); const newsResult = newsSettled.status === "fulfilled" ? newsSettled.value : null; const highImpactEvents = calendarSettled.status === "fulfilled" ? calendarSettled.value.data.filter((event) => event.impact?.toLowerCase() === "high").length : null;
   const equities = equityRows(charts); const crossAssets = CROSS_ASSETS.map(([symbol, name]) => crossRow(symbol, name, statsFor(charts, symbol), sourceName(charts.get(symbol)?.meta.provider)));
-  const components: GlobalRiskComponent[] = [new VolatilityStressEngine().evaluate(volatilityMetrics(quotes, charts)), new CreditStressEngine().evaluate(creditMetrics(charts)), new LiquidityStressEngine().evaluate(liquidityMetrics(quotes, charts)), new RatesStressEngine().evaluate(ratesMetrics(quotes, macro)), new BreadthEngine().evaluate(breadthMetrics(charts)), new EquityStressEngine().evaluate(equityMetrics(equities)), new CrossAssetStressEngine().evaluate(crossAssetMetrics(charts)), new MacroStressEngine().evaluate(macroMetrics(macro, highImpactEvents)), new NewsRiskEngine().evaluate(newsMetrics(newsResult?.data ?? null))];
-  const previous = new Map(latest?.components.map((component) => [component.key, component.score]) ?? []); for (const component of components) { const old = previous.get(component.key); component.change = component.score !== null && old !== null && old !== undefined ? round(component.score - old) : null; }
+  const components: GlobalRiskComponent[] = [new VolatilityStressEngine().evaluate(volatilityMetrics(quotes, charts)), new CreditStressEngine().evaluate(creditMetrics(charts)), new LiquidityStressEngine().evaluate(liquidityMetrics(quotes, charts)), new RatesStressEngine().evaluate(ratesMetrics(quotes, macro)), new BreadthEngine().evaluate(breadthMetrics(charts)), new EquityStressEngine().evaluate(equityMetrics(equities)), new CrossAssetStressEngine().evaluate(crossAssetMetrics(charts)), new MacroStressEngine().evaluate(macroMetrics(macro, highImpactEvents)), buildComponent("ENERGY", "Energy stress", energyMetrics(persistentInputs, charts), "Official energy observations and an explicitly labelled price proxy."), buildComponent("POSITIONING", "Market positioning", positioningMetrics(persistentInputs), "Weekly CFTC positioning; insufficient history is not scored."), new NewsRiskEngine().evaluate(persistentNewsMetrics(persistentInputs, newsResult?.data ?? null))];
+  const previous = new Map(latest?.components.map((component) => [component.key, component]) ?? []); for (let index = 0; index < components.length; index += 1) { const component = components[index]!; const old = previous.get(component.key); if (component.score === null && old?.score !== null && old?.score !== undefined) components[index] = { ...old, weight: component.weight, completeness: Math.min(old.completeness, 50), confidence: "VERY_LOW", classification: `${old.classification} · STALE LKG`, summary: `${old.summary} Last-known-good value; current source unavailable.`, freshness: "STALE", isLastKnownGood: true, change: null }; else { component.change = component.score !== null && old?.score !== null && old?.score !== undefined ? round(component.score - old.score) : null; component.freshness = component.score === null ? "UNAVAILABLE" : "FRESH"; component.isLastKnownGood = false; } }
   const timestamps = [quotesResult?.meta.sourceTimestamp, ...[...charts.values()].map((item) => item.meta.sourceTimestamp), ...macroResults.map((item) => item.meta.sourceTimestamp), newsResult?.meta.sourceTimestamp].filter((value): value is string => Boolean(value)).sort();
   const sources: GlobalRiskSource[] = [
     { provider: quotesResult?.meta.provider ?? "market providers", category: "MARKET", asOf: quotesResult?.meta.sourceTimestamp ?? timestamps.at(-1) ?? null, freshness: quotesResult?.meta.freshnessType ?? "UNAVAILABLE", available: Boolean(quotesResult || charts.size) },
     { provider: macroResults.map((item) => item.meta.provider).join(" / ") || "macro providers", category: "MACRO", asOf: macroResults.map((item) => item.meta.sourceTimestamp).filter(Boolean).sort().at(-1) ?? null, freshness: macroResults[0]?.meta.freshnessType ?? "UNAVAILABLE", available: macroResults.length > 0 },
     { provider: newsResult?.meta.provider ?? "news providers", category: "NEWS", asOf: newsResult?.meta.sourceTimestamp ?? null, freshness: newsResult?.meta.freshnessType ?? "UNAVAILABLE", available: Boolean(newsResult) },
+    { provider: persistentInputs.economic.length ? "FRED / EIA official persisted" : "official economic store", category: "MACRO", asOf: persistentInputs.economic[0]?.observedAt.toISOString() ?? null, freshness: persistentInputs.economic.length ? "CACHED" : "UNAVAILABLE", available: persistentInputs.economic.length > 0 },
+    { provider: persistentInputs.positioning.length ? "CFTC official persisted" : "CFTC", category: "MARKET", asOf: persistentInputs.positioning[0]?.reportDate.toISOString() ?? null, freshness: persistentInputs.positioning.length ? "CACHED" : "UNAVAILABLE", available: persistentInputs.positioning.length > 0 },
     { provider: "KAIRO deterministic engines", category: "CALCULATED", asOf: now.toISOString(), freshness: "CURRENT", available: true },
   ];
   const snapshot = new GlobalStressEngine().calculate({ components, history, equityMarkets: equities, crossAssets, sources, inputTimestamp: timestamps.at(-1) ?? now.toISOString(), calculatedAt: now.toISOString() });

@@ -3,7 +3,7 @@ export type SystemicStress = "NONE" | "WATCH" | "ELEVATED" | "ACTIVE";
 export type RiskTrend = "IMPROVING" | "STABLE" | "DETERIORATING" | "RAPIDLY_DETERIORATING";
 export type RiskConfidence = "VERY_LOW" | "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH";
 export type RiskDataType = "DIRECT" | "PROXY" | "KAIRO_CALCULATED" | "UNAVAILABLE";
-export type GlobalRiskComponentKey = "VOLATILITY" | "CREDIT" | "LIQUIDITY" | "RATES" | "MARKET_BREADTH" | "EQUITY_STRESS" | "CROSS_ASSET" | "MACRO" | "GEOPOLITICS";
+export type GlobalRiskComponentKey = "VOLATILITY" | "CREDIT" | "LIQUIDITY" | "RATES" | "MARKET_BREADTH" | "EQUITY_STRESS" | "CROSS_ASSET" | "MACRO" | "ENERGY" | "POSITIONING" | "NEWS_GEOPOLITICAL";
 
 export interface RiskMetric {
   key: string;
@@ -30,6 +30,8 @@ export interface GlobalRiskComponent {
   summary: string;
   metrics: RiskMetric[];
   sources: string[];
+  freshness?: "FRESH" | "STALE" | "UNAVAILABLE";
+  isLastKnownGood?: boolean;
 }
 
 export interface RiskDriver {
@@ -93,6 +95,11 @@ export interface GlobalRiskSnapshot {
   systemicStress: SystemicStress;
   confidence: RiskConfidence;
   dataCompleteness: number;
+  directDataCoverage: number;
+  proxyShare: number;
+  activeLayers: number;
+  staleLayers: number;
+  dataStatus: "AVAILABLE" | "PARTIAL" | "STALE" | "SOURCE_UNAVAILABLE";
   components: GlobalRiskComponent[];
   riskDrivers: RiskDriver[];
   stabilizingFactors: string[];

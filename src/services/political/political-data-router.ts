@@ -7,6 +7,7 @@ import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import type { PoliticalChamber, PoliticalFilters, PoliticalParty, PoliticalTransaction, Politician, ResolvedInstrument } from "@/types";
 import { normalizePoliticianName } from "@/engines/political";
 import { normalizePoliticalDisclosure } from "./political-normalizer";
+import { loadPersistedPoliticalTransactions } from "./political-repository";
 
 interface LoadedPoliticalData { transactions: PoliticalTransaction[]; politicians: Politician[]; duplicatesRemoved: number; duplicateRate: number; fetchedAt: string; invalidRecords: number; }
 
@@ -54,13 +55,17 @@ function filterTransactions(transactions: PoliticalTransaction[], filters: Polit
 
 export class PoliticalDataRouter {
   private async latest(limit = 100): Promise<LoadedPoliticalData> {
+    const persisted = await loadPersistedPoliticalTransactions({ limit });
+    if (persisted) return persisted;
     const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(undefined, limit)), settle(financialProviderRouter.senateTrades(undefined, limit))]);
     const rows = [...(house?.data ?? []), ...(senate?.data ?? [])]; const fetchedAt = house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString();
     return normalizeRows(rows, fetchedAt);
   }
 
   private async bySymbol(symbolInput: string, limit = 500): Promise<LoadedPoliticalData> {
-    const symbol = normalizeSymbol(symbolInput); const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(symbol, limit)), settle(financialProviderRouter.senateTrades(symbol, limit))]);
+    const symbol = normalizeSymbol(symbolInput); const persisted = await loadPersistedPoliticalTransactions({ symbol, limit });
+    if (persisted) return persisted;
+    const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(symbol, limit)), settle(financialProviderRouter.senateTrades(symbol, limit))]);
     if (house || senate) return normalizeRows([...(house?.data ?? []), ...(senate?.data ?? [])], house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString());
     const latest = await this.latest(Math.min(500, limit));
     return { ...latest, transactions: latest.transactions.filter((row) => row.rawTicker === symbol || row.symbol === symbol) };
