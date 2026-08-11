@@ -30,7 +30,7 @@ export async function loadPersistentGlobalInputs() {
   try {
     const database = getDatabase();
     const [economic, positioning, news] = await Promise.all([
-      database.select({ key: economicSeries.internalKey, category: economicSeries.category, title: economicSeries.metadata, value: normalizedEconomicObservations.value, observedAt: normalizedEconomicObservations.observedAt, availableAt: normalizedEconomicObservations.availableAt, provider: normalizedEconomicObservations.provider }).from(normalizedEconomicObservations).innerJoin(economicSeries, eq(normalizedEconomicObservations.seriesId, economicSeries.id)).orderBy(desc(normalizedEconomicObservations.observedAt)).limit(500),
+      database.select({ key: economicSeries.internalKey, category: economicSeries.category, title: economicSeries.metadata, value: normalizedEconomicObservations.value, observedAt: normalizedEconomicObservations.observedAt, availableAt: normalizedEconomicObservations.availableAt, provider: normalizedEconomicObservations.provider }).from(normalizedEconomicObservations).innerJoin(economicSeries, eq(normalizedEconomicObservations.seriesId, economicSeries.id)).orderBy(desc(normalizedEconomicObservations.observedAt)).limit(5_000),
       database.select().from(positioningObservations).orderBy(desc(positioningObservations.reportDate)).limit(1_000),
       database.select({ title: newsItems.title, sentiment: newsItems.sentiment, publishedAt: newsItems.publishedAt, provider: newsItems.provider, classification: newsItems.classification }).from(newsItems).orderBy(desc(newsItems.publishedAt)).limit(200),
     ]);
