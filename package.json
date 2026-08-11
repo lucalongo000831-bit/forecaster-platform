@@ -25,6 +25,8 @@
     "test:stlam": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-stlam-complete-coverage.ts",
     "test:kairo-data-v2": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-kairo-data-v2-providers.ts",
     "test:kairo-data-v2:security": "node --env-file-if-exists=.env.local scripts/verify-kairo-data-v2-security.mjs",
+    "data-v2:diagnose": "node scripts/diagnose-kairo-data-v2.mjs",
+    "data-v2:backfill": "node --env-file-if-exists=.env.local scripts/backfill-kairo-data-v2.mjs",
     "issuer:backfill": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/issuer-backfill.ts",
     "test:openai": "node --env-file-if-exists=.env.local scripts/verify-openai.mjs",
     "db:generate": "drizzle-kit generate",
