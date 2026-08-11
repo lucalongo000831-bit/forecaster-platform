@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { getEnvironmentStatus, getServerEnvironment } from "./env";
+import { getEnvironmentStatus, getPublicEnvironment, getServerEnvironment } from "./env";
+
+const providerEnvironment: NodeJS.ProcessEnv = {
+  NODE_ENV: "test",
+  FRED_API_KEY: "test-only",
+  BLS_API_KEY: "test-only",
+  BEA_API_KEY: "test-only",
+  EIA_API_KEY: "test-only",
+  MARKETAUX_API_TOKEN: "test-only",
+  OPENFIGI_API_KEY: "test-only",
+};
 
 describe("server environment", () => {
   it("uses safe defaults while optional external services are absent", () => {
@@ -41,5 +51,39 @@ describe("server environment", () => {
     expect(() => getServerEnvironment({ NODE_ENV: "test", FMP_BASE_URL: "http://financialmodelingprep.com" })).toThrow("Configurazione server non valida");
     expect(() => getServerEnvironment({ NODE_ENV: "test", ALPHA_VANTAGE_BASE_URL: "https://attacker.test" })).toThrow("Configurazione server non valida");
     expect(() => getServerEnvironment({ NODE_ENV: "test", MASSIVE_WEBSOCKET_URL: "ws://socket.massive.com" })).toThrow("Configurazione server non valida");
+  });
+});
+
+describe("Kairo Data V2 environment", () => {
+  it("accepts all new credentials as optional server environment values", () => {
+    const environment = getServerEnvironment(providerEnvironment);
+    expect(environment.FRED_API_KEY).toBe("test-only");
+    expect(environment.BLS_API_KEY).toBe("test-only");
+    expect(environment.BEA_API_KEY).toBe("test-only");
+    expect(environment.EIA_API_KEY).toBe("test-only");
+    expect(environment.MARKETAUX_API_TOKEN).toBe("test-only");
+    expect(environment.OPENFIGI_API_KEY).toBe("test-only");
+  });
+
+  it("reports configuration status without returning credential values", () => {
+    const status = getEnvironmentStatus(providerEnvironment);
+    expect(status).toMatchObject({
+      fredConfigured: true,
+      blsConfigured: true,
+      beaConfigured: true,
+      eiaConfigured: true,
+      marketauxConfigured: true,
+      openFigiConfigured: true,
+    });
+    expect(JSON.stringify(status)).not.toContain("test-only");
+  });
+
+  it("does not map provider credentials into the public environment", () => {
+    const publicEnvironment = getPublicEnvironment({
+      ...providerEnvironment,
+      NEXT_PUBLIC_FRED_API_KEY: "must-not-be-mapped",
+      NEXT_PUBLIC_OPENFIGI_API_KEY: "must-not-be-mapped",
+    });
+    expect(publicEnvironment).toEqual({});
   });
 });

@@ -23,6 +23,8 @@
     "political:backfill": "node --env-file-if-exists=.env.local scripts/political-backfill.mjs",
     "test:company-smoke": "node scripts/test-company-intelligence.mjs",
     "test:stlam": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-stlam-complete-coverage.ts",
+    "test:kairo-data-v2": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-kairo-data-v2-providers.ts",
+    "test:kairo-data-v2:security": "node --env-file-if-exists=.env.local scripts/verify-kairo-data-v2-security.mjs",
     "issuer:backfill": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/issuer-backfill.ts",
     "test:openai": "node --env-file-if-exists=.env.local scripts/verify-openai.mjs",
     "db:generate": "drizzle-kit generate",

@@ -1,3 +1,5 @@
+export {};
+
 type Check = { label: string; run: () => Promise<boolean> };
 
 const timeoutMs = 12_000;
