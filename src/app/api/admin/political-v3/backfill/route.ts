@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const inputSchema = z.object({
-  from: z.iso.date(), to: z.iso.date(), resume: z.boolean().default(true), dryRun: z.boolean().default(false), batchDays: z.number().int().min(7).max(90).default(30), maxPages: z.number().int().min(1).max(250).default(60), pageSize: z.number().int().min(10).max(100).default(100), chamber: z.enum(["HOUSE", "SENATE"]).optional(),
+  from: z.iso.date(), to: z.iso.date(), source: z.enum(["bargo", "capitol-exposed"]).default("capitol-exposed"), resume: z.boolean().default(true), dryRun: z.boolean().default(false), batchDays: z.number().int().min(7).max(90).default(30), maxPages: z.number().int().min(1).max(250).default(60), pageSize: z.number().int().min(10).max(100).default(100), chamber: z.enum(["HOUSE", "SENATE"]).optional(),
 }).refine((value) => value.from <= value.to, "Invalid backfill window");
 
 export async function POST(request: Request) {
