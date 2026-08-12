@@ -83,6 +83,15 @@ export class FmpPoliticalAdapter implements PoliticalProvider {
     return providerResult(this.name, data, { sourceTimestamp, freshness: "cached", freshnessType: "CACHED", quality: data.length ? "verified" : "partial" });
   }
 
+  async getPage(chamber: "HOUSE" | "SENATE", page: number, pageSize = 20) {
+    const endpoint = chamber === "SENATE" ? "senate-latest" : "house-latest";
+    const safePage = Math.max(0, Math.floor(page)); const safeSize = Math.min(100, Math.max(1, Math.floor(pageSize)));
+    const rows = await fmpGet(endpoint, { page: safePage, limit: safeSize }, `political:${chamber.toLowerCase()}:backfill:${safePage}`);
+    const data = rows.flatMap((row) => { const mapped = mapDisclosure(row, chamber); return mapped ? [mapped] : []; });
+    const sourceTimestamp = data.map((item) => item.disclosureDate ?? item.transactionDate).sort().at(-1) ?? null;
+    return providerResult(this.name, data, { sourceTimestamp, freshness: "cached", freshnessType: "CACHED", quality: data.length ? "verified" : "partial" });
+  }
+
   getSenateTrades(symbol?: string, limit?: number) { return this.request("SENATE", symbol, limit); }
   getHouseTrades(symbol?: string, limit?: number) { return this.request("HOUSE", symbol, limit); }
 }

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq, max, min, sql } from "drizzle-orm";
 import { getDatabase, isDatabaseConfigured, politicalFilings, politicalSyncStates, politicalTransactions, politicians } from "@/db";
 import { structuredLog } from "@/lib/server/logger";
 import { ensureInstrument } from "@/services/account/instrument-repository";
@@ -45,7 +45,7 @@ export async function persistPoliticalTransactions(input: { transactions: Politi
     filingId = filing?.id ?? (await database.select({ id: politicalFilings.id }).from(politicalFilings).where(eq(politicalFilings.sourceId, filingSourceId)).limit(1))[0]?.id ?? null;
     const values = { sourceId: transaction.sourceId, fingerprint: transaction.fingerprint, politicianId: transaction.politicianId, filingId, instrumentId: instrument?.id ?? null, canonicalIssuerId: instrument?.issuerId ?? null, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, ownerType: transaction.ownerType, assetName: transaction.assetName, assetType: transaction.assetType, rawTicker: transaction.rawTicker, symbol: transaction.symbol, sector: transaction.sector, transactionType: transaction.transactionType, transactionDate: new Date(`${transaction.transactionDate}T00:00:00Z`), disclosureDate: new Date(`${transaction.disclosureDate}T00:00:00Z`), marketAvailableDate: new Date(`${transaction.marketAvailableDate}T00:00:00Z`), disclosureDelayDays: transaction.disclosureDelayDays, amountMin: numeric(transaction.amountMin), amountMax: numeric(transaction.amountMax), amountRangeRaw: transaction.amountRangeRaw, estimatedAmount: numeric(transaction.estimatedAmount), amountMethod: transaction.amountMethod, priceAtTransaction: numeric(transaction.priceAtTransaction), priceAtDisclosure: numeric(transaction.priceAtDisclosure), currentPrice: numeric(transaction.currentPrice), sharesEstimate: numeric(transaction.sharesEstimate), source: transaction.source, sourceUrl: transaction.sourceUrl, filingType: transaction.filingType, provider: transaction.provider, fetchedAt: new Date(transaction.fetchedAt), verified: transaction.verified, verificationStatus: transaction.verificationStatus, resolutionStatus: transaction.resolutionStatus, amendment: transaction.amendment, rawPayload: { normalizedId: transaction.id } };
     const inserted = await database.insert(politicalTransactions).values(values).onConflictDoUpdate({ target: politicalTransactions.fingerprint, set: { ...values, updatedAt: new Date() } }).returning({ id: politicalTransactions.id });
-    if (inserted.length) stored += 1; if (instrument) mapped += 1;
+    if (inserted.length) stored += 1; if (transaction.resolutionStatus === "RESOLVED") mapped += 1;
   }
   const dates = input.transactions.map((row) => row.disclosureDate).sort(); const earliest = dates[0]; const latest = dates.at(-1); const unresolved = input.transactions.filter((row) => row.resolutionStatus === "UNRESOLVED_ASSET").length; const metadata = { normalizedRecords: input.transactions.length, earliestDisclosure: earliest ?? null, latestDisclosure: latest ?? null };
   await database.insert(politicalSyncStates).values({ key: "fmp-congressional", lastSuccessfulSync: new Date(), houseRecords: input.houseRecords, senateRecords: input.senateRecords, mappedInstruments: mapped, unresolvedAssets: unresolved, duplicatesRemoved: input.duplicatesRemoved, latestDisclosure: latest ? new Date(`${latest}T00:00:00Z`) : null, providerStatus: "OK", metadata }).onConflictDoUpdate({ target: politicalSyncStates.key, set: { lastSuccessfulSync: new Date(), houseRecords: input.houseRecords, senateRecords: input.senateRecords, mappedInstruments: mapped, unresolvedAssets: unresolved, duplicatesRemoved: input.duplicatesRemoved, latestDisclosure: latest ? new Date(`${latest}T00:00:00Z`) : null, providerStatus: "OK", metadata, updatedAt: new Date() } });
@@ -53,12 +53,20 @@ export async function persistPoliticalTransactions(input: { transactions: Politi
 }
 
 export async function getPoliticalSyncHealth() {
-  const empty = { lastSync: null, houseRecords: 0, senateRecords: 0, mappedInstruments: 0, unresolvedAssets: 0, duplicatesRemoved: 0, latestDisclosure: null, earliestDisclosure: null, totalRecords: 0, mappingRate: 0 };
+  const empty = { lastSync: null, houseRecords: 0, senateRecords: 0, mappedInstruments: 0, unresolvedAssets: 0, duplicatesRemoved: 0, latestDisclosure: null, earliestDisclosure: null, historyDays: 0, historyYears: 0, totalRecords: 0, mappingRate: 0 };
   if (!isDatabaseConfigured()) return { databaseConfigured: false, databaseStatus: "NOT_CONFIGURED", ...empty, fmpStatus: "RUNTIME_ONLY" };
   try {
-    const row = (await getDatabase().select().from(politicalSyncStates).where(eq(politicalSyncStates.key, "fmp-congressional")).limit(1))[0];
-    const metadata = row?.metadata ?? {}; const totalRecords = typeof metadata.normalizedRecords === "number" ? metadata.normalizedRecords : (row?.houseRecords ?? 0) + (row?.senateRecords ?? 0); const mapped = row?.mappedInstruments ?? 0;
-    return { databaseConfigured: true, databaseStatus: "AVAILABLE", lastSync: row?.lastSuccessfulSync?.toISOString() ?? null, houseRecords: row?.houseRecords ?? 0, senateRecords: row?.senateRecords ?? 0, mappedInstruments: mapped, unresolvedAssets: row?.unresolvedAssets ?? 0, duplicatesRemoved: row?.duplicatesRemoved ?? 0, latestDisclosure: row?.latestDisclosure?.toISOString() ?? null, earliestDisclosure: typeof metadata.earliestDisclosure === "string" ? metadata.earliestDisclosure : null, totalRecords, mappingRate: totalRecords ? mapped / totalRecords * 100 : 0, fmpStatus: row?.providerStatus ?? "NOT_SYNCED" };
+    const database = getDatabase();
+    const [row, aggregate, chambers] = await Promise.all([
+      database.select().from(politicalSyncStates).where(eq(politicalSyncStates.key, "fmp-congressional")).limit(1).then((rows) => rows[0]),
+      database.select({ total: count(), earliest: min(politicalTransactions.disclosureDate), latest: max(politicalTransactions.disclosureDate), mapped: sql<number>`count(*) filter (where ${politicalTransactions.resolutionStatus} = 'RESOLVED')`, unresolved: sql<number>`count(*) filter (where ${politicalTransactions.resolutionStatus} = 'UNRESOLVED_ASSET')` }).from(politicalTransactions).then((rows) => rows[0]),
+      database.select({ chamber: politicalTransactions.chamber, total: count() }).from(politicalTransactions).groupBy(politicalTransactions.chamber),
+    ]);
+    const totalRecords = Number(aggregate?.total ?? 0); const mapped = Number(aggregate?.mapped ?? 0); const unresolvedAssets = Number(aggregate?.unresolved ?? 0); const resolvable = mapped + unresolvedAssets;
+    const chamberCount = (name: "HOUSE" | "SENATE") => Number(chambers.find((item) => item.chamber === name)?.total ?? 0);
+    const earliestDisclosure = aggregate?.earliest?.toISOString().slice(0, 10) ?? null; const latestDisclosure = aggregate?.latest?.toISOString() ?? null;
+    const historyDays = earliestDisclosure && latestDisclosure ? Math.max(0, Math.floor((Date.parse(latestDisclosure) - Date.parse(`${earliestDisclosure}T00:00:00Z`)) / 86_400_000)) : 0;
+    return { databaseConfigured: true, databaseStatus: "AVAILABLE", lastSync: row?.lastSuccessfulSync?.toISOString() ?? null, houseRecords: chamberCount("HOUSE"), senateRecords: chamberCount("SENATE"), mappedInstruments: mapped, unresolvedAssets, duplicatesRemoved: row?.duplicatesRemoved ?? 0, latestDisclosure, earliestDisclosure, historyDays, historyYears: historyDays / 365.2425, totalRecords, mappingRate: resolvable ? mapped / resolvable * 100 : 0, fmpStatus: row?.providerStatus ?? "NOT_SYNCED" };
   } catch (error) {
     structuredLog("warn", "political.health.persistence_unavailable", { errorType: error instanceof Error ? error.name : "UnknownError" });
     return { databaseConfigured: true, databaseStatus: "UNAVAILABLE", ...empty, fmpStatus: "RUNTIME_ONLY" };

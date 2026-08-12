@@ -19,8 +19,8 @@ async function resolvePoliticalInstrument(symbol: string): Promise<ResolvedInstr
   return { canonicalSymbol: symbol, name: profile.name, kind: profile.quoteType.toUpperCase().includes("ETF") ? "ETF" : "EQUITY", exchange: profile.exchange, mic: null, currency: profile.currency, tradingCurrency: profile.currency, countryCode: profile.country, issuer: { legalName: profile.name, countryCode: profile.country, lei: null, cik: null, isin: null, website: profile.website, sector: profile.sector, industry: profile.industry }, mappings: [{ provider: result.meta.provider, symbol, exchangeCode: profile.exchange, providerInstrumentId: null, confidence: .9, verifiedAt: result.meta.fetchedAt }], resolutionQuality: result.meta.quality, warnings: [] };
 }
 
-async function normalizeRows(rows: PoliticalDisclosure[], fetchedAt: string): Promise<LoadedPoliticalData> {
-  const symbols = [...new Set(rows.map((row) => row.symbol?.trim().toUpperCase()).filter((symbol): symbol is string => Boolean(symbol && /^[A-Z0-9.^=-]{1,32}$/.test(symbol))))].slice(0, 24);
+export async function normalizePoliticalRows(rows: PoliticalDisclosure[], fetchedAt: string): Promise<LoadedPoliticalData> {
+  const symbols = [...new Set(rows.map((row) => row.symbol?.trim().toUpperCase()).filter((symbol): symbol is string => Boolean(symbol && /^[A-Z0-9.^=-]{1,32}$/.test(symbol))))];
   const resolutions = new Map<string, ResolvedInstrument | null>();
   for (let index = 0; index < symbols.length; index += 8) {
     const batch = symbols.slice(index, index + 8);
@@ -59,22 +59,22 @@ export class PoliticalDataRouter {
     if (persisted) return persisted;
     const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(undefined, limit)), settle(financialProviderRouter.senateTrades(undefined, limit))]);
     const rows = [...(house?.data ?? []), ...(senate?.data ?? [])]; const fetchedAt = house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString();
-    return normalizeRows(rows, fetchedAt);
+    return normalizePoliticalRows(rows, fetchedAt);
   }
 
   private async bySymbol(symbolInput: string, limit = 500): Promise<LoadedPoliticalData> {
     const symbol = normalizeSymbol(symbolInput); const persisted = await loadPersistedPoliticalTransactions({ symbol, limit });
     if (persisted) return persisted;
     const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(symbol, limit)), settle(financialProviderRouter.senateTrades(symbol, limit))]);
-    if (house || senate) return normalizeRows([...(house?.data ?? []), ...(senate?.data ?? [])], house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString());
+    if (house || senate) return normalizePoliticalRows([...(house?.data ?? []), ...(senate?.data ?? [])], house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString());
     const latest = await this.latest(Math.min(500, limit));
     return { ...latest, transactions: latest.transactions.filter((row) => row.rawTicker === symbol || row.symbol === symbol) };
   }
 
   getTradesBySymbol(symbol: string, limit = 500) { return this.bySymbol(symbol, limit); }
   async getTradesByPolitician(nameOrId: string, limit = 500) { const data = await this.latest(limit); const query = nameOrId.toLowerCase(); return { ...data, transactions: data.transactions.filter((row) => row.politicianId === nameOrId || row.politicianName.toLowerCase().includes(query)) }; }
-  async getLatestHouseTrades(limit = 100) { const result = await settle(financialProviderRouter.houseTrades(undefined, limit)); return normalizeRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString()); }
-  async getLatestSenateTrades(limit = 100) { const result = await settle(financialProviderRouter.senateTrades(undefined, limit)); return normalizeRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString()); }
+  async getLatestHouseTrades(limit = 100) { const result = await settle(financialProviderRouter.houseTrades(undefined, limit)); return normalizePoliticalRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString()); }
+  async getLatestSenateTrades(limit = 100) { const result = await settle(financialProviderRouter.senateTrades(undefined, limit)); return normalizePoliticalRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString()); }
   async getTradesByDateRange(from: string, to: string, limit = 500) { const data = await this.latest(limit); return { ...data, transactions: data.transactions.filter((row) => row.disclosureDate >= from && row.disclosureDate <= to) }; }
   async getTradesByAsset(query: string, limit = 500) { const data = await this.latest(limit); const normalized = query.toLowerCase(); return { ...data, transactions: data.transactions.filter((row) => row.symbol?.toLowerCase() === normalized || row.assetName.toLowerCase().includes(normalized)) }; }
   async getTradesByParty(party: PoliticalParty, limit = 500) { const data = await this.latest(limit); return { ...data, transactions: data.transactions.filter((row) => row.party === party) }; }
