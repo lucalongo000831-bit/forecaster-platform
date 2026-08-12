@@ -7,13 +7,13 @@ import { syncPoliticalDisclosures } from "@/services/political";
 import { runJob } from "./job-runner";
 
 export const DATA_V2_SCHEDULES = {
-  economic: process.env.KAIRO_SCHEDULE_ECONOMIC ?? "0 */6 * * *",
-  calendar: process.env.KAIRO_SCHEDULE_CALENDAR ?? "15 */6 * * *",
-  political: process.env.KAIRO_SCHEDULE_POLITICAL ?? "30 */6 * * *",
+  economic: process.env.KAIRO_SCHEDULE_ECONOMIC ?? "0 6 * * *",
+  calendar: process.env.KAIRO_SCHEDULE_CALENDAR ?? "15 6 * * *",
+  political: process.env.KAIRO_SCHEDULE_POLITICAL ?? "30 6 * * *",
   cftc: process.env.KAIRO_SCHEDULE_CFTC ?? "0 22 * * 5",
-  news: process.env.KAIRO_SCHEDULE_NEWS ?? "*/15 * * * *",
-  globalRisk: process.env.KAIRO_SCHEDULE_GLOBAL_RISK ?? "*/15 * * * *",
-  energy: process.env.KAIRO_SCHEDULE_ENERGY ?? "45 */6 * * *",
+  news: process.env.KAIRO_SCHEDULE_NEWS ?? "0 7 * * *",
+  globalRisk: process.env.KAIRO_SCHEDULE_GLOBAL_RISK ?? "15 7 * * *",
+  energy: process.env.KAIRO_SCHEDULE_ENERGY ?? "45 6 * * *",
 } as const;
 
 export const DATA_V2_JOB_NAMES = ["economic", "calendar", "political", "energy", "cftc", "news", "global-risk"] as const;
