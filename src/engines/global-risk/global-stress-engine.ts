@@ -77,12 +77,14 @@ export class GlobalStressEngine {
     const deEscalationTriggers = ["VOLATILITY", "CREDIT", "LIQUIDITY", "MARKET_BREADTH", "RATES"].map((key) => { const item = component(key as GlobalRiskComponent["key"]); return { id: `normalize-${key.toLowerCase()}`, direction: "DE_ESCALATION" as const, label: `${item?.label ?? key} normalization`, threshold: `Component below ${GLOBAL_RISK_CONFIG.triggers.normalizeComponent}`, active: item?.score !== null && item?.score !== undefined && item.score < GLOBAL_RISK_CONFIG.triggers.normalizeComponent }; });
     const confidence = adjustedConfidence(confidenceFromCompleteness(weighted.completeness), input.sources);
     const metrics = components.flatMap((component) => component.metrics.filter((item) => item.stressScore !== null));
-    const directDataCoverage = metrics.length ? round(metrics.filter((item) => item.dataType === "DIRECT" || item.dataType === "CALCULATED_FROM_DIRECT").length / metrics.length * 100, 0) : 0;
+    const rawDirectCoverage = metrics.length ? round(metrics.filter((item) => item.dataType === "DIRECT").length / metrics.length * 100, 0) : 0;
+    const calculatedFromDirectCoverage = metrics.length ? round(metrics.filter((item) => item.dataType === "CALCULATED_FROM_DIRECT").length / metrics.length * 100, 0) : 0;
+    const directDataCoverage = rawDirectCoverage + calculatedFromDirectCoverage;
     const proxyShare = metrics.length ? round(metrics.filter((item) => item.dataType === "PROXY").length / metrics.length * 100, 0) : 0;
     const activeLayers = components.filter((component) => component.score !== null).length; const staleLayers = components.filter((component) => component.isLastKnownGood).length;
     const dataStatus = activeLayers === 0 ? "SOURCE_UNAVAILABLE" as const : staleLayers === activeLayers ? "STALE" as const : weighted.completeness < 70 ? "PARTIAL" as const : "AVAILABLE" as const;
     return {
-      id: null, status, score, previousStatus: input.history.previousStatus, previousScore: input.history.previousScore, change: input.history.previousScore === null ? null : round(score - input.history.previousScore), trend, systemicStress, confidence, dataCompleteness: weighted.completeness, directDataCoverage, proxyShare, activeLayers, staleLayers, dataStatus, components, riskDrivers, stabilizingFactors, escalationTriggers, deEscalationTriggers,
+      id: null, status, score, previousStatus: input.history.previousStatus, previousScore: input.history.previousScore, change: input.history.previousScore === null ? null : round(score - input.history.previousScore), trend, systemicStress, confidence, dataCompleteness: weighted.completeness, directDataCoverage, rawDirectCoverage, calculatedFromDirectCoverage, proxyShare, activeLayers, staleLayers, dataStatus, components, riskDrivers, stabilizingFactors, escalationTriggers, deEscalationTriggers,
       summary: summaryFor(status, systemicStress, trend, riskDrivers), equityMarkets: input.equityMarkets ?? [], crossAssets: input.crossAssets ?? [], calculatedAt: input.calculatedAt ?? new Date().toISOString(), inputTimestamp: input.inputTimestamp ?? new Date().toISOString(), lastStatusChangeAt: input.history.lastStatusChangeAt, modelVersion: GLOBAL_STRESS_MODEL_VERSION, sources: input.sources ?? [],
     };
   }

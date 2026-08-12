@@ -22,7 +22,7 @@ export async function loadLatestGlobalRiskSnapshot(): Promise<GlobalRiskSnapshot
   const [row] = await getDatabase().select({ payload: globalRiskSnapshots.payload, id: globalRiskSnapshots.id }).from(globalRiskSnapshots).orderBy(desc(globalRiskSnapshots.calculatedAt)).limit(1);
   if (!row) return null;
   const payload = row.payload as unknown as GlobalRiskSnapshot;
-  return { ...payload, id: row.id, directDataCoverage: payload.directDataCoverage ?? 0, proxyShare: payload.proxyShare ?? 0, activeLayers: payload.activeLayers ?? payload.components?.filter((component) => component.score !== null).length ?? 0, staleLayers: payload.staleLayers ?? 0, dataStatus: payload.dataStatus ?? (payload.dataCompleteness >= 70 ? "AVAILABLE" : "PARTIAL") };
+  return { ...payload, id: row.id, directDataCoverage: payload.directDataCoverage ?? 0, rawDirectCoverage: payload.rawDirectCoverage ?? payload.directDataCoverage ?? 0, calculatedFromDirectCoverage: payload.calculatedFromDirectCoverage ?? 0, proxyShare: payload.proxyShare ?? 0, activeLayers: payload.activeLayers ?? payload.components?.filter((component) => component.score !== null).length ?? 0, staleLayers: payload.staleLayers ?? 0, dataStatus: payload.dataStatus ?? (payload.dataCompleteness >= 70 ? "AVAILABLE" : "PARTIAL") };
 }
 
 export async function loadPersistentGlobalInputs() {

@@ -102,12 +102,12 @@ function newsMetrics(news: ProviderNewsItem[] | null): RiskMetric[] { if (!news)
 
 type PersistentInputs = Awaited<ReturnType<typeof loadPersistentGlobalInputs>>;
 function latestEconomic(inputs: PersistentInputs, key: string) { return inputs.economic.filter((item) => item.key === key && item.value !== null).sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime()); }
-function energyMetrics(inputs: PersistentInputs, charts: Map<string, ChartRecord>): RiskMetric[] {
+export function energyMetrics(inputs: PersistentInputs, charts: Map<string, ChartRecord>): RiskMetric[] {
   const inventory = latestEconomic(inputs, "us_crude_inventory"); const gas = latestEconomic(inputs, "us_gas_storage"); const oil = statsFor(charts, "USO");
   const change = (rows: typeof inventory) => rows.length > 1 ? rows[0]!.value! - rows[1]!.value! : null;
   return [
-    metric("crude_inventory_change", "Crude inventory trend", change(inventory), absoluteStress(change(inventory), 1_000, 15_000), { displayValue: fmt(change(inventory), " kb"), dataType: inventory.length > 1 ? "DIRECT" : "UNAVAILABLE", source: "EIA", asOf: inventory[0]?.observedAt.toISOString() ?? null }),
-    metric("gas_storage_change", "Natural gas storage trend", change(gas), absoluteStress(change(gas), 20, 150), { displayValue: fmt(change(gas), " Bcf"), dataType: gas.length > 1 ? "DIRECT" : "UNAVAILABLE", source: "EIA", asOf: gas[0]?.observedAt.toISOString() ?? null }),
+    metric("crude_inventory_change", "Crude inventory trend", change(inventory), absoluteStress(change(inventory), 1_000, 15_000), { displayValue: fmt(change(inventory), " kb"), dataType: inventory.length > 1 ? "CALCULATED_FROM_DIRECT" : "UNAVAILABLE", source: "EIA", asOf: inventory[0]?.observedAt.toISOString() ?? null }),
+    metric("gas_storage_change", "Natural gas storage trend", change(gas), absoluteStress(change(gas), 20, 150), { displayValue: fmt(change(gas), " Bcf"), dataType: gas.length > 1 ? "CALCULATED_FROM_DIRECT" : "UNAVAILABLE", source: "EIA", asOf: gas[0]?.observedAt.toISOString() ?? null }),
     metric("energy_price_trend", "Energy price proxy 1M", oil?.oneMonth ?? null, absoluteStress(oil?.oneMonth, 5, 25), { displayValue: fmt(oil?.oneMonth ?? null, "%"), dataType: oil ? "PROXY" : "UNAVAILABLE", source: "USO price proxy" }),
   ];
 }

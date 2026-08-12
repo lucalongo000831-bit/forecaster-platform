@@ -96,6 +96,8 @@ export interface GlobalRiskSnapshot {
   confidence: RiskConfidence;
   dataCompleteness: number;
   directDataCoverage: number;
+  rawDirectCoverage: number;
+  calculatedFromDirectCoverage: number;
   proxyShare: number;
   activeLayers: number;
   staleLayers: number;
