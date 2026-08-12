@@ -29,6 +29,7 @@ const serverEnvironmentSchema = z.object({
   DATABASE_URL: optionalUrl,
   DIRECT_DATABASE_URL: optionalUrl,
   AUTH_SECRET: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
+  KAIRO_BOOTSTRAP_ADMIN_EMAIL: z.preprocess(emptyToUndefined, z.email().transform((value) => value.toLowerCase()).optional()),
   NEXTAUTH_URL: optionalUrl,
   YAHOO_FINANCE_ENABLED: z.preprocess((value) => value === undefined || value === "" ? true : value === "true" ? true : value === "false" ? false : value, z.boolean()),
   FMP_API_KEY: optionalSecret,
