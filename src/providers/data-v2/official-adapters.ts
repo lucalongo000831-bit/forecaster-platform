@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 import { providerGatewayV2, type GatewayResult } from "@/providers/gateway-v2";
 import { getKairoDataV2ProviderConfigs } from "@/providers/kairo-data-v2/config";
-import { officialJson } from "./http";
+import { officialJson, officialText } from "./http";
 
 const fredObservationSchema = z.object({ date: z.string(), value: z.string(), realtime_start: z.string().optional(), realtime_end: z.string().optional() }).passthrough();
 const fredSchema = z.object({ observations: z.array(fredObservationSchema) }).passthrough();
@@ -13,6 +13,78 @@ const eiaSchema = z.object({ response: z.object({ data: z.array(z.record(z.strin
 const treasurySchema = z.object({ data: z.array(z.record(z.string(), z.unknown())).default([]), meta: z.record(z.string(), z.unknown()).optional() }).passthrough();
 const ecbSchema = z.record(z.string(), z.unknown());
 const eurostatSchema = z.object({ value: z.record(z.string(), z.number().nullable()).optional(), dimension: z.record(z.string(), z.unknown()).optional(), id: z.array(z.string()).optional(), size: z.array(z.number()).optional() }).passthrough();
+const officialDocumentSchema = z.string().min(200);
+
+export interface OfficialCentralBankMeeting {
+  centralBank: "FEDERAL_RESERVE" | "ECB";
+  country: "US" | "EU";
+  meetingStart: string;
+  decisionDate: string;
+  decisionTime: string | null;
+  timezone: "America/New_York" | "Europe/Frankfurt";
+  eventType: "MONETARY_POLICY_MEETING" | "RATE_DECISION";
+  title: string;
+  sourceUrl: string;
+  publishedAt: string | null;
+  status: "SCHEDULED";
+}
+
+const monthNumbers: Record<string, number> = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
+const decode = (value: string) => value.replace(/<[^>]+>/g, " ").replace(/&(?:nbsp|#160);/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim();
+const isoDate = (year: number, month: number, day: number) => `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+function zonedTime(date: string, hour: number, minute: number, timeZone: string) {
+  const candidate = Date.parse(`${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`);
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(candidate);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const represented = Date.parse(`${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}:00Z`);
+  return new Date(candidate + (candidate - represented)).toISOString();
+}
+
+export function parseFederalReserveMeetings(html: string, sourceUrl: string): OfficialCentralBankMeeting[] {
+  const publishedAt = /Last Update:\s*([^<]+)/i.exec(html)?.[1]?.trim() ?? null;
+  const meetings: OfficialCentralBankMeeting[] = [];
+  const sections = [...html.matchAll(/<a id="\d+">(20\d{2}) FOMC Meetings<\/a>[\s\S]*?(?=<a id="\d+">20\d{2} FOMC Meetings<\/a>|Future Year:|<\/main>)/gi)];
+  for (const section of sections) {
+    const year = Number(section[1]);
+    const rows = section[0].matchAll(/<div class="[^"]*fomc-meeting[^"]*"[^>]*>[\s\S]*?fomc-meeting__month[^>]*>\s*<strong>([^<]+)<\/strong>[\s\S]*?fomc-meeting__date[^>]*>([^<]+)<\/div>/gi);
+    for (const row of rows) {
+      const month = monthNumbers[decode(row[1]!).toLowerCase().split("/")[0]!];
+      const days = decode(row[2]!).replace(/\*/g, "").match(/\d+/g)?.map(Number) ?? [];
+      if (!month || !days.length) continue;
+      const startMonth = month;
+      const decisionMonth = days.length > 1 && days.at(-1)! < days[0]! ? month + 1 : month;
+      const meetingStart = isoDate(year, startMonth, days[0]!);
+      const decisionDate = isoDate(decisionMonth > 12 ? year + 1 : year, decisionMonth > 12 ? 1 : decisionMonth, days.at(-1)!);
+      meetings.push({ centralBank: "FEDERAL_RESERVE", country: "US", meetingStart, decisionDate, decisionTime: zonedTime(decisionDate, 14, 0, "America/New_York"), timezone: "America/New_York", eventType: "RATE_DECISION", title: "Federal Reserve FOMC monetary policy decision", sourceUrl, publishedAt, status: "SCHEDULED" });
+    }
+  }
+  return meetings;
+}
+
+export function parseEcbMeetings(html: string, sourceUrl: string): OfficialCentralBankMeeting[] {
+  const publishedAt = /article:published_time"\s+content="([^"]+)/i.exec(html)?.[1] ?? null;
+  const rows = html.matchAll(/<dt>\s*(\d{2})\/(\d{2})\/(20\d{2})\s*<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/gi);
+  return [...rows].flatMap((row) => {
+    const title = decode(row[4]!);
+    if (!/monetary policy meeting/i.test(title) || !/Day 2|followed by press conference/i.test(title)) return [];
+    const decisionDate = isoDate(Number(row[3]), Number(row[2]), Number(row[1]));
+    const previousDay = new Date(`${decisionDate}T00:00:00Z`); previousDay.setUTCDate(previousDay.getUTCDate() - 1);
+    return [{ centralBank: "ECB" as const, country: "EU" as const, meetingStart: previousDay.toISOString().slice(0, 10), decisionDate, decisionTime: zonedTime(decisionDate, 14, 15, "Europe/Berlin"), timezone: "Europe/Frankfurt" as const, eventType: "RATE_DECISION" as const, title: "ECB Governing Council monetary policy decision", sourceUrl, publishedAt, status: "SCHEDULED" as const }];
+  });
+}
+
+export class OfficialCentralBankCalendarAdapter {
+  private readonly fedUrl = new URL("https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm");
+  private readonly ecbUrl = new URL("https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html");
+
+  async federalReserve() {
+    return providerGatewayV2.execute({ provider: "federal-reserve", dataset: "central_bank_calendar", operation: "fomc_calendar", requestKey: "official", schema: officialDocumentSchema, task: () => officialText(this.fedUrl), cache: { freshSeconds: 21_600, staleSeconds: 604_800 }, requestMetadata: { url: this.fedUrl } });
+  }
+
+  async ecb() {
+    return providerGatewayV2.execute({ provider: "ecb", dataset: "central_bank_calendar", operation: "governing_council_calendar", requestKey: "official", schema: officialDocumentSchema, task: () => officialText(this.ecbUrl), cache: { freshSeconds: 21_600, staleSeconds: 604_800 }, requestMetadata: { url: this.ecbUrl } });
+  }
+}
 
 function requireValue(value: string | undefined, provider: string) {
   if (!value) throw new Error(`${provider} is not configured`);
@@ -93,3 +165,4 @@ export const eiaAdapter = new EiaAdapter();
 export const usTreasuryAdapter = new USTreasuryAdapter();
 export const ecbDataAdapter = new ECBDataAdapter();
 export const eurostatAdapter = new EurostatAdapter();
+export const officialCentralBankCalendarAdapter = new OfficialCentralBankCalendarAdapter();

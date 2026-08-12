@@ -6,7 +6,7 @@ import {
   newsEntities, newsItems, normalizedEconomicObservations, positioningObservations, providerWatermarks,
 } from "@/db";
 import { structuredLog } from "@/lib/server/logger";
-import { blsAdapter, cftcAdapter, eiaAdapter, fredAdapter, marketauxAdapter, numericValue } from "@/providers/data-v2";
+import { blsAdapter, cftcAdapter, eiaAdapter, fredAdapter, marketauxAdapter, numericValue, officialCentralBankCalendarAdapter, parseEcbMeetings, parseFederalReserveMeetings } from "@/providers/data-v2";
 import { ProviderGatewayError } from "@/providers/gateway-v2";
 import { economicSeriesRegistry, seriesByProvider, type EconomicSeriesDefinition } from "@/providers/data-v2/series-registry";
 import { persistRawProviderRecord, publishDatasetSnapshot } from "./snapshot-repository";
@@ -27,22 +27,27 @@ async function ensureJob(name: string, dataset: string, provider: string | null,
   return row?.id ?? null;
 }
 
-async function beginRun(name: string, dataset: string, provider: string | null, schedule: string | null) {
+export async function beginIngestionRun(name: string, dataset: string, provider: string | null, schedule: string | null) {
   const jobId = await ensureJob(name, dataset, provider, schedule); if (!isDatabaseConfigured()) return null;
   const [run] = await getDatabase().insert(ingestionRuns).values({ jobId, jobName: name, provider, status: "RUNNING" }).returning({ id: ingestionRuns.id });
   return run?.id ?? null;
 }
 
-async function finishRun(runId: string | null, status: IngestionStatus, counts: { fetched?: number; inserted?: number; skipped?: number; errors?: number }, metadata: Record<string, unknown> = {}) {
+export async function finishIngestionRun(runId: string | null, status: IngestionStatus, counts: { fetched?: number; inserted?: number; updated?: number; skipped?: number; errors?: number }, metadata: Record<string, unknown> = {}) {
   if (!runId || !isDatabaseConfigured()) return;
-  await getDatabase().update(ingestionRuns).set({ status, endedAt: new Date(), recordsFetched: counts.fetched ?? 0, recordsInserted: counts.inserted ?? 0, recordsSkipped: counts.skipped ?? 0, errors: counts.errors ?? 0, metadata }).where(eq(ingestionRuns.id, runId));
+  const runWatermark = metadata.watermark && typeof metadata.watermark === "object" ? metadata.watermark as Record<string, unknown> : {};
+  await getDatabase().update(ingestionRuns).set({ status, endedAt: new Date(), recordsFetched: counts.fetched ?? 0, recordsInserted: counts.inserted ?? 0, recordsUpdated: counts.updated ?? 0, recordsSkipped: counts.skipped ?? 0, errors: counts.errors ?? 0, watermark: runWatermark, metadata }).where(eq(ingestionRuns.id, runId));
 }
 
-async function watermark(provider: string, dataset: string, success: boolean, externalTimestamp?: string | null, metadata: Record<string, unknown> = {}) {
+const beginRun = beginIngestionRun;
+const finishRun = finishIngestionRun;
+
+export async function recordProviderWatermark(provider: string, dataset: string, success: boolean, externalTimestamp?: string | null, metadata: Record<string, unknown> = {}, cursor?: string | null) {
   if (!isDatabaseConfigured()) return;
-  await getDatabase().insert(providerWatermarks).values({ provider, dataset, lastAttempt: new Date(), lastSuccessfulSync: success ? new Date() : null, lastExternalTimestamp: externalTimestamp ? new Date(externalTimestamp) : null, metadata })
-    .onConflictDoUpdate({ target: [providerWatermarks.provider, providerWatermarks.dataset], set: { lastAttempt: new Date(), ...(success ? { lastSuccessfulSync: new Date(), lastExternalTimestamp: externalTimestamp ? new Date(externalTimestamp) : null } : {}), metadata, updatedAt: new Date() } });
+  await getDatabase().insert(providerWatermarks).values({ provider, dataset, lastAttempt: new Date(), lastSuccessfulSync: success ? new Date() : null, lastExternalTimestamp: externalTimestamp ? new Date(externalTimestamp) : null, cursor, metadata })
+    .onConflictDoUpdate({ target: [providerWatermarks.provider, providerWatermarks.dataset], set: { lastAttempt: new Date(), ...(success ? { lastSuccessfulSync: new Date(), lastExternalTimestamp: externalTimestamp ? new Date(externalTimestamp) : null, metadata } : {}), cursor, updatedAt: new Date() } });
 }
+const watermark = recordProviderWatermark;
 
 async function upsertSeries(definition: EconomicSeriesDefinition) {
   const [row] = await getDatabase().insert(economicSeries).values({ internalKey: definition.key, provider: definition.provider, externalSeriesId: definition.externalId, country: definition.country, category: definition.category, frequency: definition.frequency, unit: definition.unit, importance: definition.importance, transform: definition.transform, metadata: { title: definition.title } })
@@ -157,6 +162,59 @@ export async function ingestFredReleaseCalendar(from: string, to: string) {
   } catch (error) { await watermark("fred", "economic_release_events", false); await finishRun(runId, "FAILED", { errors: 1 }); throw error; }
 }
 
+export async function ingestCentralBankCalendar(from: string, to: string) {
+  const runId = await beginRun("official-central-bank-calendar", "central_bank_calendar", null, "25 6 * * *");
+  let fetched = 0; let inserted = 0; let skipped = 0; let errors = 0;
+  const sourceResults: Record<string, string> = {};
+  try {
+    if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, reason: "database-not-configured", fetched, inserted, skipped, errors };
+    const settled = await Promise.allSettled([officialCentralBankCalendarAdapter.federalReserve(), officialCentralBankCalendarAdapter.ecb()]);
+    const documentCounts: Record<string, number> = {};
+    const candidates = settled.flatMap((result, index) => {
+      const provider = index === 0 ? "federal-reserve" : "ecb";
+      if (result.status === "rejected") { sourceResults[provider] = "FAILED"; errors += 1; return []; }
+      const sourceUrl = index === 0 ? "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" : "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html";
+      const meetings = index === 0 ? parseFederalReserveMeetings(result.value.data, sourceUrl) : parseEcbMeetings(result.value.data, sourceUrl);
+      documentCounts[provider] = meetings.length;
+      if (!meetings.length) { sourceResults[provider] = "SCHEMA_INVALID"; errors += 1; return []; }
+      sourceResults[provider] = result.value.status;
+      return meetings.filter((meeting) => meeting.decisionDate >= from && meeting.decisionDate <= to);
+    });
+    fetched = candidates.length;
+    for (const provider of ["federal-reserve", "ecb"] as const) {
+      const meetings = candidates.filter((meeting) => meeting.centralBank === (provider === "ecb" ? "ECB" : "FEDERAL_RESERVE"));
+      if (sourceResults[provider]) await persistRawProviderRecord({ provider, dataset: "central_bank_calendar", entityKey: `${from}:${to}`, payload: { from, to, meetings, documentRecords: documentCounts[provider] ?? 0 }, sourceUrl: meetings[0]?.sourceUrl ?? (provider === "ecb" ? "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html" : "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"), schemaVersion: "central-bank-calendar-v1" });
+      const validDocument = (documentCounts[provider] ?? 0) > 0;
+      await watermark(provider, "central_bank_calendar", validDocument, meetings.at(-1)?.decisionDate ?? null, { from, to, records: meetings.length, documentRecords: documentCounts[provider] ?? 0, sourceStatus: sourceResults[provider] ?? "FAILED" });
+    }
+    const rows = candidates.map((meeting) => ({
+      provider: meeting.centralBank === "ECB" ? "ecb" : "federal-reserve",
+      sourceId: `${meeting.centralBank}:${meeting.decisionDate}`,
+      title: meeting.title,
+      country: meeting.country,
+      importance: "HIGH" as const,
+      scheduledAt: new Date(meeting.decisionTime ?? `${meeting.decisionDate}T00:00:00Z`),
+      publishedAt: meeting.publishedAt && !Number.isNaN(Date.parse(meeting.publishedAt)) ? new Date(meeting.publishedAt) : null,
+      status: "AVAILABLE" as const,
+      metadata: { ...meeting, releaseStatus: "PENDING", currentPolicyRate: null, previousRate: null, actualRate: null },
+    }));
+    for (const batch of chunksOf(rows)) {
+      const stored = await getDatabase().insert(economicReleaseEvents).values(batch).onConflictDoNothing({ target: [economicReleaseEvents.provider, economicReleaseEvents.sourceId] }).returning({ id: economicReleaseEvents.id });
+      inserted += stored.length;
+    }
+    skipped = Math.max(0, fetched - inserted);
+    const sourceSucceeded = Object.values(documentCounts).some((count) => count > 0);
+    const status: IngestionStatus = errors ? sourceSucceeded ? "PARTIAL" : "FAILED" : "COMPLETED";
+    const schemaValid = sourceSucceeded;
+    await publishDatasetSnapshot({ dataset: "central_bank_calendar", entityKey: `${from}:${to}`, payload: { from, to, records: candidates, sourceResults, documentCounts }, recordCount: fetched, coverage: Object.values(documentCounts).filter((count) => count > 0).length / 2 * 100, sourceSucceeded, schemaValid, allowVerifiedEmpty: true, sourceTimestamp: candidates.map((item) => item.publishedAt ?? item.decisionDate).sort().at(-1) ?? null, expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), freshness: errors ? "CACHED" : "FRESH", schemaVersion: "central-bank-calendar-v1" });
+    await finishRun(runId, status, { fetched, inserted, skipped, errors }, { from, to, sourceResults, watermark: { latestDecisionDate: candidates.at(-1)?.decisionDate ?? null } });
+    return { status, fetched, inserted, skipped, errors, sourceResults };
+  } catch (error) {
+    await finishRun(runId, "FAILED", { fetched, inserted, skipped, errors: Math.max(1, errors) }, { from, to });
+    throw error;
+  }
+}
+
 function valueOf(row: Record<string, unknown>, ...keys: string[]) { for (const key of keys) { const value = numericValue(row[key]); if (value !== null) return value; } return null; }
 function textOf(row: Record<string, unknown>, ...keys: string[]) { for (const key of keys) if (typeof row[key] === "string" && row[key]) return row[key] as string; return null; }
 
@@ -217,9 +275,9 @@ export async function ingestMarketauxNews() {
 export async function bootstrapDataArchitectureV2() {
   if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, reason: "database-not-configured" };
   for (const definition of economicSeriesRegistry) await upsertSeries(definition);
-  const now = new Date(); const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10); const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 3, 0)).toISOString().slice(0, 10);
-  const [fred, calendar, energy, cftc, news] = await Promise.allSettled([ingestFredEconomicData(), ingestFredReleaseCalendar(from, to), ingestEiaEnergyData(), ingestCftcPositioning(), ingestMarketauxNews()]);
-  return { status: "COMPLETED" as const, fred: fred.status, calendar: calendar.status, energy: energy.status, cftc: cftc.status, news: news.status };
+  const now = new Date(); const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10); const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 3, 0)).toISOString().slice(0, 10);
+  const [fred, calendar, centralBank, energy, cftc, news] = await Promise.allSettled([ingestFredEconomicData(), ingestFredReleaseCalendar(from, to), ingestCentralBankCalendar(from, to), ingestEiaEnergyData(), ingestCftcPositioning(), ingestMarketauxNews()]);
+  return { status: "COMPLETED" as const, fred: fred.status, calendar: calendar.status, centralBank: centralBank.status, energy: energy.status, cftc: cftc.status, news: news.status };
 }
 
 export async function latestIngestionRuns(limit = 50) {

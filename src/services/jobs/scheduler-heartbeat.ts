@@ -4,7 +4,7 @@ import { desc, like } from "drizzle-orm";
 import { calculationRuns, getDatabase, isDatabaseConfigured } from "@/db";
 
 export type SchedulerHeartbeatStatus = "HEALTHY" | "LATE" | "MISSED" | "FAILED" | "DISABLED";
-const expectedMinutes: Record<string, number> = { "data-v2-economic": 1_440, "data-v2-calendar": 1_440, "data-v2-political": 1_440, "data-v2-energy": 1_440, "data-v2-cftc": 10_080, "data-v2-news": 1_440, "data-v2-global-risk": 1_440 };
+const expectedMinutes: Record<string, number> = { "data-v2-economic": 1_440, "data-v2-calendar": 1_440, "data-v2-central-bank": 1_440, "data-v2-political": 1_440, "data-v2-energy": 1_440, "data-v2-cftc": 10_080, "data-v2-news": 1_440, "data-v2-global-risk": 1_440 };
 
 export function classifyHeartbeat(input: { enabled: boolean; lastStartedAt: Date | null; lastStatus: string | null; expectedMinutes: number }, now = new Date()): SchedulerHeartbeatStatus {
   if (!input.enabled) return "DISABLED";

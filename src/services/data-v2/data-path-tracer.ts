@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, count, eq, gte, lte } from "drizzle-orm";
+import { and, count, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { calendarEvents, dataSnapshots, economicReleaseEvents, getDatabase, isDatabaseConfigured, politicalTransactions, rawProviderRecords } from "@/db";
 
 export interface DataPathTrace {
@@ -17,6 +17,11 @@ export interface DataPathTrace {
 
 const date = (value: string, end = false) => new Date(`${value}T${end ? "23:59:59.999" : "00:00:00"}Z`);
 async function counted(query: Promise<Array<{ value: number }>>) { return (await query)[0]?.value ?? 0; }
+function payloadRecordCount(payload: Record<string, unknown>) {
+  if (Array.isArray(payload.rows)) return payload.rows.length;
+  if (Array.isArray(payload.meetings)) return payload.meetings.length;
+  return 0;
+}
 
 export async function traceDataPath(input: { dataset: "calendar" | "political" | "global"; category?: string; symbol?: string; from?: string; to?: string }): Promise<DataPathTrace> {
   const base = { dataset: input.dataset, category: input.category?.toUpperCase() ?? null, symbol: input.symbol?.toUpperCase() ?? null, from: input.from ?? null, to: input.to ?? null, source: [] as string[], warnings: [] as string[], tracedAt: new Date().toISOString() };
@@ -25,10 +30,20 @@ export async function traceDataPath(input: { dataset: "calendar" | "political" |
   if (input.dataset === "calendar") {
     const start = date(input.from ?? "1970-01-01"); const end = date(input.to ?? "2999-12-31", true); const category = input.category?.toUpperCase();
     const eventCondition = and(gte(calendarEvents.startsAt, start), lte(calendarEvents.startsAt, end), ...(category ? [eq(calendarEvents.eventType, category)] : []), ...(input.symbol ? [eq(calendarEvents.symbol, input.symbol.toUpperCase())] : []));
-    const releaseCondition = and(gte(economicReleaseEvents.scheduledAt, start), lte(economicReleaseEvents.scheduledAt, end));
-    const [stored, releases, raw, snapshots] = await Promise.all([counted(database.select({ value: count() }).from(calendarEvents).where(eventCondition)), input.symbol || (category && !["MACRO", "CENTRAL_BANK"].includes(category)) ? 0 : counted(database.select({ value: count() }).from(economicReleaseEvents).where(releaseCondition)), counted(database.select({ value: count() }).from(rawProviderRecords).where(eq(rawProviderRecords.dataset, "economic_release_dates"))), counted(database.select({ value: count() }).from(dataSnapshots).where(eq(dataSnapshots.dataset, "market_calendar")))]);
+    const macroClassifier = sql<boolean>`not (${economicReleaseEvents.title} ~* 'central bank|interest rate|rate decision|fomc|ecb|boe|boj|monetary policy')`;
+    const centralBankClassifier = sql<boolean>`${economicReleaseEvents.title} ~* 'central bank|interest rate|rate decision|fomc|ecb|boe|boj|monetary policy'`;
+    const releaseCondition = and(gte(economicReleaseEvents.scheduledAt, start), lte(economicReleaseEvents.scheduledAt, end), ...(category === "MACRO" ? [macroClassifier] : category === "CENTRAL_BANK" ? [centralBankClassifier] : []));
+    const rawDataset = category === "CENTRAL_BANK" ? "central_bank_calendar" : "economic_release_dates";
+    const rawEntityKey = input.from && input.to ? `${input.from}:${input.to}` : null;
+    const [stored, releases, rawRows, snapshotRow] = await Promise.all([counted(database.select({ value: count() }).from(calendarEvents).where(eventCondition)), input.symbol || (category && !["MACRO", "CENTRAL_BANK"].includes(category)) ? 0 : counted(database.select({ value: count() }).from(economicReleaseEvents).where(releaseCondition)), database.select({ provider: rawProviderRecords.provider, payload: rawProviderRecords.payload }).from(rawProviderRecords).where(and(eq(rawProviderRecords.dataset, rawDataset), ...(rawEntityKey ? [eq(rawProviderRecords.entityKey, rawEntityKey)] : []))).orderBy(desc(rawProviderRecords.fetchedAt)), database.select({ payload: dataSnapshots.payload }).from(dataSnapshots).where(and(eq(dataSnapshots.dataset, "market_calendar"), eq(dataSnapshots.entityKey, `${input.from ?? "1970-01-01"}:${input.to ?? "2999-12-31"}:${input.symbol?.toUpperCase() ?? "global"}`), eq(dataSnapshots.published, true))).orderBy(desc(dataSnapshots.calculatedAt)).limit(1).then((rows) => rows[0] ?? null)]);
+    const latestRaw = [...new Map(rawRows.map((row) => [row.provider, row])).values()];
+    const raw = latestRaw.reduce((total, row) => total + payloadRecordCount(row.payload), 0);
     const normalized = stored + releases; const sources = releases ? ["economic_release_events"] : []; if (stored) sources.push("calendar_events"); if (!normalized) base.warnings.push("NO_NORMALIZED_ROWS");
-    return { ...base, source: sources, counts: { raw, normalized, database: normalized, snapshot: snapshots, apiConsumable: normalized, uiConsumable: normalized } };
+    const snapshotEvents = Array.isArray(snapshotRow?.payload.events) ? snapshotRow.payload.events as Array<Record<string, unknown>> : [];
+    const snapshot = category ? snapshotEvents.filter((event) => event.type === category).length : snapshotEvents.length;
+    const apiConsumable = snapshotRow ? snapshot : normalized; const uiConsumable = apiConsumable;
+    if (snapshotRow && snapshot !== normalized) base.warnings.push(`DB_SNAPSHOT_MISMATCH:${normalized}:${snapshot}`);
+    return { ...base, source: sources, counts: { raw, normalized, database: normalized, snapshot, apiConsumable, uiConsumable } };
   }
   if (input.dataset === "political") {
     const start = date(input.from ?? "1970-01-01");
