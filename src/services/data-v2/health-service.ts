@@ -3,7 +3,7 @@ import "server-only";
 import { desc } from "drizzle-orm";
 import { dataQualityRecords, dataSnapshots, getDatabase, ingestionRuns, isDatabaseConfigured, lastKnownGood, providerQuotaStates, providerWatermarks } from "@/db";
 
-export const CRITICAL_DATASETS = ["market_calendar", "political_disclosures", "economic_observations", "positioning", "news", "global_risk"] as const;
+export const CRITICAL_DATASETS = ["market_calendar", "political_disclosures", "economic_observations", "energy_observations", "positioning", "news", "global_risk"] as const;
 
 export async function getDataArchitectureHealth() {
   if (!isDatabaseConfigured()) return { database: "NOT_CONFIGURED" as const, overall: "DEGRADED" as const, datasets: [], providers: [], runs: [] };

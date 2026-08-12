@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectiveComponentWeights, evaluateQualityGate, verifiedCount } from "./quality-gate";
+import { categoryContinuityReasons, effectiveComponentWeights, evaluateQualityGate, verifiedCount } from "./quality-gate";
 
 describe("Kairo Data V2 quality gate", () => {
   it("rejects a suspicious empty provider response and preserves LKG eligibility", () => {
@@ -8,6 +8,14 @@ describe("Kairo Data V2 quality gate", () => {
 
   it("allows an explicitly verified empty dataset", () => {
     expect(evaluateQualityGate({ previousRecordCount: 0, previousCoverage: 100, candidateRecordCount: 0, candidateCoverage: 100, sourceSucceeded: true, schemaValid: true, allowVerifiedEmpty: true })).toMatchObject({ accepted: true, status: "AVAILABLE" });
+  });
+
+  it("detects a category-specific collapse after a successful refresh", () => {
+    expect(categoryContinuityReasons(
+      { EARNINGS: 12, DIVIDEND: 4, MACRO: 8 },
+      { EARNINGS: 0, DIVIDEND: 4, MACRO: 8 },
+      new Set(["EARNINGS", "DIVIDEND", "MACRO"]),
+    )).toEqual(["SUSPICIOUS_CATEGORY_COLLAPSE:EARNINGS"]);
   });
 
   it("distinguishes a verified zero from an unavailable value", () => {

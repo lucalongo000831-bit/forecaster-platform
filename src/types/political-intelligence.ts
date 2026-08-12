@@ -11,6 +11,22 @@ export type PoliticalConfidence = "VERY_LOW" | "LOW" | "MEDIUM" | "HIGH" | "VERY
 export type PoliticalClusterStrength = "NONE" | "WEAK" | "MODERATE" | "STRONG";
 export type PoliticalPeriod = "7D" | "30D" | "90D" | "6M" | "1Y" | "3Y" | "5Y" | "MAX";
 export type PoliticalPerformanceClassification = "OUTPERFORMED" | "UNDERPERFORMED" | "NEUTRAL" | "INSUFFICIENT_HISTORY";
+export type PoliticalResultStatus = "VERIFIED_ACTIVITY" | "VERIFIED_ZERO" | "PARTIAL_DATA" | "DATASET_INITIALIZING" | "LAST_KNOWN_GOOD" | "UNSUPPORTED";
+
+export interface PoliticalDatasetCoverage {
+  status: PoliticalResultStatus;
+  requestedFrom: string | null;
+  requestedTo: string;
+  historyFrom: string | null;
+  historyTo: string | null;
+  historyCoveragePercent: number;
+  mappingRate: number;
+  ingestedRecords: number;
+  sourceHealthy: boolean;
+  isLastKnownGood: boolean;
+  reason: string;
+  suggestedPeriod: PoliticalPeriod | null;
+}
 
 export interface Politician {
   id: string;
@@ -196,6 +212,8 @@ export interface PoliticalIntelligenceReport {
   sources: Array<{ provider: string; label: string; url: string | null; fetchedAt: string; verificationStatus: PoliticalVerificationStatus }>;
   limitations: string[];
   calculatedAt: string;
+  resultStatus: PoliticalResultStatus;
+  coverage: PoliticalDatasetCoverage;
 }
 
 export interface PoliticianActivityReport {
@@ -233,6 +251,8 @@ export interface PoliticalLeaderboardReport {
   verifiedRecords: number;
   dataCompleteness: number;
   calculatedAt: string;
+  resultStatus: PoliticalResultStatus;
+  coverage: PoliticalDatasetCoverage;
 }
 
 export interface PoliticalFilters {

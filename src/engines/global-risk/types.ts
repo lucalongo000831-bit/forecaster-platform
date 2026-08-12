@@ -2,7 +2,7 @@ export type GlobalRiskStatus = "GREEN" | "YELLOW" | "ORANGE" | "RED";
 export type SystemicStress = "NONE" | "WATCH" | "ELEVATED" | "ACTIVE";
 export type RiskTrend = "IMPROVING" | "STABLE" | "DETERIORATING" | "RAPIDLY_DETERIORATING";
 export type RiskConfidence = "VERY_LOW" | "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH";
-export type RiskDataType = "DIRECT" | "PROXY" | "KAIRO_CALCULATED" | "UNAVAILABLE";
+export type RiskDataType = "DIRECT" | "CALCULATED_FROM_DIRECT" | "PROXY" | "LAST_KNOWN_GOOD" | "MISSING" | "UNAVAILABLE";
 export type GlobalRiskComponentKey = "VOLATILITY" | "CREDIT" | "LIQUIDITY" | "RATES" | "MARKET_BREADTH" | "EQUITY_STRESS" | "CROSS_ASSET" | "MACRO" | "ENERGY" | "POSITIONING" | "NEWS_GEOPOLITICAL";
 
 export interface RiskMetric {

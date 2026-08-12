@@ -6,7 +6,7 @@ import {
   newsEntities, newsItems, normalizedEconomicObservations, positioningObservations, providerWatermarks,
 } from "@/db";
 import { structuredLog } from "@/lib/server/logger";
-import { blsAdapter, cftcAdapter, fredAdapter, marketauxAdapter, numericValue } from "@/providers/data-v2";
+import { blsAdapter, cftcAdapter, eiaAdapter, fredAdapter, marketauxAdapter, numericValue } from "@/providers/data-v2";
 import { ProviderGatewayError } from "@/providers/gateway-v2";
 import { economicSeriesRegistry, seriesByProvider, type EconomicSeriesDefinition } from "@/providers/data-v2/series-registry";
 import { persistRawProviderRecord, publishDatasetSnapshot } from "./snapshot-repository";
@@ -114,6 +114,26 @@ export async function ingestFredEconomicData(options: { start?: string; seriesKe
   } catch (error) { await finishRun(runId, "FAILED", { fetched, inserted, errors: Math.max(1, definitions.length - successfulSeries) }); throw error; }
 }
 
+function eiaPeriod(value: unknown) { if (typeof value !== "string") return null; const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : null; return date ? new Date(`${date}T00:00:00Z`) : null; }
+
+export async function ingestEiaEnergyData(options: { start?: string } = {}) {
+  const runId = await beginRun("eia-energy-observations", "energy_observations", "eia", "45 */6 * * *"); const definitions = seriesByProvider("eia"); let fetched = 0; let inserted = 0; let successfulSeries = 0; let latest: string | null = null;
+  try {
+    if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, reason: "database-not-configured", fetched, inserted };
+    for (const definition of definitions) {
+      try {
+        const result = await eiaAdapter.series(definition.externalId, { length: "500", "data[0]": "value", frequency: "weekly", "sort[0][column]": "period", "sort[0][direction]": "desc", ...(options.start ? { start: options.start } : {}) }); const seriesId = await upsertSeries(definition); const rows = result.data.response.data; fetched += rows.length;
+        await persistRawProviderRecord({ provider: "eia", dataset: "energy_observations", externalId: definition.externalId, entityKey: definition.key, payload: result.data as unknown as Record<string, unknown>, schemaVersion: "eia-energy-v2" });
+        const observationRows = rows.flatMap((row) => { const observedAt = eiaPeriod(row.period); const value = numericValue(row.value); if (!observedAt) return []; const date = observedAt.toISOString().slice(0, 10); if (!latest || date > latest) latest = date; return [{ seriesId, value: value === null ? null : String(value), observedAt, effectiveAt: observedAt, availableAt: observedAt, status: value === null ? "INSUFFICIENT_DATA" as const : "AVAILABLE" as const, provider: "eia", schemaVersion: "energy-observation-v2", metadata: { unit: row["value-units"] ?? definition.unit, sourceRoute: definition.externalId } }]; });
+        for (const batch of chunksOf(observationRows)) { const stored = await getDatabase().insert(normalizedEconomicObservations).values(batch).onConflictDoNothing({ target: [normalizedEconomicObservations.seriesId, normalizedEconomicObservations.observedAt, normalizedEconomicObservations.availableAt, normalizedEconomicObservations.provider] }).returning({ id: normalizedEconomicObservations.id }); inserted += stored.length; }
+        successfulSeries += 1;
+      } catch (error) { structuredLog("warn", "ingestion.eia.series_failed", { series: definition.key, code: error instanceof ProviderGatewayError ? error.errorClass : error instanceof Error ? error.name : "UNKNOWN" }); }
+    }
+    const errors = definitions.length - successfulSeries; const sourceSucceeded = successfulSeries > 0; const status: IngestionStatus = errors ? sourceSucceeded ? "PARTIAL" : "FAILED" : "COMPLETED";
+    await watermark("eia", "energy_observations", sourceSucceeded, latest, { series: definitions.length, successful: successfulSeries }); await publishDatasetSnapshot({ dataset: "energy_observations", payload: { provider: "eia", series: definitions.map((item) => item.key), latest } as Record<string, unknown>, recordCount: fetched, coverage: definitions.length ? successfulSeries / definitions.length * 100 : null, sourceSucceeded, schemaValid: true, allowVerifiedEmpty: false, sourceTimestamp: latest, expiresAt: new Date(Date.now() + 48 * 3_600_000).toISOString(), freshness: errors ? "CACHED" : "FRESH", schemaVersion: "energy-snapshot-v2" }); await finishRun(runId, status, { fetched, inserted, errors }); return { status, fetched, inserted, errors, latest };
+  } catch (error) { await finishRun(runId, "FAILED", { fetched, inserted, errors: Math.max(1, definitions.length - successfulSeries) }); throw error; }
+}
+
 export async function ingestFredReleaseCalendar(from: string, to: string) {
   const runId = await beginRun("fred-release-calendar", "economic_release_events", "fred", "15 */6 * * *"); let inserted = 0;
   try {
@@ -198,8 +218,8 @@ export async function bootstrapDataArchitectureV2() {
   if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, reason: "database-not-configured" };
   for (const definition of economicSeriesRegistry) await upsertSeries(definition);
   const now = new Date(); const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10); const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 3, 0)).toISOString().slice(0, 10);
-  const [fred, calendar, cftc, news] = await Promise.allSettled([ingestFredEconomicData(), ingestFredReleaseCalendar(from, to), ingestCftcPositioning(), ingestMarketauxNews()]);
-  return { status: "COMPLETED" as const, fred: fred.status, calendar: calendar.status, cftc: cftc.status, news: news.status };
+  const [fred, calendar, energy, cftc, news] = await Promise.allSettled([ingestFredEconomicData(), ingestFredReleaseCalendar(from, to), ingestEiaEnergyData(), ingestCftcPositioning(), ingestMarketauxNews()]);
+  return { status: "COMPLETED" as const, fred: fred.status, calendar: calendar.status, energy: energy.status, cftc: cftc.status, news: news.status };
 }
 
 export async function latestIngestionRuns(limit = 50) {

@@ -1,5 +1,19 @@
 import type { QualityGateInput, QualityGateResult } from "@/types";
 
+export function categoryContinuityReasons(
+  previous: Record<string, number | null> | null | undefined,
+  candidate: Record<string, number | null>,
+  succeededCategories: ReadonlySet<string>,
+) {
+  if (!previous) return [];
+  return Object.entries(candidate).flatMap(([category, count]) => {
+    const previousCount = previous[category] ?? 0;
+    return succeededCategories.has(category) && previousCount > 0 && count === 0
+      ? [`SUSPICIOUS_CATEGORY_COLLAPSE:${category}`]
+      : [];
+  });
+}
+
 export function evaluateQualityGate(input: QualityGateInput): QualityGateResult {
   const reasons: string[] = [];
   const maximumCoverageDrop = input.maximumCoverageDrop ?? 35;

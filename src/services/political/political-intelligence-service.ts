@@ -6,6 +6,8 @@ import { financialProviderRouter } from "@/providers";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import type { MarketChartPoint, PoliticalFilters, PoliticalIntelligenceReport, PoliticalLeaderboardReport, PoliticalPeriod, PoliticalTransaction, PoliticianActivityReport } from "@/types";
 import { politicalDataRouter } from "./political-data-router";
+import { getPoliticalSyncHealth } from "./political-repository";
+import { politicalCoverage } from "./political-coverage";
 
 const activityEngine = new PoliticalActivityEngine(); const clusterEngine = new PoliticalClusterEngine(30); const performanceEngine = new PoliticalTradePerformanceEngine();
 const EMPTY_STUDY = performanceEngine.historicalStudy([], []);
@@ -75,7 +77,7 @@ export async function getSymbolPoliticalIntelligence(symbolInput: string, filter
   ]);
   const priced = chart ? enrichPrices(periodRows, chart.data.points, quote?.data.price ?? chart.data.points.at(-1)?.close ?? null) : periodRows;
   const performances = chart && benchmark ? priced.slice(0, 100).map((transaction) => performanceEngine.calculate(transaction, chart.data.points, benchmark.data.points)) : [];
-  const summary = activityEngine.summarize(priced, period, clusters); const breakdown = breakdowns(priced); const ordered = sortedTransactions(priced, filters.sort);
+  const summary = activityEngine.summarize(priced, period, clusters); const breakdown = breakdowns(priced); const ordered = sortedTransactions(priced, filters.sort); const health = await getPoliticalSyncHealth(); const coverage = politicalCoverage(period, priced, loaded.transactions, health);
   return {
     scope: "SYMBOL", symbol, name: profile?.data.name ?? quote?.data.name ?? symbol, period, summary, transactions: paginate(ordered, page, pageSize), totalTransactions: ordered.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ordered.length / pageSize)),
     clusters, performances, historicalStudy: performanceEngine.historicalStudy(priced, performances), priceHistory: chart?.data.points ?? [], timeline: politicalTimeline(priced, period === "5Y" || period === "3Y" ? "monthly" : "weekly"),
@@ -88,7 +90,7 @@ export async function getSymbolPoliticalIntelligence(symbolInput: string, filter
       ...(loaded.invalidRecords ? [`${loaded.invalidRecords} provider records without a disclosure date were excluded from market-availability analytics.`] : []),
       ...(unresolved(priced).length ? [`${unresolved(priced).length} disclosed assets could not be mapped to a canonical market instrument.`] : []),
       "Past post-disclosure performance does not imply future performance.",
-    ], calculatedAt: new Date().toISOString(),
+    ], calculatedAt: new Date().toISOString(), resultStatus: coverage.status, coverage,
   };
 }
 
@@ -98,7 +100,8 @@ export async function getPoliticalLeaderboard(filters: PoliticalFilters = {}): P
   if (filters.clusterOnly) { const ids = new Set(clusters.flatMap((cluster) => cluster.transactionIds)); transactions = transactions.filter((row) => ids.has(row.id)); clusters = clusterEngine.analyze(transactions); }
   const summary = activityEngine.summarize(transactions, period, clusters); const breakdown = breakdowns(transactions); const ordered = sortedTransactions(transactions, filters.sort);
   const performances = await politicianPerformances(transactions.slice(0, 80));
-  const report: PoliticalLeaderboardReport = { period, summary, latest: paginate(ordered, page, pageSize), mostActivePoliticians: breakdown.politician.slice(0, 12), mostPurchased: rankAssets(transactions, "PURCHASE"), mostSold: rankAssets(transactions, "SALE"), clusters: clusters.slice(0, 12), sectors: breakdown.sector.slice(0, 12), timeline: politicalTimeline(transactions, period === "3Y" || period === "5Y" || period === "MAX" ? "monthly" : "weekly"), politicians: loaded.politicians, historicalStudy: performanceEngine.historicalStudy(transactions, performances), performanceSampleSize: performances.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ordered.length / pageSize)), totalTransactions: transactions.length, mappedTransactions: transactions.filter((row) => row.resolutionStatus === "RESOLVED").length, unresolvedAssets: unresolved(transactions).length, duplicateRate: loaded.duplicateRate, verifiedRecords: transactions.filter((row) => row.verified).length, dataCompleteness: summary.dataCompleteness, calculatedAt: new Date().toISOString() };
+  const health = await getPoliticalSyncHealth(); const coverage = politicalCoverage(period, transactions, loaded.transactions, health);
+  const report: PoliticalLeaderboardReport = { period, summary, latest: paginate(ordered, page, pageSize), mostActivePoliticians: breakdown.politician.slice(0, 12), mostPurchased: rankAssets(transactions, "PURCHASE"), mostSold: rankAssets(transactions, "SALE"), clusters: clusters.slice(0, 12), sectors: breakdown.sector.slice(0, 12), timeline: politicalTimeline(transactions, period === "3Y" || period === "5Y" || period === "MAX" ? "monthly" : "weekly"), politicians: loaded.politicians, historicalStudy: performanceEngine.historicalStudy(transactions, performances), performanceSampleSize: performances.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ordered.length / pageSize)), totalTransactions: transactions.length, mappedTransactions: transactions.filter((row) => row.resolutionStatus === "RESOLVED").length, unresolvedAssets: unresolved(transactions).length, duplicateRate: loaded.duplicateRate, verifiedRecords: transactions.filter((row) => row.verified).length, dataCompleteness: summary.dataCompleteness, calculatedAt: new Date().toISOString(), resultStatus: coverage.status, coverage };
   await cacheSet(cacheKey, report, 3_600); return report;
 }
 

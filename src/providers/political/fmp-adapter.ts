@@ -56,13 +56,29 @@ export class FmpPoliticalAdapter implements PoliticalProvider {
   private async request(chamber: PoliticalDisclosure["chamber"], symbolInput?: string, limit = 100) {
     const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
     const endpoint = chamber === "SENATE" ? (symbol ? "senate-trades" : "senate-latest") : (symbol ? "house-trades" : "house-latest");
-    // FMP returns 402 for larger congressional-disclosure pages on some plans.
-    // A conservative page preserves live availability; deeper history comes from controlled pagination/backfill.
-    const rows = await fmpGet(endpoint, symbol ? { symbol } : { page: 0, limit: Math.min(20, Math.max(1, limit)) }, `political:${chamber.toLowerCase()}`);
+    const requestedLimit = Math.min(500, Math.max(1, limit));
+    const pageSize = Math.min(20, requestedLimit);
+    const rows: Record<string, unknown>[] = [];
+    if (symbol) {
+      rows.push(...await fmpGet(endpoint, { symbol }, `political:${chamber.toLowerCase()}:symbol`));
+    } else {
+      // Plans expose different history depths. Preserve successful live pages if
+      // a later page is rate-limited or restricted instead of losing the batch.
+      for (let page = 0; rows.length < requestedLimit; page += 1) {
+        try {
+          const batch = await fmpGet(endpoint, { page, limit: pageSize }, `political:${chamber.toLowerCase()}:page:${page}`);
+          rows.push(...batch);
+          if (batch.length < pageSize) break;
+        } catch (error) {
+          if (rows.length === 0) throw error;
+          break;
+        }
+      }
+    }
     const data = rows.flatMap((row) => {
       const mapped = mapDisclosure(row, chamber);
       return mapped ? [mapped] : [];
-    }).slice(0, limit);
+    }).slice(0, requestedLimit);
     const sourceTimestamp = data.map((item) => item.disclosureDate ?? item.transactionDate).sort().at(-1) ?? null;
     return providerResult(this.name, data, { sourceTimestamp, freshness: "cached", freshnessType: "CACHED", quality: data.length ? "verified" : "partial" });
   }
