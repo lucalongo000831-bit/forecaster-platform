@@ -7,3 +7,5 @@ The API/UI result status is one of `VERIFIED_ACTIVITY`, `VERIFIED_ZERO`, `PARTIA
 FMP plan/rate limits may prevent the targeted one-to-five-year backfill. That limitation is exposed; recent data is never relabelled as complete history.
 
 Trace with `NODE_OPTIONS=--conditions=react-server node --env-file-if-exists=.env.local --import tsx scripts/trace-political-data.ts NVDA`.
+
+Direct text aliases are deliberately narrow: `Bitcoin/BTC` resolves to `BTC-USD` and `Ethereum/Ether/ETH` to `ETH-USD` only when the raw disclosure does not identify an ETF, fund, trust, note or share. A named Bitcoin ETF such as IBIT remains the ETF and is never reclassified as direct crypto.
