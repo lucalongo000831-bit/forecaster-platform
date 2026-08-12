@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   try {
     assertInternalRequest(request);
     const status = getEnvironmentStatus();
-    const configured = { yahoo: true, fmp: status.fmpConfigured, "alpha-vantage": status.alphaVantageConfigured, massive: status.massiveConfigured, eodhd: status.eodhdConfigured, finnhub: status.finnhubConfigured, coingecko: status.coinGeckoConfigured, "sec-edgar": status.secConfigured, esef: status.esefEnabled };
+    const configured = { yahoo: true, fmp: status.fmpConfigured, "alpha-vantage": status.alphaVantageConfigured, massive: status.massiveConfigured, eodhd: status.eodhdConfigured, finnhub: status.finnhubConfigured, coingecko: status.coinGeckoConfigured, "sec-edgar": status.secConfigured, esef: status.esefEnabled, bargo: true, "capitol-exposed": true };
     return jsonSuccess({
       providers: getProviderHealth().map((provider) => ({ ...provider, configured: configured[provider.provider], coordinator: getProviderCoordinatorState(provider.provider) })),
       kairoAi: "DISABLED",

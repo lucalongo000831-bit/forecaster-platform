@@ -21,6 +21,8 @@
     "test:complete-data-stack": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-complete-data-stack.ts",
     "test:political": "node --env-file-if-exists=.env.local scripts/test-political-intelligence.mjs",
     "political:backfill": "node --env-file-if-exists=.env.local scripts/political-backfill.mjs",
+    "political:v3:backfill": "node --conditions=react-server --env-file-if-exists=.env.local --import=tsx scripts/political-v3-backfill.ts",
+    "test:political:v3:sources": "node --conditions=react-server --env-file-if-exists=.env.local --import=tsx scripts/test-political-v3-sources.ts",
     "test:company-smoke": "node scripts/test-company-intelligence.mjs",
     "test:stlam": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-stlam-complete-coverage.ts",
     "test:kairo-data-v2": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-kairo-data-v2-providers.ts",

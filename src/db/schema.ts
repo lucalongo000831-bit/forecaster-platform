@@ -27,7 +27,7 @@ export const politicalChamber = pgEnum("political_chamber", ["HOUSE", "SENATE", 
 export const politicalParty = pgEnum("political_party", ["DEMOCRATIC", "REPUBLICAN", "INDEPENDENT", "OTHER", "UNKNOWN"]);
 export const politicalOwnerType = pgEnum("political_owner_type", ["SELF", "SPOUSE", "DEPENDENT", "JOINT", "TRUST", "OTHER", "UNKNOWN"]);
 export const politicalTransactionKind = pgEnum("political_transaction_kind", ["PURCHASE", "SALE_FULL", "SALE_PARTIAL", "SALE", "EXCHANGE", "OPTION", "OTHER", "UNKNOWN"]);
-export const politicalVerificationStatus = pgEnum("political_verification_status", ["PROVIDER_ONLY", "OFFICIAL_SOURCE_VERIFIED", "SOURCE_MISMATCH", "PENDING", "UNVERIFIABLE"]);
+export const politicalVerificationStatus = pgEnum("political_verification_status", ["PROVIDER_ONLY", "OFFICIAL_SOURCE_VERIFIED", "SOURCE_MISMATCH", "PENDING", "UNVERIFIABLE", "BARGO_ONLY", "FMP_ONLY", "CAPITOL_EXPOSED_ONLY", "BARGO_FMP_MATCH", "HOUSE_OFFICIAL_VERIFIED", "SENATE_OFFICIAL_VERIFIED", "MULTI_SOURCE_VERIFIED", "CONFLICT", "PENDING_VERIFICATION"]);
 
 const createdUpdated = () => ({
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -796,6 +796,31 @@ export const politicalClusters = pgTable("political_clusters", {
 export const politicalDataVerifications = pgTable("political_data_verifications", {
   id: uuid("id").defaultRandom().primaryKey(), politicalTransactionId: uuid("political_transaction_id").references(() => politicalTransactions.id, { onDelete: "cascade" }).notNull(), status: politicalVerificationStatus("status").notNull(), sourceUrl: text("source_url"), providerPayload: jsonb("provider_payload").$type<Record<string, unknown>>().default({}).notNull(), officialPayload: jsonb("official_payload").$type<Record<string, unknown>>().default({}).notNull(), conflicts: jsonb("conflicts").$type<Array<Record<string, unknown>>>().default([]).notNull(), verifiedAt: timestamp("verified_at", { withTimezone: true }), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("political_verification_transaction_idx").on(table.politicalTransactionId, table.createdAt), index("political_verification_status_idx").on(table.status)]);
+
+export const politicalTransactionSources = pgTable("political_transaction_sources", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  politicalTransactionId: uuid("political_transaction_id").references(() => politicalTransactions.id, { onDelete: "cascade" }).notNull(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  externalId: varchar("external_id", { length: 240 }).notNull(),
+  sourceUrl: text("source_url"),
+  rawHash: varchar("raw_hash", { length: 64 }).notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+  verificationStatus: varchar("verification_status", { length: 48 }).notNull(),
+  rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+}, (table) => [uniqueIndex("political_transaction_source_unique").on(table.provider, table.externalId), index("political_transaction_source_transaction_idx").on(table.politicalTransactionId), index("political_transaction_source_status_idx").on(table.verificationStatus)]);
+
+export const politicalHistoryMonths = pgTable("political_history_months", {
+  month: varchar("month", { length: 7 }).primaryKey(),
+  status: varchar("status", { length: 24 }).notNull(),
+  recordCount: integer("record_count").default(0).notNull(),
+  houseRecords: integer("house_records").default(0).notNull(),
+  senateRecords: integer("senate_records").default(0).notNull(),
+  sources: jsonb("sources").$type<string[]>().default([]).notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
+  ...createdUpdated(),
+});
 
 export const politicalLeaderboardSnapshots = pgTable("political_leaderboard_snapshots", {
   id: uuid("id").defaultRandom().primaryKey(), period: varchar("period", { length: 16 }).notNull(), payload: jsonb("payload").$type<Record<string, unknown>>().notNull(), dataCompleteness: numeric("data_completeness", { precision: 8, scale: 4 }).notNull(), modelVersion: varchar("model_version", { length: 80 }).notNull(), calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull(), createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

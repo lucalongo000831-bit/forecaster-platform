@@ -2,7 +2,6 @@ import "server-only";
 
 import { deduplicatePoliticalTransactions } from "@/engines/political";
 import { structuredLog } from "@/lib/server/logger";
-import { politicalDataRouter } from "./political-data-router";
 import { persistPoliticalTransactions } from "./political-repository";
 import { publishDatasetSnapshot } from "@/services/data-v2/snapshot-repository";
 import { beginIngestionRun, finishIngestionRun, recordProviderWatermark } from "@/services/data-v2/ingestion-service";
@@ -12,15 +11,21 @@ import { normalizePoliticalRows } from "./political-data-router";
 import { eq } from "drizzle-orm";
 import { getDatabase, isDatabaseConfigured, politicalTransactions, providerWatermarks } from "@/db";
 import { advancePoliticalBackfill, initialPoliticalBackfillPage } from "./political-backfill";
+import { politicalSourceRouter } from "./political-source-router";
+import { calculatePoliticalHistoryMonths } from "./political-history-coverage";
+import { persistPoliticalHistoryMonths } from "./political-repository";
+import type { ResolvedInstrument } from "@/types";
 
 export async function syncPoliticalDisclosures(options: { limit?: number } = {}) {
-  const runId = await beginIngestionRun("fmp-political-disclosures", "political_disclosures", "fmp", "30 6 * * *");
+  const runId = await beginIngestionRun("political-source-router-recent", "political_disclosures", null, "30 6 * * *");
   const limit = Math.min(500, Math.max(20, options.limit ?? 100));
   try {
-  const [house, senate] = await Promise.all([politicalDataRouter.getLatestHouseTrades(limit), politicalDataRouter.getLatestSenateTrades(limit)]);
-  const deduped = deduplicatePoliticalTransactions([...house.transactions, ...senate.transactions]); const byId = new Map([...house.politicians, ...senate.politicians].map((item) => [item.id, item]));
-  const persistence = await persistPoliticalTransactions({ transactions: deduped.data, politicians: [...byId.values()], houseRecords: house.transactions.length, senateRecords: senate.transactions.length, duplicatesRemoved: deduped.duplicatesRemoved + house.duplicatesRemoved + senate.duplicatesRemoved }).catch((error) => { structuredLog("warn", "political.ingestion.persistence_failed", { code: error instanceof Error ? error.name : "UNKNOWN" }); return { persisted: false, transactions: 0, mapped: deduped.data.filter((row) => row.resolutionStatus === "RESOLVED").length, unresolved: deduped.data.filter((row) => row.resolutionStatus === "UNRESOLVED_ASSET").length }; });
-  const result = { fetched: house.transactions.length + senate.transactions.length, normalized: deduped.data.length, duplicatesRemoved: deduped.duplicatesRemoved, house: house.transactions.length, senate: senate.transactions.length, ...persistence, lastSuccessfulSync: new Date().toISOString() };
+  const to = new Date().toISOString().slice(0, 10); const from = new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const routed = await politicalSourceRouter.recent({ from, to, limit });
+  if (!routed.operational) throw new Error("POLITICAL_OPERATIONAL_SOURCES_UNAVAILABLE");
+  const normalized = await normalizePoliticalRows(routed.rows, routed.fetchedAt); const deduped = deduplicatePoliticalTransactions(normalized.transactions); const byId = new Map(normalized.politicians.map((item) => [item.id, item]));
+  const persistence = await persistPoliticalTransactions({ transactions: deduped.data, sourceTransactions: deduped.sourceRows, politicians: [...byId.values()], houseRecords: deduped.data.filter((row) => row.chamber === "HOUSE").length, senateRecords: deduped.data.filter((row) => row.chamber === "SENATE").length, duplicatesRemoved: deduped.duplicatesRemoved + normalized.duplicatesRemoved }).catch((error) => { structuredLog("warn", "political.ingestion.persistence_failed", { code: error instanceof Error ? error.name : "UNKNOWN" }); return { persisted: false, transactions: 0, mapped: deduped.data.filter((row) => row.resolutionStatus === "RESOLVED").length, unresolved: deduped.data.filter((row) => row.resolutionStatus === "UNRESOLVED_ASSET").length }; });
+  const result = { status: routed.degraded ? "SUCCESS_DEGRADED" as const : "SUCCESS" as const, fetched: routed.rows.length, normalized: deduped.data.length, duplicatesRemoved: deduped.duplicatesRemoved, house: deduped.data.filter((row) => row.chamber === "HOUSE").length, senate: deduped.data.filter((row) => row.chamber === "SENATE").length, sourceAttempts: routed.attempts, ...persistence, lastSuccessfulSync: new Date().toISOString() };
   const health = await getPoliticalSyncHealth();
   await publishDatasetSnapshot({ dataset: "political_disclosures", payload: { records: deduped.data, politicians: [...byId.values()], history: { earliestDisclosureDate: health.earliestDisclosure, latestDisclosureDate: health.latestDisclosure, historyDays: health.historyDays, historyYears: health.historyYears, records: health.totalRecords } } as unknown as Record<string, unknown>, recordCount: health.totalRecords, coverage: health.mappingRate, sourceSucceeded: result.fetched > 0, schemaValid: true, allowVerifiedEmpty: false, sourceTimestamp: result.lastSuccessfulSync, expiresAt: new Date(Date.now() + 24 * 3_600_000).toISOString(), freshness: "FRESH", schemaVersion: "political-disclosures-v2", modelVersion: "political-normalizer-v1" }).catch(() => undefined);
   await finishIngestionRun(runId, "COMPLETED", { fetched: result.fetched, inserted: result.transactions, skipped: result.duplicatesRemoved }, { watermark: { earliestDisclosure: health.earliestDisclosure, latestDisclosure: health.latestDisclosure, historyDays: health.historyDays }, mappingRate: health.mappingRate, unresolved: health.unresolvedAssets });
@@ -30,6 +35,31 @@ export async function syncPoliticalDisclosures(options: { limit?: number } = {})
     await finishIngestionRun(runId, "FAILED", { errors: 1 }, { watermark: {} });
     throw error;
   }
+}
+
+export interface PoliticalV3BackfillOptions { from: string; to: string; resume?: boolean; dryRun?: boolean; batchDays?: number; maxPages?: number; pageSize?: number; chamber?: "HOUSE" | "SENATE"; }
+
+export async function backfillPoliticalHistoryV3(options: PoliticalV3BackfillOptions) {
+  const from = options.from.slice(0, 10); const to = options.to.slice(0, 10); const pageSize = Math.min(100, Math.max(10, options.pageSize ?? 100)); const maxPages = Math.min(500, Math.max(1, options.maxPages ?? 150));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new Error("INVALID_POLITICAL_BACKFILL_WINDOW");
+  const runId = options.dryRun ? null : await beginIngestionRun("political-v3-historical-backfill", "political_disclosures", "capitol-exposed", null); let fetched = 0; let processed = 0; let skipped = 0; let page = 1; const accumulated = [] as Awaited<ReturnType<typeof normalizePoliticalRows>>["transactions"]; const sources = ["capitol-exposed"]; const resolutionCache = new Map<string, ResolvedInstrument | null>();
+  try {
+    if (!isDatabaseConfigured() && !options.dryRun) return { status: "SKIPPED" as const, reason: "database-not-configured", fetched, processed };
+    if (options.resume && isDatabaseConfigured()) { const [saved] = await getDatabase().select().from(providerWatermarks).where(eq(providerWatermarks.dataset, "political_disclosures:history:v3")).limit(1); const parsed = Number(saved?.cursor ?? 1); if (Number.isInteger(parsed) && parsed > 0) page = parsed; }
+    const members = await politicalSourceRouter.getHistoricalMembers(); let reachedFrom = false; let hasMore = true;
+    for (let index = 0; index < maxPages && hasMore && !reachedFrom; index += 1, page += 1) {
+      const response = await politicalSourceRouter.historicalPage(page, pageSize, members); fetched += response.rows.length; hasMore = response.hasMore;
+      const eligible = response.rows.filter((row) => { const date = row.disclosureDate ?? row.transactionDate; return date >= from && date <= to && (!options.chamber || row.chamber === options.chamber); });
+      const normalized = await normalizePoliticalRows(eligible, response.fetchedAt, { resolveInstruments: !options.dryRun, resolutionCache }); accumulated.push(...normalized.transactions); skipped += normalized.invalidRecords + normalized.duplicatesRemoved;
+      if (!options.dryRun && normalized.transactions.length) { const persistence = await persistPoliticalTransactions({ transactions: normalized.transactions, politicians: normalized.politicians, houseRecords: normalized.transactions.filter((row) => row.chamber === "HOUSE").length, senateRecords: normalized.transactions.filter((row) => row.chamber === "SENATE").length, duplicatesRemoved: normalized.duplicatesRemoved }); processed += persistence.transactions; }
+      const validDates = response.rows.map((row) => row.disclosureDate ?? row.transactionDate).filter((value): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))).sort(); const oldest = validDates[0] ?? null; const newest = validDates.at(-1) ?? null; reachedFrom = Boolean(newest && newest < from);
+      if (!options.dryRun) await recordProviderWatermark("capitol-exposed", "political_disclosures:history:v3", true, oldest, { from, to, page, hasMore, reachedFrom, fetched, processed }, String(page + 1));
+    }
+    const deduped = deduplicatePoliticalTransactions(accumulated); const monthCoverage = calculatePoliticalHistoryMonths(deduped.data, from, to, sources); if (!options.dryRun) await persistPoliticalHistoryMonths(monthCoverage.map((month) => ({ ...month, metadata: { operationalSource: "capitol-exposed", officialVerification: "PARTIAL" } })));
+    const status = monthCoverage.every((month) => month.status === "AVAILABLE" || month.status === "PARTIAL") ? "COMPLETED" as const : "PARTIAL" as const; const health = await getPoliticalSyncHealth();
+    if (runId) await finishIngestionRun(runId, status, { fetched, inserted: processed, skipped }, { watermark: { from, to, page, earliestDisclosure: health.earliestDisclosure, latestDisclosure: health.latestDisclosure }, months: monthCoverage.length, dryRun: Boolean(options.dryRun) });
+    return { status, provider: "capitol-exposed" as const, fetched, processed, skipped, duplicatesRemoved: deduped.duplicatesRemoved, monthCoverage, health, dryRun: Boolean(options.dryRun) };
+  } catch (error) { if (runId) await finishIngestionRun(runId, "FAILED", { fetched, inserted: processed, skipped, errors: 1 }, { watermark: { from, to, page } }); throw error; }
 }
 
 export async function backfillPoliticalDisclosures(options: { targetDays?: number; maxPagesPerChamber?: number; pageSize?: number } = {}) {

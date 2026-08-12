@@ -33,8 +33,8 @@ export function normalizePoliticalDisclosure(disclosure: PoliticalDisclosure, fe
     disclosureDate: disclosure.disclosureDate, marketAvailableDate: disclosure.disclosureDate, disclosureDelayDays: disclosureDelayDays(disclosure.transactionDate, disclosure.disclosureDate),
     amountMin: amount.min, amountMax: amount.max, amountRangeRaw: disclosure.amountRange, estimatedAmount: amount.estimated, amountMethod: amount.method,
     priceAtTransaction: null, priceAtDisclosure: null, currentPrice: null, sharesEstimate: null,
-    source: "Financial Modeling Prep congressional disclosure data", sourceUrl: disclosure.sourceUrl, filingId: disclosure.filingId, filingType: disclosure.filingType,
-    provider: "fmp", fetchedAt, verified: false, verificationStatus: disclosure.sourceUrl ? "PENDING" : "PROVIDER_ONLY",
+    source: disclosure.sourceLabel ?? "Financial Modeling Prep congressional disclosure data", sourceUrl: disclosure.sourceUrl, filingId: disclosure.filingId, filingType: disclosure.filingType,
+    provider: disclosure.provider ?? "fmp", fetchedAt, verified: false, verificationStatus: disclosure.provider === "bargo" ? "BARGO_ONLY" : disclosure.provider === "capitol-exposed" ? "CAPITOL_EXPOSED_ONLY" : "FMP_ONLY",
     resolutionStatus: resolved ? "RESOLVED" : nonMarket || optionLike ? "NON_MARKET_ASSET" : "UNRESOLVED_ASSET",
     fingerprint: "", amendment: disclosure.amendment, createdAt: now, updatedAt: now,
   };

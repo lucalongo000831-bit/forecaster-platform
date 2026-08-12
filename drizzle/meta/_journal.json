@@ -64,6 +64,13 @@
       "when": 1786477450406,
       "tag": "0008_kairo_data_architecture_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786550400000,
+      "tag": "0009_political_data_sourcing_v3",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,7 @@ export interface ProviderHealthSnapshot {
   rateLimited: boolean;
 }
 
-const providers: ProviderName[] = ["massive", "fmp", "alpha-vantage", "eodhd", "finnhub", "coingecko", "sec-edgar", "esef", "yahoo"];
+const providers: ProviderName[] = ["massive", "fmp", "alpha-vantage", "eodhd", "finnhub", "coingecko", "sec-edgar", "esef", "yahoo", "bargo", "capitol-exposed"];
 const state = new Map<ProviderName, ProviderHealthSnapshot>(
   providers.map((provider) => [provider, { provider, healthy: null, lastSuccess: null, lastError: null, latencyMs: null, lastDataTimestamp: null, rateLimited: false }]),
 );

@@ -83,7 +83,7 @@ export async function getSymbolPoliticalIntelligence(symbolInput: string, filter
     clusters, performances, historicalStudy: performanceEngine.historicalStudy(priced, performances), priceHistory: chart?.data.points ?? [], timeline: politicalTimeline(priced, period === "5Y" || period === "3Y" ? "monthly" : "weekly"),
     chamberBreakdown: breakdown.chamber, partyBreakdown: breakdown.party, sectorBreakdown: breakdown.sector, politicianBreakdown: breakdown.politician,
     mostPurchased: rankAssets(priced, "PURCHASE"), mostSold: rankAssets(priced, "SALE"), unresolvedAssets: unresolved(priced),
-    sources: [{ provider: "fmp", label: "Financial Modeling Prep congressional disclosures", url: null, fetchedAt: loaded.fetchedAt, verificationStatus: priced.some((row) => row.verificationStatus === "OFFICIAL_SOURCE_VERIFIED") ? "OFFICIAL_SOURCE_VERIFIED" : "PROVIDER_ONLY" }],
+    sources: [...new Map(priced.map((row) => [row.provider, { provider: row.provider, label: row.provider === "fmp" ? "Financial Modeling Prep congressional disclosures" : row.provider === "bargo" ? "Bargo Congress API (secondary)" : "CapitolExposed Congress API (secondary historical)", url: row.provider === "bargo" ? "https://www.bargo.ai/free-apis/congress" : row.provider === "capitol-exposed" ? "https://www.capitolexposed.com/api-docs" : null, fetchedAt: row.fetchedAt, verificationStatus: row.verificationStatus }])).values()],
     limitations: [
       "Congressional financial disclosures may be reported after the transaction and commonly disclose value ranges rather than exact amounts.",
       "All post-disclosure analytics start on disclosureDate; transactionDate is never treated as market-available information.",

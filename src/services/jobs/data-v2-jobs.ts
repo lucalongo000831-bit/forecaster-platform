@@ -3,7 +3,7 @@ import "server-only";
 import { ingestCentralBankCalendar, ingestCftcPositioning, ingestEiaEnergyData, ingestFredEconomicData, ingestFredReleaseCalendar, ingestMarketauxNews } from "@/services/data-v2";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
 import { getGlobalRiskCurrent } from "@/services/global-risk";
-import { backfillPoliticalDisclosures } from "@/services/political";
+import { syncPoliticalDisclosures } from "@/services/political";
 import { runJob } from "./job-runner";
 
 export const DATA_V2_SCHEDULES = {
@@ -22,7 +22,7 @@ export type DataV2JobName = typeof DATA_V2_JOB_NAMES[number];
 
 export function monthWindow(now = new Date()) { return { from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10), to: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 3, 0)).toISOString().slice(0, 10) }; }
 
-export function requireSuccessfulPoliticalBackfill<T extends { status: "COMPLETED" | "PARTIAL" | "FAILED" | "SKIPPED" }>(result: T) {
+export function requireSuccessfulPoliticalBackfill<T extends { status: string }>(result: T) {
   if (result.status === "FAILED") throw new Error("POLITICAL_BACKFILL_FAILED");
   return result;
 }
@@ -47,7 +47,7 @@ export function runDataV2Job(name: DataV2JobName) {
   if (name === "economic") return runJob("data-v2-economic", () => ingestFredEconomicData(), { timeoutMs: 240_000, lockSeconds: 300 });
   if (name === "calendar") return runJob("data-v2-calendar", () => refreshCalendar(window.from, window.to), { timeoutMs: 120_000, lockSeconds: 180 });
   if (name === "central-bank") return runJob("data-v2-central-bank", async () => { const result = await ingestCentralBankCalendar(window.from, window.to); await getMarketCalendar(window.from, window.to, undefined, { force: true }); return result; }, { timeoutMs: 120_000, lockSeconds: 180 });
-  if (name === "political") return runJob("data-v2-political", () => backfillPoliticalDisclosures({ targetDays: 365, maxPagesPerChamber: 12 }).then(requireSuccessfulPoliticalBackfill), { timeoutMs: 240_000, lockSeconds: 300 });
+  if (name === "political") return runJob("data-v2-political", () => syncPoliticalDisclosures({ limit: 100 }).then(requireSuccessfulPoliticalBackfill), { timeoutMs: 240_000, lockSeconds: 300 });
   if (name === "energy") return runJob("data-v2-energy", () => ingestEiaEnergyData(), { timeoutMs: 180_000, lockSeconds: 300 });
   if (name === "cftc") return runJob("data-v2-cftc", () => ingestCftcPositioning(), { timeoutMs: 180_000, lockSeconds: 300 });
   if (name === "news") return runJob("data-v2-news", () => ingestMarketauxNews(), { timeoutMs: 120_000, lockSeconds: 180 });

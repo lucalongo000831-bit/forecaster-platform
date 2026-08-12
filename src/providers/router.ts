@@ -15,6 +15,7 @@ import { AlphaVantageNewsAdapter } from "./news/alpha-vantage-adapter";
 import { FmpNewsAdapter } from "./news/fmp-adapter";
 import { YahooNewsAdapter } from "./news/yahoo-adapter";
 import { FmpPoliticalAdapter } from "./political/fmp-adapter";
+import { BargoCongressAdapter } from "./political/bargo-adapter";
 import { FmpMacroAdapter } from "./macro/fmp-adapter";
 import { AlphaVantageMacroAdapter } from "./macro/alpha-vantage-adapter";
 import { FmpMarketDataAdapter } from "./market-data/fmp-adapter";
@@ -45,7 +46,7 @@ const marketAdapters = {
 } satisfies Record<"massive" | "yahoo" | "fmp" | "eodhd", MarketDataProvider>;
 const fundamentalAdapters = { fmp: new FmpFundamentalsAdapter(), eodhd: new EodhdFundamentalsAdapter(), "sec-edgar": new SecEdgarFundamentalsAdapter(), yahoo: new YahooFundamentalsAdapter() } satisfies Record<"fmp" | "eodhd" | "sec-edgar" | "yahoo", FundamentalsProvider>;
 const newsAdapters = { "alpha-vantage": new AlphaVantageNewsAdapter(), fmp: new FmpNewsAdapter(), yahoo: new YahooNewsAdapter() } satisfies Record<"alpha-vantage" | "fmp" | "yahoo", NewsProvider>;
-const politicalAdapters = { fmp: new FmpPoliticalAdapter() } satisfies Record<"fmp", PoliticalProvider>;
+const politicalAdapters = { fmp: new FmpPoliticalAdapter(), bargo: new BargoCongressAdapter() } satisfies Record<"fmp" | "bargo", PoliticalProvider>;
 const macroAdapters = { fmp: new FmpMacroAdapter(), "alpha-vantage": new AlphaVantageMacroAdapter() } satisfies Record<"fmp" | "alpha-vantage", MacroProvider>;
 const capabilityBlocks = new Map<string, number>();
 
@@ -280,14 +281,14 @@ export class FinancialProviderRouter {
 
   senateTrades(symbolInput?: string, limit = 100) {
     const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
-    const adapter = politicalAdapters.fmp;
-    return providerCached(`political:senate:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("senate-trades", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getSenateTrades(symbol, limit) }]));
+    const order = [politicalAdapters.fmp, politicalAdapters.bargo];
+    return providerCached(`political:senate:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("senate-trades", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getSenateTrades(symbol, limit) }))));
   }
 
   houseTrades(symbolInput?: string, limit = 100) {
     const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
-    const adapter = politicalAdapters.fmp;
-    return providerCached(`political:house:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("house-trades", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getHouseTrades(symbol, limit) }]));
+    const order = [politicalAdapters.fmp, politicalAdapters.bargo];
+    return providerCached(`political:house:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("house-trades", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getHouseTrades(symbol, limit) }))));
   }
 
   macroIndicator(indicator: "INFLATION" | "RATES" | "GDP" | "EMPLOYMENT") {
@@ -301,6 +302,8 @@ export class FinancialProviderRouter {
       { provider: "fmp", configured: marketAdapters.fmp.isConfigured(), capabilities: ["profile", "statements", "ratios", "analyst-consensus", "earnings-calendar", "dividends-calendar", "economic-calendar", "house-disclosures", "senate-disclosures", "quote-fallback"], limitations: ["endpoint availability depends on subscription", "congressional disclosures may be delayed and amount-ranged", "daily fallback bars"] },
       { provider: "alpha-vantage", configured: newsAdapters["alpha-vantage"].isConfigured(), capabilities: ["ticker-news", "topic-news", "sentiment"], limitations: ["strict free-tier quotas", "coverage varies by symbol"] },
       { provider: "massive", configured: marketAdapters.massive.isConfigured(), capabilities: ["US snapshots", "US aggregate bars", "US market status", "US search"], limitations: ["US adapter only", "realtime depends on subscription", "5 calls/minute conservative limit"] },
+      { provider: "bargo", configured: true, capabilities: ["recent congressional disclosures", "cross-source validation"], limitations: ["secondary source", "keyless history limited to about 3 months", "attribution required"] },
+      { provider: "capitol-exposed", configured: true, capabilities: ["historical congressional disclosures", "paginated archive"], limitations: ["secondary source", "official verification remains separate", "attribution requested"] },
     ];
   }
 }

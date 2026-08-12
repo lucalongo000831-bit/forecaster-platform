@@ -9,7 +9,7 @@ import { normalizePoliticianName } from "@/engines/political";
 import { normalizePoliticalDisclosure } from "./political-normalizer";
 import { loadPersistedPoliticalTransactions } from "./political-repository";
 
-interface LoadedPoliticalData { transactions: PoliticalTransaction[]; politicians: Politician[]; duplicatesRemoved: number; duplicateRate: number; fetchedAt: string; invalidRecords: number; }
+interface LoadedPoliticalData { transactions: PoliticalTransaction[]; sourceTransactions?: PoliticalTransaction[]; politicians: Politician[]; duplicatesRemoved: number; duplicateRate: number; fetchedAt: string; invalidRecords: number; }
 
 async function settle<T>(task: Promise<{ data: T; meta: { fetchedAt: string } }>) { try { return await task; } catch { return null; } }
 
@@ -19,11 +19,11 @@ async function resolvePoliticalInstrument(symbol: string): Promise<ResolvedInstr
   return { canonicalSymbol: symbol, name: profile.name, kind: profile.quoteType.toUpperCase().includes("ETF") ? "ETF" : "EQUITY", exchange: profile.exchange, mic: null, currency: profile.currency, tradingCurrency: profile.currency, countryCode: profile.country, issuer: { legalName: profile.name, countryCode: profile.country, lei: null, cik: null, isin: null, website: profile.website, sector: profile.sector, industry: profile.industry }, mappings: [{ provider: result.meta.provider, symbol, exchangeCode: profile.exchange, providerInstrumentId: null, confidence: .9, verifiedAt: result.meta.fetchedAt }], resolutionQuality: result.meta.quality, warnings: [] };
 }
 
-export async function normalizePoliticalRows(rows: PoliticalDisclosure[], fetchedAt: string): Promise<LoadedPoliticalData> {
+export async function normalizePoliticalRows(rows: PoliticalDisclosure[], fetchedAt: string, options: { resolveInstruments?: boolean; resolutionCache?: Map<string, ResolvedInstrument | null> } = {}): Promise<LoadedPoliticalData> {
   const symbols = [...new Set(rows.map((row) => row.symbol?.trim().toUpperCase()).filter((symbol): symbol is string => Boolean(symbol && /^[A-Z0-9.^=-]{1,32}$/.test(symbol))))];
-  const resolutions = new Map<string, ResolvedInstrument | null>();
-  for (let index = 0; index < symbols.length; index += 8) {
-    const batch = symbols.slice(index, index + 8);
+  const resolutions = options.resolutionCache ?? new Map<string, ResolvedInstrument | null>();
+  if (options.resolveInstruments !== false) for (let index = 0; index < symbols.length; index += 8) {
+    const batch = symbols.slice(index, index + 8).filter((symbol) => !resolutions.has(symbol));
     const resolved = await Promise.all(batch.map(resolvePoliticalInstrument));
     batch.forEach((symbol, position) => resolutions.set(symbol, resolved[position] ?? null));
   }
@@ -33,9 +33,9 @@ export async function normalizePoliticalRows(rows: PoliticalDisclosure[], fetche
   for (const transaction of deduped.data) {
     if (politicianMap.has(transaction.politicianId)) continue;
     const name = normalizePoliticianName(transaction.politicianName);
-    politicianMap.set(transaction.politicianId, { id: transaction.politicianId, normalizedName: name.normalizedName, displayName: transaction.politicianName, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, activeStatus: "UNKNOWN", sourceIdentifiers: { fmp: transaction.politicianId }, createdAt: transaction.createdAt, updatedAt: transaction.updatedAt });
+    politicianMap.set(transaction.politicianId, { id: transaction.politicianId, normalizedName: name.normalizedName, displayName: transaction.politicianName, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, activeStatus: "UNKNOWN", sourceIdentifiers: { [transaction.provider]: transaction.sourceId }, createdAt: transaction.createdAt, updatedAt: transaction.updatedAt });
   }
-  return { transactions: deduped.data, politicians: [...politicianMap.values()], duplicatesRemoved: deduped.duplicatesRemoved, duplicateRate: deduped.duplicateRate, fetchedAt, invalidRecords };
+  return { transactions: deduped.data, sourceTransactions: deduped.sourceRows, politicians: [...politicianMap.values()], duplicatesRemoved: deduped.duplicatesRemoved, duplicateRate: deduped.duplicateRate, fetchedAt, invalidRecords };
 }
 
 function filterTransactions(transactions: PoliticalTransaction[], filters: PoliticalFilters) {

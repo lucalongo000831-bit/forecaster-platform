@@ -4,7 +4,7 @@ export type PoliticalChamber = "HOUSE" | "SENATE" | "UNKNOWN";
 export type PoliticalParty = "DEMOCRATIC" | "REPUBLICAN" | "INDEPENDENT" | "OTHER" | "UNKNOWN";
 export type PoliticalOwnerType = "SELF" | "SPOUSE" | "DEPENDENT" | "JOINT" | "TRUST" | "OTHER" | "UNKNOWN";
 export type PoliticalTransactionType = "PURCHASE" | "SALE_FULL" | "SALE_PARTIAL" | "SALE" | "EXCHANGE" | "OPTION" | "OTHER" | "UNKNOWN";
-export type PoliticalVerificationStatus = "PROVIDER_ONLY" | "OFFICIAL_SOURCE_VERIFIED" | "SOURCE_MISMATCH" | "PENDING" | "UNVERIFIABLE";
+export type PoliticalVerificationStatus = "PROVIDER_ONLY" | "OFFICIAL_SOURCE_VERIFIED" | "SOURCE_MISMATCH" | "PENDING" | "UNVERIFIABLE" | "BARGO_ONLY" | "FMP_ONLY" | "CAPITOL_EXPOSED_ONLY" | "BARGO_FMP_MATCH" | "HOUSE_OFFICIAL_VERIFIED" | "SENATE_OFFICIAL_VERIFIED" | "MULTI_SOURCE_VERIFIED" | "CONFLICT" | "PENDING_VERIFICATION";
 export type PoliticalAmountMethod = "EXACT" | "MIDPOINT_ESTIMATE" | "UNKNOWN";
 export type PoliticalDirection = "STRONG_BUYING" | "BUYING" | "BALANCED" | "NEUTRAL" | "SELLING" | "STRONG_SELLING" | "INSUFFICIENT_DATA";
 export type PoliticalConfidence = "VERY_LOW" | "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH";
@@ -77,7 +77,7 @@ export interface PoliticalTransaction {
   sourceUrl: string | null;
   filingId: string | null;
   filingType: string | null;
-  provider: "fmp";
+  provider: "fmp" | "bargo" | "capitol-exposed";
   fetchedAt: string;
   verified: boolean;
   verificationStatus: PoliticalVerificationStatus;
@@ -86,6 +86,17 @@ export interface PoliticalTransaction {
   amendment: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type PoliticalHistoryMonthStatus = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "NOT_CHECKED";
+export interface PoliticalHistoryMonthCoverage {
+  month: string;
+  status: PoliticalHistoryMonthStatus;
+  recordCount: number;
+  houseRecords: number;
+  senateRecords: number;
+  sources: string[];
+  checkedAt: string | null;
 }
 
 export interface PoliticalTradePerformance {

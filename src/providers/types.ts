@@ -16,7 +16,9 @@ export type ProviderName =
   | "finnhub"
   | "coingecko"
   | "sec-edgar"
-  | "esef";
+  | "esef"
+  | "bargo"
+  | "capitol-exposed";
 export type DataFreshness = "realtime" | "delayed" | "cached" | "stale";
 export type FreshnessType = "REALTIME" | "NEAR_REALTIME" | "DELAYED" | "CACHED" | "END_OF_DAY" | "STALE" | "UNAVAILABLE";
 export type DataQuality = "verified" | "partial" | "estimated" | "unavailable";
@@ -176,6 +178,8 @@ export interface PoliticalDisclosure {
   filingId: string | null;
   filingType: string | null;
   amendment: boolean;
+  provider?: "fmp" | "bargo" | "capitol-exposed";
+  sourceLabel?: string;
 }
 
 export interface MacroObservation {
