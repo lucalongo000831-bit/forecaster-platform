@@ -6,7 +6,7 @@ import {
   newsEntities, newsItems, normalizedEconomicObservations, positioningObservations, providerWatermarks,
 } from "@/db";
 import { structuredLog } from "@/lib/server/logger";
-import { blsAdapter, cftcAdapter, eiaAdapter, fredAdapter, marketauxAdapter, numericValue, officialCentralBankCalendarAdapter, parseEcbMeetings, parseFederalReserveMeetings } from "@/providers/data-v2";
+import { blsAdapter, cftcAdapter, eiaAdapter, fredAdapter, fredCoreMacroReleases, marketauxAdapter, numericValue, officialCentralBankCalendarAdapter, parseEcbMeetings, parseFederalReserveMeetings } from "@/providers/data-v2";
 import { ProviderGatewayError } from "@/providers/gateway-v2";
 import { economicSeriesRegistry, seriesByProvider, type EconomicSeriesDefinition } from "@/providers/data-v2/series-registry";
 import { persistRawProviderRecord, publishDatasetSnapshot } from "./snapshot-repository";
@@ -143,22 +143,25 @@ export async function ingestFredReleaseCalendar(from: string, to: string) {
   const runId = await beginRun("fred-release-calendar", "economic_release_events", "fred", "15 */6 * * *"); let inserted = 0;
   try {
     if (!isDatabaseConfigured()) return { status: "SKIPPED" as const, inserted };
-    const rows: Array<{ release_id: number; release_name: string; date: string }> = [];
-    let offset = 0; let totalAvailable = 0;
-    do {
-      const result = await fredAdapter.releaseDates(from, to, offset); totalAvailable = result.data.count;
-      rows.push(...result.data.release_dates.filter((release) => release.date >= from && release.date <= to));
-      const oldestDate = result.data.release_dates.at(-1)?.date;
-      offset += result.data.release_dates.length;
-      if (!result.data.release_dates.length || (oldestDate && oldestDate < from)) break;
-    } while (offset < totalAvailable && offset < 10_000);
-    await persistRawProviderRecord({ provider: "fred", dataset: "economic_release_dates", entityKey: `${from}:${to}`, payload: { from, to, totalAvailable, rows }, schemaVersion: "fred-release-dates-v2" });
+    const settled = await Promise.allSettled(fredCoreMacroReleases.map(async (release) => {
+      const result = await fredAdapter.releaseDates(release.id, from, to);
+      return result.data.release_dates.filter((item) => item.date >= from && item.date <= to).map((item) => ({ ...item, release_name: release.name }));
+    }));
+    const errors = settled.filter((result) => result.status === "rejected").length;
+    const rows = [...new Map(settled.flatMap((result) => result.status === "fulfilled" ? result.value : []).map((release) => [`${release.release_id}:${release.date}`, release])).values()]
+      .sort((left, right) => left.date.localeCompare(right.date) || left.release_id - right.release_id);
+    const successfulReleases = fredCoreMacroReleases.length - errors;
+    if (!successfulReleases) throw new ProviderGatewayError("UPSTREAM_5XX", "FRED core release calendar unavailable", true, 503);
+    await persistRawProviderRecord({ provider: "fred", dataset: "economic_release_dates", entityKey: `${from}:${to}`, payload: { from, to, coreReleases: fredCoreMacroReleases, successfulReleases, rows }, schemaVersion: "fred-release-dates-v3" });
     const eventRows = rows.map((release) => ({ provider: "fred", sourceId: `${release.release_id}:${release.date}`, title: release.release_name, country: "US", importance: "HIGH" as const, scheduledAt: new Date(`${release.date}T13:30:00Z`), status: "AVAILABLE" as const, metadata: { releaseId: release.release_id, timePrecision: "DATE_WITH_DEFAULT_TIME" } }));
     for (const batch of chunksOf(eventRows)) {
       const stored = await getDatabase().insert(economicReleaseEvents).values(batch).onConflictDoNothing({ target: [economicReleaseEvents.provider, economicReleaseEvents.sourceId] }).returning({ id: economicReleaseEvents.id });
       inserted += stored.length;
     }
-    await watermark("fred", "economic_release_events", true, rows.at(-1)?.date ?? null, { from, to }); await finishRun(runId, "COMPLETED", { fetched: rows.length, inserted }); return { status: "COMPLETED" as const, fetched: rows.length, inserted };
+    const status: IngestionStatus = errors ? "PARTIAL" : "COMPLETED";
+    await watermark("fred", "economic_release_events", true, rows.at(-1)?.date ?? null, { from, to, coreReleases: fredCoreMacroReleases.length, successfulReleases, records: rows.length });
+    await finishRun(runId, status, { fetched: rows.length, inserted, skipped: Math.max(0, rows.length - inserted), errors }, { from, to, successfulReleases, watermark: { latestReleaseDate: rows.at(-1)?.date ?? null } });
+    return { status, fetched: rows.length, inserted, skipped: Math.max(0, rows.length - inserted), errors };
   } catch (error) { await watermark("fred", "economic_release_events", false); await finishRun(runId, "FAILED", { errors: 1 }); throw error; }
 }
 

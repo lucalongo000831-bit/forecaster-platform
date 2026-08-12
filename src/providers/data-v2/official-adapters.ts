@@ -15,6 +15,21 @@ const ecbSchema = z.record(z.string(), z.unknown());
 const eurostatSchema = z.object({ value: z.record(z.string(), z.number().nullable()).optional(), dimension: z.record(z.string(), z.unknown()).optional(), id: z.array(z.string()).optional(), size: z.array(z.number()).optional() }).passthrough();
 const officialDocumentSchema = z.string().min(200);
 
+export const fredCoreMacroReleases = [
+  { id: 9, name: "Advance Monthly Sales for Retail and Food Services" },
+  { id: 10, name: "Consumer Price Index" },
+  { id: 13, name: "Industrial Production and Capacity Utilization" },
+  { id: 27, name: "New Residential Construction" },
+  { id: 46, name: "Producer Price Index" },
+  { id: 47, name: "Productivity and Costs" },
+  { id: 50, name: "Employment Situation" },
+  { id: 51, name: "U.S. International Trade in Goods and Services" },
+  { id: 53, name: "Gross Domestic Product" },
+  { id: 54, name: "Personal Income and Outlays" },
+  { id: 97, name: "New Residential Sales" },
+  { id: 192, name: "Job Openings and Labor Turnover Survey" },
+] as const;
+
 export interface OfficialCentralBankMeeting {
   centralBank: "FEDERAL_RESERVE" | "ECB";
   country: "US" | "EU";
@@ -100,11 +115,11 @@ export class FredAdapter {
     return providerGatewayV2.execute({ provider: "fred", dataset: "economic_observations", operation: "series_observations", requestKey: `${seriesId}:${start ?? "latest"}`, schema: fredSchema, task: () => officialJson(url, {}, config.timeoutMs), cache: { freshSeconds: 3_600, staleSeconds: 86_400 }, retryCount: 1, requestMetadata: { url } });
   }
 
-  async releaseDates(start: string, end: string, offset = 0) {
-    const config = getKairoDataV2ProviderConfigs().fred; const url = new URL("/fred/releases/dates", config.baseUrl);
-    url.searchParams.set("api_key", requireValue(config.apiKey, "FRED")); url.searchParams.set("file_type", "json"); url.searchParams.set("realtime_start", start); url.searchParams.set("realtime_end", end); url.searchParams.set("include_release_dates_with_no_data", "true"); url.searchParams.set("limit", "1000"); url.searchParams.set("offset", String(Math.max(0, offset))); url.searchParams.set("order_by", "release_date"); url.searchParams.set("sort_order", "desc");
-    const schema = z.object({ count: z.number(), offset: z.number(), limit: z.number(), release_dates: z.array(z.object({ release_id: z.number(), release_name: z.string(), date: z.string() }).passthrough()) }).passthrough();
-    return providerGatewayV2.execute({ provider: "fred", dataset: "economic_release_dates", operation: "release_dates", requestKey: `${start}:${end}:${offset}`, schema, task: () => officialJson(url, {}, config.timeoutMs), cache: { freshSeconds: 21_600, staleSeconds: 172_800 }, requestMetadata: { url } });
+  async releaseDates(releaseId: number, start: string, end: string) {
+    const config = getKairoDataV2ProviderConfigs().fred; const url = new URL("/fred/release/dates", config.baseUrl);
+    url.searchParams.set("api_key", requireValue(config.apiKey, "FRED")); url.searchParams.set("file_type", "json"); url.searchParams.set("release_id", String(releaseId)); url.searchParams.set("realtime_start", start); url.searchParams.set("realtime_end", end); url.searchParams.set("include_release_dates_with_no_data", "true"); url.searchParams.set("limit", "10000"); url.searchParams.set("sort_order", "asc");
+    const schema = z.object({ count: z.number(), offset: z.number(), limit: z.number(), release_dates: z.array(z.object({ release_id: z.number(), date: z.string() }).passthrough()) }).passthrough();
+    return providerGatewayV2.execute({ provider: "fred", dataset: "economic_release_dates", operation: "release_dates", requestKey: `${releaseId}:${start}:${end}`, schema, task: () => officialJson(url, {}, config.timeoutMs), cache: { freshSeconds: 21_600, staleSeconds: 172_800 }, retryCount: 1, requestMetadata: { url } });
   }
 }
 
