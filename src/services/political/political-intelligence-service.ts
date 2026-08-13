@@ -4,10 +4,12 @@ import { PoliticalActivityEngine, PoliticalClusterEngine, PoliticalTradePerforma
 import { cacheGet, cacheSet } from "@/lib/server/redis";
 import { financialProviderRouter } from "@/providers";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
-import type { MarketChartPoint, PoliticalFilters, PoliticalIntelligenceReport, PoliticalLeaderboardReport, PoliticalPeriod, PoliticalTransaction, PoliticianActivityReport } from "@/types";
+import type { MarketChartPoint, PoliticalAssetProvenance, PoliticalFilters, PoliticalIntelligenceReport, PoliticalLeaderboardReport, PoliticalPeriod, PoliticalTransaction, PoliticianActivityReport } from "@/types";
 import { politicalDataRouter } from "./political-data-router";
 import { getPoliticalSyncHealth } from "./political-repository";
 import { politicalCoverage } from "./political-coverage";
+import { resolvePoliticalAssetContext } from "./political-asset-resolver";
+import { derivePoliticalAssetDataStatus, politicalAssetCacheKey } from "./political-asset-state";
 
 const activityEngine = new PoliticalActivityEngine(); const clusterEngine = new PoliticalClusterEngine(30); const performanceEngine = new PoliticalTradePerformanceEngine();
 const EMPTY_STUDY = performanceEngine.historicalStudy([], []);
@@ -65,19 +67,30 @@ function applyFilters(transactions: PoliticalTransaction[], filters: PoliticalFi
   });
 }
 
+const politicalPeriods: PoliticalPeriod[] = ["7D", "30D", "90D", "6M", "1Y", "3Y", "5Y", "MAX"];
+
+function availablePeriods(transactions: PoliticalTransaction[]) {
+  return politicalPeriods.filter((period) => filterPoliticalPeriod(transactions, period).length > 0);
+}
+
 export async function getSymbolPoliticalIntelligence(symbolInput: string, filters: PoliticalFilters = {}): Promise<PoliticalIntelligenceReport> {
   const symbol = normalizeSymbol(decodeURIComponent(symbolInput)); const period = filters.period ?? "90D"; const page = Math.max(1, filters.page ?? 1); const pageSize = Math.min(100, Math.max(10, filters.pageSize ?? 20));
-  const cacheKey = `political-intelligence:symbol:${symbol}:${period}`; let loaded = await cacheGet<Awaited<ReturnType<typeof politicalDataRouter.getTradesBySymbol>>>(cacheKey);
-  if (!loaded) { loaded = await politicalDataRouter.getTradesBySymbol(symbol, 500); await cacheSet(cacheKey, loaded, 3_600); }
+  const context = await resolvePoliticalAssetContext(symbol);
+  const cacheKey = politicalAssetCacheKey(context.cacheIdentity, period); let loaded = await cacheGet<Awaited<ReturnType<typeof politicalDataRouter.getTradesByAssetContext>>>(cacheKey);
+  if (!loaded) { loaded = await politicalDataRouter.getTradesByAssetContext(context, 5_000); await cacheSet(cacheKey, loaded, 900); }
   let periodRows = applyFilters(filterPoliticalPeriod(loaded.transactions, period), filters); let clusters = clusterEngine.analyze(periodRows);
   if (filters.clusterOnly) { const ids = new Set(clusters.flatMap((cluster) => cluster.transactionIds)); periodRows = periodRows.filter((row) => ids.has(row.id)); clusters = clusterEngine.analyze(periodRows); }
+  const marketSymbol = context.canonicalSymbol;
   const [chart, benchmark, quote, profile] = await Promise.all([
-    financialProviderRouter.analyticsChart(symbol, "5Y", "1d").catch(() => null), financialProviderRouter.analyticsChart("SPY", "5Y", "1d").catch(() => null),
-    financialProviderRouter.quote(symbol).catch(() => null), financialProviderRouter.profile(symbol).catch(() => null),
+    financialProviderRouter.analyticsChart(marketSymbol, "5Y", "1d").catch(() => null), financialProviderRouter.analyticsChart("SPY", "5Y", "1d").catch(() => null),
+    financialProviderRouter.quote(marketSymbol).catch(() => null), financialProviderRouter.profile(marketSymbol).catch(() => null),
   ]);
   const priced = chart ? enrichPrices(periodRows, chart.data.points, quote?.data.price ?? chart.data.points.at(-1)?.close ?? null) : periodRows;
   const performances = chart && benchmark ? priced.slice(0, 100).map((transaction) => performanceEngine.calculate(transaction, chart.data.points, benchmark.data.points)) : [];
   const summary = activityEngine.summarize(priced, period, clusters); const breakdown = breakdowns(priced); const ordered = sortedTransactions(priced, filters.sort); const health = await getPoliticalSyncHealth(); const coverage = politicalCoverage(period, priced, loaded.transactions, health);
+  const provenance: PoliticalAssetProvenance = { ...loaded.provenance, lastSuccessfulSync: health.lastSync };
+  const dataStatus = derivePoliticalAssetDataStatus({ recordCount: priced.length, context, provenance, coverage });
+  const resultStatus = dataStatus === "HAS_ACTIVITY" ? (provenance.databaseStatus === "AVAILABLE" ? "VERIFIED_ACTIVITY" : "PARTIAL_DATA") : dataStatus === "VERIFIED_ZERO" ? "VERIFIED_ZERO" : dataStatus === "UNRESOLVED_ASSET" ? "UNSUPPORTED" : dataStatus === "DATABASE_UNAVAILABLE" || dataStatus === "SOURCE_TEMPORARILY_UNAVAILABLE" ? "LAST_KNOWN_GOOD" : coverage.status;
   return {
     scope: "SYMBOL", symbol, name: profile?.data.name ?? quote?.data.name ?? symbol, period, summary, transactions: paginate(ordered, page, pageSize), totalTransactions: ordered.length, page, pageSize, totalPages: Math.max(1, Math.ceil(ordered.length / pageSize)),
     clusters, performances, historicalStudy: performanceEngine.historicalStudy(priced, performances), priceHistory: chart?.data.points ?? [], timeline: politicalTimeline(priced, period === "5Y" || period === "3Y" ? "monthly" : "weekly"),
@@ -89,8 +102,9 @@ export async function getSymbolPoliticalIntelligence(symbolInput: string, filter
       "All post-disclosure analytics start on disclosureDate; transactionDate is never treated as market-available information.",
       ...(loaded.invalidRecords ? [`${loaded.invalidRecords} provider records without a disclosure date were excluded from market-availability analytics.`] : []),
       ...(unresolved(priced).length ? [`${unresolved(priced).length} disclosed assets could not be mapped to a canonical market instrument.`] : []),
+      ...(provenance.databaseStatus !== "AVAILABLE" ? ["The canonical political database was unavailable; provider fallback responses cannot verify a true zero result."] : []),
       "Past post-disclosure performance does not imply future performance.",
-    ], calculatedAt: new Date().toISOString(), resultStatus: coverage.status, coverage,
+    ], calculatedAt: new Date().toISOString(), resultStatus, dataStatus, coverage, canonicalResolution: context, provenance, availablePeriods: availablePeriods(loaded.transactions), activityOutsideSelectedPeriod: loaded.transactions.length > 0 && priced.length === 0,
   };
 }
 

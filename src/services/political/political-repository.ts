@@ -1,15 +1,31 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { count, desc, eq, max, min, sql } from "drizzle-orm";
-import { getDatabase, isDatabaseConfigured, politicalFilings, politicalHistoryMonths, politicalSyncStates, politicalTransactions, politicalTransactionSources, politicians } from "@/db";
+import { count, desc, eq, inArray, max, min, or, sql } from "drizzle-orm";
+import { getDatabase, instruments, isDatabaseConfigured, politicalFilings, politicalHistoryMonths, politicalSyncStates, politicalTransactions, politicalTransactionSources, politicians } from "@/db";
 import { structuredLog } from "@/lib/server/logger";
-import { ensureInstrument } from "@/services/account/instrument-repository";
-import type { PoliticalTransaction, Politician } from "@/types";
+import { verifiedInstrumentKind } from "@/services/instruments/instrument-kind";
+import type { PoliticalAssetContext, PoliticalTransaction, Politician } from "@/types";
+import { ensurePoliticalAssetContext, resolvePoliticalAssetContext } from "./political-asset-resolver";
 
 const numeric = (value: number | null) => value === null ? null : String(value);
 const dateOnly = (value: Date) => value.toISOString().slice(0, 10);
 const numberOrNull = (value: string | null) => value === null ? null : Number(value);
+
+type PersistedPoliticalRow = {
+  transaction: typeof politicalTransactions.$inferSelect;
+  politician: typeof politicians.$inferSelect;
+};
+
+function mapPersistedRows(rows: PersistedPoliticalRow[]) {
+  const politicianMap = new Map<string, Politician>();
+  const transactions: PoliticalTransaction[] = rows.map(({ transaction: row, politician }) => {
+    politicianMap.set(politician.id, { id: politician.id, normalizedName: politician.normalizedName, displayName: politician.displayName, chamber: politician.chamber, party: politician.party, state: politician.state, district: politician.district, activeStatus: politician.activeStatus as Politician["activeStatus"], sourceIdentifiers: politician.sourceIdentifiers, createdAt: politician.createdAt.toISOString(), updatedAt: politician.updatedAt.toISOString() });
+    return { id: row.id, sourceId: row.sourceId, politicianId: row.politicianId, politicianName: politician.displayName, chamber: row.chamber, party: row.party, state: row.state, district: row.district, ownerType: row.ownerType, assetName: row.assetName, assetType: row.assetType, sector: row.sector, rawTicker: row.rawTicker, canonicalInstrumentId: row.instrumentId, canonicalIssuerId: row.canonicalIssuerId, symbol: row.symbol, transactionType: row.transactionType, transactionDate: dateOnly(row.transactionDate), disclosureDate: dateOnly(row.disclosureDate), marketAvailableDate: dateOnly(row.marketAvailableDate), disclosureDelayDays: row.disclosureDelayDays, amountMin: numberOrNull(row.amountMin), amountMax: numberOrNull(row.amountMax), amountRangeRaw: row.amountRangeRaw, estimatedAmount: numberOrNull(row.estimatedAmount), amountMethod: row.amountMethod as PoliticalTransaction["amountMethod"], priceAtTransaction: numberOrNull(row.priceAtTransaction), priceAtDisclosure: numberOrNull(row.priceAtDisclosure), currentPrice: numberOrNull(row.currentPrice), sharesEstimate: numberOrNull(row.sharesEstimate), source: row.source, sourceUrl: row.sourceUrl, filingId: row.filingId, filingType: row.filingType, provider: row.provider as PoliticalTransaction["provider"], fetchedAt: row.fetchedAt.toISOString(), verified: row.verified, verificationStatus: row.verificationStatus as PoliticalTransaction["verificationStatus"], resolutionStatus: row.resolutionStatus as PoliticalTransaction["resolutionStatus"], fingerprint: row.fingerprint, amendment: row.amendment, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  });
+  const fetchedAt = rows.length ? rows.map(({ transaction }) => transaction.fetchedAt).sort((a, b) => b.getTime() - a.getTime())[0]!.toISOString() : new Date().toISOString();
+  return { transactions, politicians: [...politicianMap.values()], fetchedAt };
+}
 
 export async function loadPersistedPoliticalTransactions(input: { symbol?: string; limit?: number } = {}) {
   if (!isDatabaseConfigured()) return null;
@@ -17,14 +33,92 @@ export async function loadPersistedPoliticalTransactions(input: { symbol?: strin
     const database = getDatabase(); const condition = input.symbol ? eq(politicalTransactions.symbol, input.symbol.toUpperCase()) : undefined;
     const rows = await database.select({ transaction: politicalTransactions, politician: politicians }).from(politicalTransactions).innerJoin(politicians, eq(politicalTransactions.politicianId, politicians.id)).where(condition).orderBy(desc(politicalTransactions.disclosureDate)).limit(Math.min(Math.max(input.limit ?? 500, 1), 2_000));
     if (!rows.length) return null;
-    const politicianMap = new Map<string, Politician>();
-    const transactions: PoliticalTransaction[] = rows.map(({ transaction: row, politician }) => {
-      politicianMap.set(politician.id, { id: politician.id, normalizedName: politician.normalizedName, displayName: politician.displayName, chamber: politician.chamber, party: politician.party, state: politician.state, district: politician.district, activeStatus: politician.activeStatus as Politician["activeStatus"], sourceIdentifiers: politician.sourceIdentifiers, createdAt: politician.createdAt.toISOString(), updatedAt: politician.updatedAt.toISOString() });
-      return { id: row.id, sourceId: row.sourceId, politicianId: row.politicianId, politicianName: politician.displayName, chamber: row.chamber, party: row.party, state: row.state, district: row.district, ownerType: row.ownerType, assetName: row.assetName, assetType: row.assetType, sector: row.sector, rawTicker: row.rawTicker, canonicalInstrumentId: row.instrumentId, canonicalIssuerId: row.canonicalIssuerId, symbol: row.symbol, transactionType: row.transactionType, transactionDate: dateOnly(row.transactionDate), disclosureDate: dateOnly(row.disclosureDate), marketAvailableDate: dateOnly(row.marketAvailableDate), disclosureDelayDays: row.disclosureDelayDays, amountMin: numberOrNull(row.amountMin), amountMax: numberOrNull(row.amountMax), amountRangeRaw: row.amountRangeRaw, estimatedAmount: numberOrNull(row.estimatedAmount), amountMethod: row.amountMethod as PoliticalTransaction["amountMethod"], priceAtTransaction: numberOrNull(row.priceAtTransaction), priceAtDisclosure: numberOrNull(row.priceAtDisclosure), currentPrice: numberOrNull(row.currentPrice), sharesEstimate: numberOrNull(row.sharesEstimate), source: row.source, sourceUrl: row.sourceUrl, filingId: row.filingId, filingType: row.filingType, provider: row.provider as PoliticalTransaction["provider"], fetchedAt: row.fetchedAt.toISOString(), verified: row.verified, verificationStatus: row.verificationStatus as PoliticalTransaction["verificationStatus"], resolutionStatus: row.resolutionStatus as PoliticalTransaction["resolutionStatus"], fingerprint: row.fingerprint, amendment: row.amendment, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
-    });
-    const fetchedAt = rows.map(({ transaction }) => transaction.fetchedAt).sort((a, b) => b.getTime() - a.getTime())[0]!.toISOString();
-    return { transactions, politicians: [...politicianMap.values()], duplicatesRemoved: 0, duplicateRate: 0, fetchedAt, invalidRecords: 0, status: "AVAILABLE" as const, isLastKnownGood: true };
+    return { ...mapPersistedRows(rows), duplicatesRemoved: 0, duplicateRate: 0, invalidRecords: 0, status: "AVAILABLE" as const, isLastKnownGood: true };
   } catch (error) { structuredLog("warn", "political.persistence.read_failed", { code: error instanceof Error ? error.name : "UNKNOWN" }); return null; }
+}
+
+export interface PoliticalAssetDatabaseResult {
+  transactions: PoliticalTransaction[];
+  politicians: Politician[];
+  fetchedAt: string;
+  databaseStatus: "AVAILABLE" | "NOT_CONFIGURED" | "UNAVAILABLE";
+  matchStrategy: PoliticalAssetContext["matchStrategy"];
+  matchedAliases: string[];
+}
+
+/**
+ * Canonical asset lookup. Equity activity follows the issuer across listings;
+ * ETF, fund and crypto activity remains attached to the disclosed instrument.
+ */
+export async function loadPoliticalTransactionsForAsset(context: PoliticalAssetContext, limit = 2_000): Promise<PoliticalAssetDatabaseResult> {
+  const empty = (databaseStatus: PoliticalAssetDatabaseResult["databaseStatus"]): PoliticalAssetDatabaseResult => ({ transactions: [], politicians: [], fetchedAt: new Date().toISOString(), databaseStatus, matchStrategy: context.matchStrategy, matchedAliases: context.aliases });
+  if (!isDatabaseConfigured()) return empty("NOT_CONFIGURED");
+  try {
+    const database = getDatabase();
+    const aliases = context.aliases.length ? context.aliases : [context.canonicalSymbol];
+    let condition;
+    if (context.assetClass === "EQUITY" && context.issuerId) {
+      const issuerInstruments = await database.select({ id: instruments.id }).from(instruments).where(eq(instruments.issuerId, context.issuerId));
+      const instrumentIds = issuerInstruments.map((row) => row.id);
+      condition = instrumentIds.length
+        ? or(eq(politicalTransactions.canonicalIssuerId, context.issuerId), inArray(politicalTransactions.instrumentId, instrumentIds), inArray(politicalTransactions.symbol, aliases))
+        : or(eq(politicalTransactions.canonicalIssuerId, context.issuerId), inArray(politicalTransactions.symbol, aliases));
+    } else if (context.instrumentId) {
+      condition = or(eq(politicalTransactions.instrumentId, context.instrumentId), inArray(politicalTransactions.symbol, aliases));
+    } else {
+      condition = inArray(politicalTransactions.symbol, aliases);
+    }
+    const rows = await database.select({ transaction: politicalTransactions, politician: politicians }).from(politicalTransactions)
+      .innerJoin(politicians, eq(politicalTransactions.politicianId, politicians.id))
+      .where(condition).orderBy(desc(politicalTransactions.disclosureDate)).limit(Math.min(Math.max(limit, 1), 5_000));
+    structuredLog("info", "political.asset.database_lookup", { canonicalSymbol: context.canonicalSymbol, assetClass: context.assetClass, matchStrategy: context.matchStrategy, records: rows.length });
+    return { ...mapPersistedRows(rows), databaseStatus: "AVAILABLE", matchStrategy: context.matchStrategy, matchedAliases: aliases };
+  } catch (error) {
+    structuredLog("warn", "political.asset.database_lookup_failed", { canonicalSymbol: context.canonicalSymbol, code: error instanceof Error ? error.name : "UNKNOWN" });
+    return empty("UNAVAILABLE");
+  }
+}
+
+export async function repairPoliticalAssetMappings(symbolInputs: string[]) {
+  if (!isDatabaseConfigured()) throw new Error("Political database is not configured.");
+  const database = getDatabase();
+  const requested = [...new Set(symbolInputs.map((symbol) => symbol.trim()).filter(Boolean))];
+  const seedContexts: PoliticalAssetContext[] = [];
+  for (const symbol of requested) {
+    const inspected = await resolvePoliticalAssetContext(symbol);
+    seedContexts.push(inspected.instrumentId && (inspected.assetClass !== "EQUITY" || inspected.issuerId) ? inspected : await ensurePoliticalAssetContext(symbol));
+  }
+  for (const context of seedContexts) if (context.instrumentId) {
+    await database.update(instruments).set({ type: context.assetClass, issuerId: context.assetClass === "EQUITY" ? context.issuerId : null, updatedAt: new Date() }).where(eq(instruments.id, context.instrumentId));
+  }
+  const aliases = [...new Set(seedContexts.flatMap((context) => context.aliases))];
+  const rows = aliases.length
+    ? await database.selectDistinct({ symbol: politicalTransactions.symbol, assetType: politicalTransactions.assetType }).from(politicalTransactions).where(inArray(politicalTransactions.symbol, aliases))
+    : [];
+  let updated = 0;
+  const repaired: Array<{ symbol: string; instrumentId: string | null; issuerId: string | null; assetClass: string; rows: number }> = [];
+  for (const row of rows) {
+    if (!row.symbol) continue;
+    const expectedKind = expectedAssetKind({ assetType: row.assetType, symbol: row.symbol });
+    const inspected = await resolvePoliticalAssetContext(row.symbol);
+    const context = inspected.instrumentId && inspected.assetClass === expectedKind && (expectedKind !== "EQUITY" || inspected.issuerId) ? inspected : await ensurePoliticalAssetContext(row.symbol, expectedKind);
+    const changed = await database.update(politicalTransactions).set({ instrumentId: context.instrumentId, canonicalIssuerId: context.assetClass === "EQUITY" ? context.issuerId : null, resolutionStatus: context.instrumentId ? "RESOLVED" : "UNRESOLVED_ASSET", updatedAt: new Date() }).where(eq(politicalTransactions.symbol, row.symbol)).returning({ id: politicalTransactions.id });
+    updated += changed.length;
+    repaired.push({ symbol: row.symbol, instrumentId: context.instrumentId, issuerId: context.issuerId, assetClass: context.assetClass, rows: changed.length });
+  }
+  for (const context of seedContexts) if (!repaired.some((row) => row.symbol === context.requestedSymbol)) repaired.push({ symbol: context.requestedSymbol, instrumentId: context.instrumentId, issuerId: context.issuerId, assetClass: context.assetClass, rows: 0 });
+  structuredLog("info", "political.asset.mapping_repair", { requested: requested.length, aliases: aliases.length, updated, instruments: repaired.length });
+  return { requested, aliases, updated, repaired };
+}
+
+function expectedAssetKind(transaction: Pick<PoliticalTransaction, "assetType" | "symbol">) {
+  const verified = transaction.symbol ? verifiedInstrumentKind(transaction.symbol, transaction.assetType, transaction.assetType) : null;
+  if (verified) return verified;
+  const type = transaction.assetType?.toUpperCase() ?? "";
+  if (transaction.symbol?.endsWith("-USD") || type.includes("CRYPTO")) return "CRYPTO" as const;
+  if (type.includes("ETF")) return "ETF" as const;
+  if (type.includes("FUND")) return "FUND" as const;
+  return "EQUITY" as const;
 }
 
 export async function persistPoliticalTransactions(input: { transactions: PoliticalTransaction[]; sourceTransactions?: PoliticalTransaction[]; politicians: Politician[]; houseRecords: number; senateRecords: number; duplicatesRemoved: number }) {
@@ -35,16 +129,16 @@ export async function persistPoliticalTransactions(input: { transactions: Politi
     structuredLog("warn", "political.persistence.suspicious_empty_rejected", { previousRecords: (previousSync?.houseRecords ?? 0) + (previousSync?.senateRecords ?? 0) });
     return { persisted: false, transactions: 0, mapped: previousSync?.mappedInstruments ?? 0, unresolved: previousSync?.unresolvedAssets ?? 0, rejectedReason: "SUSPICIOUS_EMPTY" as const };
   }
-  const instrumentsBySymbol = new Map<string, Awaited<ReturnType<typeof ensureInstrument>>>(); let stored = 0; let mapped = 0;
+  const instrumentsBySymbol = new Map<string, PoliticalAssetContext>(); let stored = 0; let mapped = 0;
   for (const politician of input.politicians) await database.insert(politicians).values({ id: politician.id, normalizedName: politician.normalizedName, displayName: politician.displayName, chamber: politician.chamber, party: politician.party, state: politician.state, district: politician.district, activeStatus: politician.activeStatus, sourceIdentifiers: politician.sourceIdentifiers }).onConflictDoUpdate({ target: politicians.id, set: { displayName: politician.displayName, chamber: politician.chamber, party: politician.party, state: politician.state, district: politician.district, sourceIdentifiers: politician.sourceIdentifiers, updatedAt: new Date() } });
   for (const transaction of input.transactions) {
     let instrument = transaction.symbol ? instrumentsBySymbol.get(transaction.symbol) : undefined;
-    if (!instrument && transaction.symbol && transaction.resolutionStatus === "RESOLVED") { instrument = await ensureInstrument({ symbol: transaction.symbol, name: transaction.assetName, type: transaction.symbol.endsWith("-USD") ? "CRYPTO" : "EQUITY" }).catch(() => undefined); if (instrument) instrumentsBySymbol.set(transaction.symbol, instrument); }
+    if (!instrument && transaction.symbol && transaction.resolutionStatus === "RESOLVED") { instrument = await ensurePoliticalAssetContext(transaction.symbol, expectedAssetKind(transaction)).catch(() => undefined); if (instrument) instrumentsBySymbol.set(transaction.symbol, instrument); }
     let filingId: string | null = null;
     const filingSourceId = transaction.filingId ?? transaction.sourceId;
     const [filing] = await database.insert(politicalFilings).values({ politicianId: transaction.politicianId, provider: transaction.provider, sourceId: filingSourceId, filingType: transaction.filingType, disclosureDate: new Date(`${transaction.disclosureDate}T00:00:00Z`), sourceUrl: transaction.sourceUrl, amendment: transaction.amendment, fetchedAt: new Date(transaction.fetchedAt), payload: { sourceId: transaction.sourceId } }).onConflictDoUpdate({ target: [politicalFilings.provider, politicalFilings.sourceId], set: { sourceUrl: transaction.sourceUrl, amendment: transaction.amendment, fetchedAt: new Date(transaction.fetchedAt), updatedAt: new Date() } }).returning({ id: politicalFilings.id });
     filingId = filing?.id ?? (await database.select({ id: politicalFilings.id }).from(politicalFilings).where(eq(politicalFilings.sourceId, filingSourceId)).limit(1))[0]?.id ?? null;
-    const values = { sourceId: transaction.sourceId, fingerprint: transaction.fingerprint, politicianId: transaction.politicianId, filingId, instrumentId: instrument?.id ?? null, canonicalIssuerId: instrument?.issuerId ?? null, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, ownerType: transaction.ownerType, assetName: transaction.assetName, assetType: transaction.assetType, rawTicker: transaction.rawTicker, symbol: transaction.symbol, sector: transaction.sector, transactionType: transaction.transactionType, transactionDate: new Date(`${transaction.transactionDate}T00:00:00Z`), disclosureDate: new Date(`${transaction.disclosureDate}T00:00:00Z`), marketAvailableDate: new Date(`${transaction.marketAvailableDate}T00:00:00Z`), disclosureDelayDays: transaction.disclosureDelayDays, amountMin: numeric(transaction.amountMin), amountMax: numeric(transaction.amountMax), amountRangeRaw: transaction.amountRangeRaw, estimatedAmount: numeric(transaction.estimatedAmount), amountMethod: transaction.amountMethod, priceAtTransaction: numeric(transaction.priceAtTransaction), priceAtDisclosure: numeric(transaction.priceAtDisclosure), currentPrice: numeric(transaction.currentPrice), sharesEstimate: numeric(transaction.sharesEstimate), source: transaction.source, sourceUrl: transaction.sourceUrl, filingType: transaction.filingType, provider: transaction.provider, fetchedAt: new Date(transaction.fetchedAt), verified: transaction.verified, verificationStatus: transaction.verificationStatus, resolutionStatus: transaction.resolutionStatus, amendment: transaction.amendment, rawPayload: { normalizedId: transaction.id } };
+    const values = { sourceId: transaction.sourceId, fingerprint: transaction.fingerprint, politicianId: transaction.politicianId, filingId, instrumentId: instrument?.instrumentId ?? null, canonicalIssuerId: instrument?.issuerId ?? null, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, ownerType: transaction.ownerType, assetName: transaction.assetName, assetType: transaction.assetType, rawTicker: transaction.rawTicker, symbol: transaction.symbol, sector: transaction.sector, transactionType: transaction.transactionType, transactionDate: new Date(`${transaction.transactionDate}T00:00:00Z`), disclosureDate: new Date(`${transaction.disclosureDate}T00:00:00Z`), marketAvailableDate: new Date(`${transaction.marketAvailableDate}T00:00:00Z`), disclosureDelayDays: transaction.disclosureDelayDays, amountMin: numeric(transaction.amountMin), amountMax: numeric(transaction.amountMax), amountRangeRaw: transaction.amountRangeRaw, estimatedAmount: numeric(transaction.estimatedAmount), amountMethod: transaction.amountMethod, priceAtTransaction: numeric(transaction.priceAtTransaction), priceAtDisclosure: numeric(transaction.priceAtDisclosure), currentPrice: numeric(transaction.currentPrice), sharesEstimate: numeric(transaction.sharesEstimate), source: transaction.source, sourceUrl: transaction.sourceUrl, filingType: transaction.filingType, provider: transaction.provider, fetchedAt: new Date(transaction.fetchedAt), verified: transaction.verified, verificationStatus: transaction.verificationStatus, resolutionStatus: transaction.resolutionStatus, amendment: transaction.amendment, rawPayload: { normalizedId: transaction.id } };
     const inserted = await database.insert(politicalTransactions).values(values).onConflictDoUpdate({ target: politicalTransactions.fingerprint, set: { instrumentId: values.instrumentId, canonicalIssuerId: values.canonicalIssuerId, symbol: values.symbol, sector: values.sector, sourceUrl: sql`coalesce(${politicalTransactions.sourceUrl}, excluded.source_url)`, fetchedAt: values.fetchedAt, resolutionStatus: values.resolutionStatus, updatedAt: new Date() } }).returning({ id: politicalTransactions.id });
     const logicalId = inserted[0]?.id ?? (await database.select({ id: politicalTransactions.id }).from(politicalTransactions).where(eq(politicalTransactions.fingerprint, transaction.fingerprint)).limit(1))[0]?.id;
     if (logicalId) {

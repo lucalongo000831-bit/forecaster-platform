@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { financialProviderRouter } from "@/providers";
 import { queryObject } from "@/schemas";
 import { createRequestContext } from "@/lib/server/request-context";
 import { enforceRateLimit } from "@/lib/server/rate-limit";
 import { jsonFailure, jsonSuccess } from "@/lib/server/api-response";
+import { getPoliticalLeaderboard, getSymbolPoliticalIntelligence } from "@/services/political";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,11 +15,12 @@ export async function GET(request: Request) {
   try {
     await enforceRateLimit(context.ip, { scope: "market:political", limit: 15 });
     const { symbol, chamber, limit } = requestSchema.parse(queryObject(request));
-    const [senate, house] = await Promise.all([
-      chamber === "house" ? Promise.resolve(null) : financialProviderRouter.senateTrades(symbol, limit),
-      chamber === "senate" ? Promise.resolve(null) : financialProviderRouter.houseTrades(symbol, limit),
-    ]);
-    const data = [...(senate?.data ?? []), ...(house?.data ?? [])].sort((a, b) => b.transactionDate.localeCompare(a.transactionDate));
-    return jsonSuccess(data.slice(0, limit), context, { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=21600" }, meta: { provider: "fmp", fetchedAt: new Date().toISOString(), freshnessType: senate?.meta.freshnessType ?? house?.meta.freshnessType ?? "UNAVAILABLE" } });
+    const filters = { period: "MAX" as const, chamber: chamber === "all" ? "ALL" as const : chamber.toUpperCase() as "HOUSE" | "SENATE", page: 1, pageSize: Math.min(limit, 100) };
+    if (symbol) {
+      const report = await getSymbolPoliticalIntelligence(symbol, filters);
+      return jsonSuccess(report.transactions.slice(0, limit), context, { headers: { "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600" }, meta: { providers: report.provenance.providers, sourceMode: report.provenance.sourceMode, databaseStatus: report.provenance.databaseStatus, dataStatus: report.dataStatus, fetchedAt: report.calculatedAt } });
+    }
+    const report = await getPoliticalLeaderboard(filters);
+    return jsonSuccess(report.latest.slice(0, limit), context, { headers: { "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600" }, meta: { sourceMode: "DATABASE_FIRST", resultStatus: report.resultStatus, fetchedAt: report.calculatedAt } });
   } catch (error) { return jsonFailure(error, context); }
 }

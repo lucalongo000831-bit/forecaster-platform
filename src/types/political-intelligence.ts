@@ -1,4 +1,5 @@
 import type { MarketChartPoint } from "./market-api";
+import type { InstrumentKind, ProviderSymbolMapping } from "./data-coverage";
 
 export type PoliticalChamber = "HOUSE" | "SENATE" | "UNKNOWN";
 export type PoliticalParty = "DEMOCRATIC" | "REPUBLICAN" | "INDEPENDENT" | "OTHER" | "UNKNOWN";
@@ -12,6 +13,31 @@ export type PoliticalClusterStrength = "NONE" | "WEAK" | "MODERATE" | "STRONG";
 export type PoliticalPeriod = "7D" | "30D" | "90D" | "6M" | "1Y" | "3Y" | "5Y" | "MAX";
 export type PoliticalPerformanceClassification = "OUTPERFORMED" | "UNDERPERFORMED" | "NEUTRAL" | "INSUFFICIENT_HISTORY";
 export type PoliticalResultStatus = "VERIFIED_ACTIVITY" | "VERIFIED_ZERO" | "PARTIAL_DATA" | "DATASET_INITIALIZING" | "LAST_KNOWN_GOOD" | "UNSUPPORTED";
+export type PoliticalAssetDataStatus = "HAS_ACTIVITY" | "VERIFIED_ZERO" | "PARTIAL_DATA" | "SOURCE_TEMPORARILY_UNAVAILABLE" | "DATABASE_UNAVAILABLE" | "UNRESOLVED_ASSET";
+export type PoliticalProviderAttemptStatus = "REQUEST_SUCCESS_WITH_DATA" | "REQUEST_SUCCESS_EMPTY" | "RATE_LIMITED" | "SOURCE_UNAVAILABLE";
+
+export interface PoliticalAssetContext {
+  requestedSymbol: string;
+  canonicalSymbol: string;
+  assetClass: InstrumentKind;
+  instrumentId: string | null;
+  issuerId: string | null;
+  aliases: string[];
+  providerMappings: ProviderSymbolMapping[];
+  resolutionQuality: "verified" | "partial" | "estimated" | "unavailable";
+  cacheIdentity: string;
+  matchStrategy: "CANONICAL_ISSUER" | "CANONICAL_INSTRUMENT" | "CANONICAL_SYMBOL" | "UNRESOLVED";
+}
+
+export interface PoliticalAssetProvenance {
+  sourceMode: "DATABASE" | "PROVIDER_FALLBACK" | "DATABASE_AND_PROVIDER" | "UNAVAILABLE";
+  providers: string[];
+  databaseUsed: boolean;
+  fallbackUsed: boolean;
+  databaseStatus: "AVAILABLE" | "NOT_CONFIGURED" | "UNAVAILABLE";
+  providerAttempts: Array<{ provider: string; status: PoliticalProviderAttemptStatus; records: number }>;
+  lastSuccessfulSync: string | null;
+}
 
 export interface PoliticalDatasetCoverage {
   status: PoliticalResultStatus;
@@ -224,7 +250,12 @@ export interface PoliticalIntelligenceReport {
   limitations: string[];
   calculatedAt: string;
   resultStatus: PoliticalResultStatus;
+  dataStatus: PoliticalAssetDataStatus;
   coverage: PoliticalDatasetCoverage;
+  canonicalResolution: PoliticalAssetContext | null;
+  provenance: PoliticalAssetProvenance;
+  availablePeriods: PoliticalPeriod[];
+  activityOutsideSelectedPeriod: boolean;
 }
 
 export interface PoliticianActivityReport {

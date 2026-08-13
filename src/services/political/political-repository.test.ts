@@ -10,12 +10,16 @@ vi.mock("@/db", () => ({
   getDatabase: mocks.getDatabase,
   isDatabaseConfigured: mocks.isDatabaseConfigured,
   politicalFilings: {},
+  politicalHistoryMonths: { month: "month" },
   politicalSyncStates: { key: "key" },
   politicalTransactions: {},
+  politicalTransactionSources: {},
   politicians: {},
+  instruments: {},
 }));
 vi.mock("@/lib/server/logger", () => ({ structuredLog: mocks.structuredLog }));
-vi.mock("@/services/account/instrument-repository", () => ({ ensureInstrument: vi.fn() }));
+vi.mock("./political-asset-resolver", () => ({ ensurePoliticalAssetContext: vi.fn(), resolvePoliticalAssetContext: vi.fn() }));
+vi.mock("@/services/instruments/instrument-kind", () => ({ verifiedInstrumentKind: vi.fn() }));
 
 import { getPoliticalSyncHealth } from "./political-repository";
 
