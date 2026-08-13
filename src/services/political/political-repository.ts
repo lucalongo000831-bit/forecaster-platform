@@ -71,9 +71,10 @@ export async function persistPoliticalHistoryMonths(months: Array<{ month: strin
 export async function summarizePersistedPoliticalTransactionsByMonth(from: string, to: string) {
   if (!isDatabaseConfigured()) return [];
   const database = getDatabase();
-  const start = new Date(`${from.slice(0, 10)}T00:00:00Z`);
+  const start = `${from.slice(0, 10)}T00:00:00.000Z`;
   const end = new Date(`${to.slice(0, 10)}T00:00:00Z`);
   end.setUTCDate(end.getUTCDate() + 1);
+  const endExclusive = end.toISOString();
   const rows = await database.execute<{
     month: string;
     record_count: number;
@@ -88,8 +89,8 @@ export async function summarizePersistedPoliticalTransactionsByMonth(from: strin
       count(*) filter (where ${politicalTransactions.chamber} = 'SENATE')::int as senate_records,
       coalesce(array_agg(distinct ${politicalTransactions.provider}), array[]::varchar[]) as sources
     from ${politicalTransactions}
-    where ${politicalTransactions.disclosureDate} >= ${start}
-      and ${politicalTransactions.disclosureDate} < ${end}
+    where ${politicalTransactions.disclosureDate} >= ${start}::timestamptz
+      and ${politicalTransactions.disclosureDate} < ${endExclusive}::timestamptz
     group by 1
     order by 1
   `);
