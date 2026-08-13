@@ -6,6 +6,21 @@ import { getServerEnvironment } from "@/schemas/env";
 
 let redis: Redis | null | undefined;
 const localCache = new Map<string, { value: unknown; expiresAt: number }>();
+const remoteOperationTimeoutMs = 1_500;
+
+async function withinRemoteDeadline<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("REDIS_OPERATION_TIMEOUT")), remoteOperationTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export function getRedis(): Redis | null {
   if (redis !== undefined) return redis;
@@ -22,7 +37,13 @@ export function privacySafeKey(value: string): string {
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
   const remote = getRedis();
-  if (remote) return remote.get<T>(key);
+  if (remote) {
+    try {
+      return await withinRemoteDeadline(remote.get<T>(key));
+    } catch {
+      return null;
+    }
+  }
   const entry = localCache.get(key);
   if (!entry || entry.expiresAt <= Date.now()) {
     localCache.delete(key);
@@ -34,7 +55,7 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 export async function cacheSet<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
   const remote = getRedis();
   if (remote) {
-    await remote.set(key, value, { ex: Math.max(1, Math.floor(ttlSeconds)) });
+    await withinRemoteDeadline(remote.set(key, value, { ex: Math.max(1, Math.floor(ttlSeconds)) })).catch(() => undefined);
     return;
   }
   localCache.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1_000 });
@@ -46,7 +67,7 @@ export async function cacheSet<T>(key: string, value: T, ttlSeconds: number): Pr
 
 export async function cacheDelete(key: string): Promise<void> {
   const remote = getRedis();
-  if (remote) await remote.del(key);
+  if (remote) await withinRemoteDeadline(remote.del(key)).catch(() => undefined);
   else localCache.delete(key);
 }
 
@@ -54,12 +75,17 @@ export async function withDistributedLock<T>(key: string, ttlSeconds: number, ta
   const remote = getRedis();
   if (!remote) return task();
   const token = randomUUID();
-  const acquired = await remote.set(`lock:${key}`, token, { nx: true, ex: ttlSeconds });
+  let acquired: string | null;
+  try {
+    acquired = await withinRemoteDeadline(remote.set(`lock:${key}`, token, { nx: true, ex: ttlSeconds }));
+  } catch {
+    return task();
+  }
   if (!acquired) return null;
   try {
     return await task();
   } finally {
-    const current = await remote.get<string>(`lock:${key}`);
-    if (current === token) await remote.del(`lock:${key}`);
+    const current = await withinRemoteDeadline(remote.get<string>(`lock:${key}`)).catch(() => null);
+    if (current === token) await withinRemoteDeadline(remote.del(`lock:${key}`)).catch(() => undefined);
   }
 }

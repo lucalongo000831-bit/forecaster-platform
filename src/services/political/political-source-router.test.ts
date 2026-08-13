@@ -1,0 +1,18 @@
+import { describe, expect, it, vi } from "vitest";
+import { PoliticalSourceRouter } from "./political-source-router";
+
+const meta = { provider: "bargo", fetchedAt: "2026-08-12T00:00:00Z", sourceTimestamp: null, freshness: "cached", freshnessType: "CACHED", delaySeconds: null, quality: "partial", isFallback: false } as const;
+describe("PoliticalSourceRouter", () => {
+  it("degrades successfully when FMP is plan-limited and Bargo works", async () => { const fmp = { getHouseTrades: vi.fn().mockRejectedValue(new Error("plan 403")), getSenateTrades: vi.fn().mockRejectedValue(new Error("plan 403")) }; const bargo = { getTradesByDateRange: vi.fn().mockResolvedValue({ data: { trades: [], page: 0, limit: 100, count: 0 }, provider: "bargo", status: "AVAILABLE", isFallback: false, fetchedAt: meta.fetchedAt }) }; const router = new PoliticalSourceRouter(fmp as never, bargo as never, {} as never); const result = await router.recent({ from: "2026-08-01", to: "2026-08-12" }); expect(result).toMatchObject({ operational: true, degraded: true }); expect(result.attempts.some((item) => item.provider === "fmp" && item.status === "PLAN_LIMIT")).toBe(true); });
+  it("reports no operational refresh when both upstream sources fail", async () => { const failed = { getHouseTrades: vi.fn().mockRejectedValue(new Error("offline")), getSenateTrades: vi.fn().mockRejectedValue(new Error("offline")) }; const bargo = { getTradesByDateRange: vi.fn().mockRejectedValue(new Error("offline")) }; const result = await new PoliticalSourceRouter(failed as never, bargo as never, {} as never).recent({ from: "2026-08-01", to: "2026-08-12" }); expect(result.operational).toBe(false); });
+  it("falls back to FMP when Bargo is unavailable", async () => { const fmp = { getHouseTrades: vi.fn().mockResolvedValue({ data: [], meta: { ...meta, provider: "fmp" } }), getSenateTrades: vi.fn().mockResolvedValue({ data: [], meta: { ...meta, provider: "fmp" } }) }; const bargo = { getTradesByDateRange: vi.fn().mockRejectedValue(new Error("offline")) }; const result = await new PoliticalSourceRouter(fmp as never, bargo as never, {} as never).recent({ from: "2026-08-01", to: "2026-08-12" }); expect(result).toMatchObject({ operational: true, degraded: true }); });
+  it("routes a requested Bargo historical page to Bargo instead of the archive provider", async () => {
+    const getTradesByDateRange = vi.fn().mockResolvedValue({ data: { trades: [], page: 0, limit: 25, count: 0 }, fetchedAt: meta.fetchedAt });
+    const historical = { getPage: vi.fn(), getMembers: vi.fn() };
+    const router = new PoliticalSourceRouter({} as never, { getTradesByDateRange } as never, historical as never);
+    const result = await router.historicalPage("bargo", 0, 25, { from: "2026-08-01", to: "2026-08-12", chamber: "HOUSE" });
+    expect(getTradesByDateRange).toHaveBeenCalledWith("2026-08-01", "2026-08-12", { page: 0, limit: 25, chamber: "house" });
+    expect(historical.getPage).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ provider: "bargo", hasMore: false });
+  });
+});

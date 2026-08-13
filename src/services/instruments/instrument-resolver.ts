@@ -9,14 +9,13 @@ import type { ProviderName } from "@/providers/types";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import type { InstrumentKind, ProviderSymbolMapping, ResolvedInstrument } from "@/types";
 import { verifiedIssuerByLegalName, verifiedIssuerByListing } from "./verified-issuer-registry";
+import { verifiedInstrumentKind } from "./instrument-kind";
 
-function kindFor(symbol: string, quoteType?: string | null): InstrumentKind {
+function kindFor(symbol: string, quoteType?: string | null, name?: string | null): InstrumentKind {
+  const verified = verifiedInstrumentKind(symbol, quoteType, name);
+  if (verified) return verified;
   const type = quoteType?.toUpperCase() ?? "";
-  if (symbol.endsWith("-USD") || type.includes("CRYPTO")) return "CRYPTO";
-  if (symbol.startsWith("^") || type === "INDEX") return "INDEX";
-  if (type.includes("ETF")) return "ETF";
   if (type.includes("FUND")) return "FUND";
-  if (symbol.includes("=X")) return "FOREX";
   return "EQUITY";
 }
 
@@ -26,7 +25,7 @@ function map(provider: ProviderName, symbol: string, exchangeCode: string | null
 
 export async function resolveInstrument(symbolInput: string): Promise<ResolvedInstrument> {
   const symbol = normalizeSymbol(decodeURIComponent(symbolInput));
-  return (await providerCached(`instrument-resolution:v2:${symbol}`, { freshSeconds: 30 * 86_400, staleSeconds: 60 * 86_400 }, async () => {
+  return (await providerCached(`instrument-resolution:v3:${symbol}`, { freshSeconds: 30 * 86_400, staleSeconds: 60 * 86_400 }, async () => {
     const warnings: string[] = []; const mappings: ProviderSymbolMapping[] = [map("yahoo", symbol, null, null, 1)];
     let name = symbol; let exchange: string | null = null; let currency: string | null = null; let countryCode: string | null = null; let sector: string | null = null; let industry: string | null = null; let website: string | null = null; let cik: string | null = null; let coinGeckoId: string | null = null; let quoteType: string | null = null;
     if (symbol.endsWith("-USD")) {
@@ -52,7 +51,7 @@ export async function resolveInstrument(symbolInput: string): Promise<ResolvedIn
         mappings.push(...Object.entries(verified.issuerProviderSymbols).flatMap(([provider, providerSymbol]) => providerSymbol && !mappings.some((item) => item.provider === provider && item.symbol === providerSymbol) ? [map(provider as ProviderName, providerSymbol, provider === "sec-edgar" ? "SEC" : exchange, provider === "sec-edgar" ? providerSymbol : `issuer-alias:${providerSymbol}`, 1)] : []));
       }
     }
-    const kind = kindFor(symbol, quoteType);
+    const kind = kindFor(symbol, quoteType, name);
     const verified = verifiedIssuerByLegalName(name) ?? verifiedIssuerByListing(symbol);
     const issuer = kind === "EQUITY" ? { legalName: verified?.legalName ?? name, countryCode: verified?.countryCode ?? countryCode, lei: verified?.lei ?? null, cik: verified?.cik ?? cik, isin: verified?.isin ?? null, website, sector, industry, reportingCurrency: verified?.reportingCurrency ?? null, comparableHistoryStartDate: verified?.comparableHistoryStartDate ?? null } : null;
     const data: ResolvedInstrument = { canonicalSymbol: symbol, name, kind, exchange, mic: verified?.listings.find((listing) => listing.providerSymbol === symbol)?.mic ?? null, currency, tradingCurrency: currency, countryCode, issuer, listings: verified?.listings, mappings, resolutionQuality: warnings.length ? mappings.length > 1 ? "partial" : "unavailable" : "verified", warnings };

@@ -1,7 +1,7 @@
 import "server-only";
 
-import { and, asc, desc, gte, lte } from "drizzle-orm";
-import { getDatabase, globalRiskComponentSnapshots, globalRiskSnapshots, globalRiskTriggers, isDatabaseConfigured } from "@/db";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { economicSeries, getDatabase, globalRiskComponentSnapshots, globalRiskSnapshots, globalRiskTriggers, isDatabaseConfigured, newsItems, normalizedEconomicObservations, positioningObservations } from "@/db";
 import type { GlobalRiskHistoryPoint, GlobalRiskHistoryReference, GlobalRiskSnapshot, GlobalRiskStatus, RiskTrend, SystemicStress } from "@/engines/global-risk";
 import { structuredLog } from "@/lib/server/logger";
 
@@ -20,7 +20,22 @@ export async function loadGlobalRiskHistoryReference(now = new Date()): Promise<
 export async function loadLatestGlobalRiskSnapshot(): Promise<GlobalRiskSnapshot | null> {
   if (!isDatabaseConfigured()) return null;
   const [row] = await getDatabase().select({ payload: globalRiskSnapshots.payload, id: globalRiskSnapshots.id }).from(globalRiskSnapshots).orderBy(desc(globalRiskSnapshots.calculatedAt)).limit(1);
-  return row ? { ...(row.payload as unknown as GlobalRiskSnapshot), id: row.id } : null;
+  if (!row) return null;
+  const payload = row.payload as unknown as GlobalRiskSnapshot;
+  return { ...payload, id: row.id, directDataCoverage: payload.directDataCoverage ?? 0, rawDirectCoverage: payload.rawDirectCoverage ?? payload.directDataCoverage ?? 0, calculatedFromDirectCoverage: payload.calculatedFromDirectCoverage ?? 0, proxyShare: payload.proxyShare ?? 0, activeLayers: payload.activeLayers ?? payload.components?.filter((component) => component.score !== null).length ?? 0, staleLayers: payload.staleLayers ?? 0, dataStatus: payload.dataStatus ?? (payload.dataCompleteness >= 70 ? "AVAILABLE" : "PARTIAL") };
+}
+
+export async function loadPersistentGlobalInputs() {
+  if (!isDatabaseConfigured()) return { economic: [], positioning: [], news: [] };
+  try {
+    const database = getDatabase();
+    const [economic, positioning, news] = await Promise.all([
+      database.select({ key: economicSeries.internalKey, category: economicSeries.category, title: economicSeries.metadata, value: normalizedEconomicObservations.value, observedAt: normalizedEconomicObservations.observedAt, availableAt: normalizedEconomicObservations.availableAt, provider: normalizedEconomicObservations.provider }).from(normalizedEconomicObservations).innerJoin(economicSeries, eq(normalizedEconomicObservations.seriesId, economicSeries.id)).orderBy(desc(normalizedEconomicObservations.observedAt)).limit(5_000),
+      database.select().from(positioningObservations).orderBy(desc(positioningObservations.reportDate)).limit(1_000),
+      database.select({ title: newsItems.title, sentiment: newsItems.sentiment, publishedAt: newsItems.publishedAt, provider: newsItems.provider, classification: newsItems.classification }).from(newsItems).orderBy(desc(newsItems.publishedAt)).limit(200),
+    ]);
+    return { economic: economic.map((row) => ({ ...row, value: row.value === null ? null : Number(row.value) })), positioning: positioning.map((row) => ({ ...row, long: row.long === null ? null : Number(row.long), short: row.short === null ? null : Number(row.short), net: row.net === null ? null : Number(row.net), openInterest: row.openInterest === null ? null : Number(row.openInterest) })), news: news.map((row) => ({ ...row, sentiment: row.sentiment === null ? null : Number(row.sentiment) })) };
+  } catch { return { economic: [], positioning: [], news: [] }; }
 }
 
 export async function loadGlobalRiskHistory(from: Date, to: Date): Promise<GlobalRiskHistoryPoint[]> {
@@ -35,9 +50,9 @@ export async function persistGlobalRiskSnapshot(snapshot: GlobalRiskSnapshot, mi
     const database = getDatabase(); const [latest] = await database.select({ calculatedAt: globalRiskSnapshots.calculatedAt }).from(globalRiskSnapshots).orderBy(desc(globalRiskSnapshots.calculatedAt)).limit(1);
     if (latest && Date.now() - latest.calculatedAt.getTime() < minimumMinutes * 60_000) return null;
     const byKey = new Map(snapshot.components.map((component) => [component.key, component.score]));
-    const [created] = await database.insert(globalRiskSnapshots).values({ status: snapshot.status, score: String(snapshot.score), systemicStress: snapshot.systemicStress, trend: snapshot.trend, confidence: snapshot.confidence, dataCompleteness: String(snapshot.dataCompleteness), volatilityScore: numeric(byKey.get("VOLATILITY") ?? null), creditScore: numeric(byKey.get("CREDIT") ?? null), liquidityScore: numeric(byKey.get("LIQUIDITY") ?? null), ratesScore: numeric(byKey.get("RATES") ?? null), breadthScore: numeric(byKey.get("MARKET_BREADTH") ?? null), equityScore: numeric(byKey.get("EQUITY_STRESS") ?? null), crossAssetScore: numeric(byKey.get("CROSS_ASSET") ?? null), macroScore: numeric(byKey.get("MACRO") ?? null), newsRiskScore: numeric(byKey.get("GEOPOLITICS") ?? null), payload: snapshot as unknown as Record<string, unknown>, modelVersion: snapshot.modelVersion, inputTimestamp: new Date(snapshot.inputTimestamp), calculatedAt: new Date(snapshot.calculatedAt) }).returning({ id: globalRiskSnapshots.id });
+    const [created] = await database.insert(globalRiskSnapshots).values({ status: snapshot.status, score: String(snapshot.score), systemicStress: snapshot.systemicStress, trend: snapshot.trend, confidence: snapshot.confidence, dataCompleteness: String(snapshot.dataCompleteness), volatilityScore: numeric(byKey.get("VOLATILITY") ?? null), creditScore: numeric(byKey.get("CREDIT") ?? null), liquidityScore: numeric(byKey.get("LIQUIDITY") ?? null), ratesScore: numeric(byKey.get("RATES") ?? null), breadthScore: numeric(byKey.get("MARKET_BREADTH") ?? null), equityScore: numeric(byKey.get("EQUITY_STRESS") ?? null), crossAssetScore: numeric(byKey.get("CROSS_ASSET") ?? null), macroScore: numeric(byKey.get("MACRO") ?? null), newsRiskScore: numeric(byKey.get("NEWS_GEOPOLITICAL") ?? null), payload: snapshot as unknown as Record<string, unknown>, modelVersion: snapshot.modelVersion, inputTimestamp: new Date(snapshot.inputTimestamp), calculatedAt: new Date(snapshot.calculatedAt) }).returning({ id: globalRiskSnapshots.id });
     if (!created) return null;
-    await database.insert(globalRiskComponentSnapshots).values(snapshot.components.map((component) => ({ snapshotId: created.id, component: component.key, score: numeric(component.score), weight: String(component.weight), contribution: String(component.contribution), completeness: String(component.completeness), dataType: component.metrics.some((item) => item.dataType === "PROXY") ? "PROXY" : component.metrics.some((item) => item.dataType === "DIRECT") ? "DIRECT" : "KAIRO_CALCULATED", payload: component as unknown as Record<string, unknown> })));
+    await database.insert(globalRiskComponentSnapshots).values(snapshot.components.map((component) => ({ snapshotId: created.id, component: component.key, score: numeric(component.score), weight: String(component.weight), contribution: String(component.contribution), completeness: String(component.completeness), dataType: component.metrics.some((item) => item.dataType === "PROXY") ? "PROXY" : component.metrics.some((item) => item.dataType === "DIRECT") ? "DIRECT" : component.metrics.some((item) => item.dataType === "CALCULATED_FROM_DIRECT") ? "CALCULATED_FROM_DIRECT" : component.metrics.some((item) => item.dataType === "LAST_KNOWN_GOOD") ? "LAST_KNOWN_GOOD" : "MISSING", payload: component as unknown as Record<string, unknown> })));
     await database.insert(globalRiskTriggers).values([...snapshot.escalationTriggers, ...snapshot.deEscalationTriggers].map((trigger) => ({ snapshotId: created.id, triggerKey: trigger.id, direction: trigger.direction, label: trigger.label, threshold: trigger.threshold, active: trigger.active })));
     return created.id;
   } catch (error) { structuredLog("warn", "global-risk.persistence.failed", { code: error instanceof Error ? error.name : "UNKNOWN" }); return null; }

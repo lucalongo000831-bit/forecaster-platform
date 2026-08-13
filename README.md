@@ -17,6 +17,8 @@ The product identity and assets are replaceable. The project does not scrape the
 - Asset-specific Crypto, ETF and Index Intelligence, with technicals, risk, seasonality, attributed sentiment and probabilistic scenarios instead of inapplicable corporate DCF metrics.
 - Global Markets risk monitoring with a versioned deterministic stress model, systemic-transmission rules, historical alert timeline and a separately labelled manual editorial brief workflow.
 - Ask Kairo code is preserved but parked behind `ENABLE_KAIRO_AI=false`; the financial platform works without an OpenAI key.
+- KAIRO Data Architecture V2 persists redacted raw records, normalized observations, quality-gated snapshots and per-dataset Last Known Good state before data reaches Calendar, Political Intelligence or Global Markets.
+- Official-data adapters cover FRED, BLS, BEA, EIA, US Treasury, ECB, Eurostat, GLEIF and CFTC; OpenFIGI and Marketaux add structured identity and news data without browser-side provider access.
 
 ## Technology
 
@@ -69,6 +71,10 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run test:complete-data-stack` | provider and optional Preview route smoke matrix; never prints keys |
 | `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |
 | `npm run test:openai` | minimal live Responses API authentication check; never prints the key or model output |
+| `npm run test:kairo-data-v2` | safe credential smoke for the six configured Data V2 providers |
+| `npm run test:kairo-data-v2:security` | tracked-file, client-source and built-bundle secret scan |
+| `npm run data-v2:diagnose` | Calendar, Political, Global Markets and health route diagnostic |
+| `npm run data-v2:backfill -- economic` | invoke one authenticated, lock-protected ingestion/backfill job |
 
 ## Architecture
 
@@ -93,9 +99,12 @@ Next.js server components + Node.js route handlers
         │     ├── strict internal financial tools only
         │     ├── normalized context and provenance
         │     └── PostgreSQL conversation memory
-        └── account services / job runner
-              ├── PostgreSQL durable state
-              └── Redis cache, locks and distributed limits
+        └── persistence-first data and account services
+              ├── ProviderGateway V2 / raw content hashes
+              ├── normalized temporal observations
+              ├── quality-gated snapshots / Last Known Good
+              ├── PostgreSQL durable state and ingestion runs
+              └── Redis cache, single-flight, locks and distributed limits
 ```
 
 Core boundaries:
@@ -148,6 +157,8 @@ Operational APIs:
 - Public liveness: `GET /api/health`
 - Protected diagnostics: `GET /api/health/providers`, `GET /api/health/database`
 - Protected schedules: `GET /api/cron/daily`, `GET /api/cron/alerts`
+- Protected Data V2 schedule: `GET /api/cron/data-v2?job=<job>`
+- Administrator ingestion control room: `/preferences/data-ingestion` and `/api/admin/data-ingestion`
 
 All financial and operational route handlers use the Node.js runtime. Symbols are normalized and length-limited and support dots, dashes, `^`, `=` and exchange suffixes such as `BRK-B`, `^GSPC`, `BTC-USD`, `EURUSD=X`, `ENI.MI` and `STLAM.MI`.
 
@@ -204,6 +215,7 @@ Detailed environment, PostgreSQL, Redis, cron, preview and domain instructions a
 - [Complete field coverage audit](docs/DATA_COVERAGE_AUDIT.md), [coverage implementation](docs/COMPLETE_DATA_COVERAGE_REPORT.md) and [remaining data gaps](docs/REMAINING_DATA_GAPS.md)
 - [Global Risk engine](docs/GLOBAL_RISK_ENGINE.md), [methodology](docs/GLOBAL_RISK_MODEL_METHODOLOGY.md), [data sources](docs/GLOBAL_MARKETS_DATA_SOURCES.md), [editorial workflow](docs/GLOBAL_MARKET_BRIEF.md) and [future editorial AI boundary](docs/FUTURE_AUTOMATED_EDITORIAL_AI.md)
 - [Political Intelligence](docs/POLITICAL_INTELLIGENCE.md), [data model](docs/POLITICAL_DATA_MODEL.md), [backtest methodology](docs/POLITICAL_BACKTEST_METHODOLOGY.md), [data lineage](docs/POLITICAL_DATA_LINEAGE.md), [limitations](docs/POLITICAL_DISCLOSURE_LIMITATIONS.md) and [implementation report](docs/POLITICAL_INTELLIGENCE_IMPLEMENTATION_REPORT.md)
+- [KAIRO Data Architecture V2](docs/KAIRO_DATA_ARCHITECTURE_V2.md), [provider matrix](docs/KAIRO_PROVIDER_MATRIX_V2.md), [ingestion engine](docs/KAIRO_INGESTION_ENGINE.md), [quality gates](docs/KAIRO_DATA_QUALITY.md), [LKG](docs/KAIRO_LAST_KNOWN_GOOD.md), [backfill](docs/KAIRO_BACKFILL.md) and [runbook](docs/KAIRO_RUNBOOK.md)
 
 ## Disclaimer
 

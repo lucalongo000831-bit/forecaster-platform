@@ -1,6 +1,6 @@
 import type { GlobalRiskComponentKey, GlobalRiskStatus } from "./types";
 
-export const GLOBAL_STRESS_MODEL_VERSION = "global-stress-v1";
+export const GLOBAL_STRESS_MODEL_VERSION = "global-stress-v2";
 
 export const GLOBAL_RISK_THRESHOLDS: ReadonlyArray<{ status: GlobalRiskStatus; min: number; max: number; meaning: string }> = [
   { status: "GREEN", min: 0, max: 24, meaning: "Normal market conditions" },
@@ -10,15 +10,17 @@ export const GLOBAL_RISK_THRESHOLDS: ReadonlyArray<{ status: GlobalRiskStatus; m
 ];
 
 export const GLOBAL_RISK_WEIGHTS: Record<GlobalRiskComponentKey, number> = {
-  VOLATILITY: 0.15,
-  CREDIT: 0.15,
-  LIQUIDITY: 0.15,
-  RATES: 0.10,
-  MARKET_BREADTH: 0.10,
+  VOLATILITY: 0.13,
+  CREDIT: 0.13,
+  LIQUIDITY: 0.12,
+  RATES: 0.09,
+  MARKET_BREADTH: 0.09,
   EQUITY_STRESS: 0.10,
-  CROSS_ASSET: 0.10,
-  MACRO: 0.08,
-  GEOPOLITICS: 0.07,
+  CROSS_ASSET: 0.09,
+  MACRO: 0.09,
+  POSITIONING: 0.06,
+  ENERGY: 0.04,
+  NEWS_GEOPOLITICAL: 0.06,
 };
 
 export const GLOBAL_RISK_CONFIG = {

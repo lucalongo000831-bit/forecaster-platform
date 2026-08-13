@@ -2,6 +2,14 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/cron/daily", "schedule": "17 5 * * *" }
+    { "path": "/api/cron/daily", "schedule": "17 5 * * *" },
+    { "path": "/api/cron/data-v2?job=economic", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/data-v2?job=calendar", "schedule": "15 6 * * *" },
+    { "path": "/api/cron/data-v2?job=central-bank", "schedule": "25 6 * * *" },
+    { "path": "/api/cron/data-v2?job=political", "schedule": "30 6 * * *" },
+    { "path": "/api/cron/data-v2?job=energy", "schedule": "45 6 * * *" },
+    { "path": "/api/cron/data-v2?job=cftc", "schedule": "0 22 * * 5" },
+    { "path": "/api/cron/data-v2?job=news", "schedule": "0 7 * * *" },
+    { "path": "/api/cron/data-v2?job=global-risk", "schedule": "15 7 * * *" }
   ]
 }

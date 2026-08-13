@@ -98,8 +98,9 @@ export function disclosureDelayDays(transactionDate: string, disclosureDate: str
   return Math.max(0, Math.round((disclosure - transaction) / 86_400_000));
 }
 
-export function politicalTransactionFingerprint(input: Pick<PoliticalTransaction, "politicianId" | "assetName" | "rawTicker" | "transactionDate" | "transactionType" | "amountRangeRaw" | "ownerType" | "filingId" | "disclosureDate">) {
-  return stablePoliticalId(input.politicianId, input.rawTicker ?? input.assetName, input.transactionDate, input.transactionType, input.amountRangeRaw, input.ownerType, input.filingId ?? input.disclosureDate);
+export function politicalTransactionFingerprint(input: Pick<PoliticalTransaction, "politicianId" | "chamber" | "assetName" | "rawTicker" | "transactionDate" | "transactionType" | "amountMin" | "amountMax" | "ownerType">) {
+  const assetIdentity = (input.rawTicker ?? input.assetName).normalize("NFKD").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  return stablePoliticalId(input.politicianId, input.chamber, assetIdentity, input.transactionDate, input.transactionType, input.amountMin?.toString() ?? null, input.amountMax?.toString() ?? null);
 }
 
 export function deduplicatePoliticalTransactions(transactions: PoliticalTransaction[]) {
@@ -109,5 +110,9 @@ export function deduplicatePoliticalTransactions(transactions: PoliticalTransact
     if (!existing || transaction.amendment || transaction.disclosureDate > existing.disclosureDate) byFingerprint.set(transaction.fingerprint, transaction);
   }
   const data = [...byFingerprint.values()].sort((a, b) => b.disclosureDate.localeCompare(a.disclosureDate));
-  return { data, duplicatesRemoved: transactions.length - data.length, duplicateRate: transactions.length ? (transactions.length - data.length) / transactions.length * 100 : 0 };
+  const canonicalByCore = new Map(data.map((row) => [stablePoliticalId(row.politicianId, row.chamber, (row.rawTicker ?? row.assetName).normalize("NFKD").replace(/[^a-zA-Z0-9]/g, "").toLowerCase(), row.transactionDate, row.transactionType, row.amountMin?.toString() ?? null, row.amountMax?.toString() ?? null), row.fingerprint]));
+  const sourceRows = transactions.map((row) => ({ ...row, fingerprint: canonicalByCore.get(stablePoliticalId(row.politicianId, row.chamber, (row.rawTicker ?? row.assetName).normalize("NFKD").replace(/[^a-zA-Z0-9]/g, "").toLowerCase(), row.transactionDate, row.transactionType, row.amountMin?.toString() ?? null, row.amountMax?.toString() ?? null)) ?? row.fingerprint }));
+  const providerSets = new Map<string, Set<PoliticalTransaction["provider"]>>(); for (const row of sourceRows) providerSets.set(row.fingerprint, new Set([...(providerSets.get(row.fingerprint) ?? []), row.provider]));
+  const mergedData = data.map((row) => { const providers = providerSets.get(row.fingerprint) ?? new Set([row.provider]); const matched = providers.has("fmp") && providers.has("bargo"); return matched ? { ...row, verificationStatus: "BARGO_FMP_MATCH" as const } : row; });
+  return { data: mergedData, sourceRows, duplicatesRemoved: transactions.length - mergedData.length, duplicateRate: transactions.length ? (transactions.length - mergedData.length) / transactions.length * 100 : 0 };
 }

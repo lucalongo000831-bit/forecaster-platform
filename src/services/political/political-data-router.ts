@@ -3,14 +3,54 @@ import "server-only";
 import { PoliticalClusterEngine, deduplicatePoliticalTransactions } from "@/engines/political";
 import { financialProviderRouter } from "@/providers";
 import type { PoliticalDisclosure } from "@/providers";
+import { normalizeProviderError } from "@/providers/errors";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
-import type { PoliticalChamber, PoliticalFilters, PoliticalParty, PoliticalTransaction, Politician, ResolvedInstrument } from "@/types";
+import type { PoliticalAssetContext, PoliticalAssetProvenance, PoliticalChamber, PoliticalFilters, PoliticalParty, PoliticalTransaction, Politician, ResolvedInstrument } from "@/types";
 import { normalizePoliticianName } from "@/engines/political";
 import { normalizePoliticalDisclosure } from "./political-normalizer";
+import { loadPersistedPoliticalTransactions, loadPoliticalTransactionsForAsset } from "./political-repository";
+import { resolvePoliticalAssetContext } from "./political-asset-resolver";
+import { politicalTransactionMatchesContext } from "./political-asset-state";
 
-interface LoadedPoliticalData { transactions: PoliticalTransaction[]; politicians: Politician[]; duplicatesRemoved: number; duplicateRate: number; fetchedAt: string; invalidRecords: number; }
+export interface LoadedPoliticalData {
+  transactions: PoliticalTransaction[];
+  sourceTransactions?: PoliticalTransaction[];
+  politicians: Politician[];
+  duplicatesRemoved: number;
+  duplicateRate: number;
+  fetchedAt: string;
+  invalidRecords: number;
+  assetContext?: PoliticalAssetContext;
+  provenance: PoliticalAssetProvenance;
+}
 
-async function settle<T>(task: Promise<{ data: T; meta: { fetchedAt: string } }>) { try { return await task; } catch { return null; } }
+async function settle<T>(task: Promise<{ data: T; meta: { fetchedAt: string; provider: string } }>) { try { return await task; } catch { return null; } }
+
+const databaseProvenance = (databaseStatus: PoliticalAssetProvenance["databaseStatus"], providers: string[] = []): PoliticalAssetProvenance => ({
+  sourceMode: databaseStatus === "AVAILABLE" ? "DATABASE" : providers.length ? "PROVIDER_FALLBACK" : "UNAVAILABLE",
+  providers,
+  databaseUsed: databaseStatus === "AVAILABLE",
+  fallbackUsed: databaseStatus !== "AVAILABLE" && providers.length > 0,
+  databaseStatus,
+  providerAttempts: [],
+  lastSuccessfulSync: null,
+});
+
+async function providerAttempt(task: ReturnType<typeof financialProviderRouter.houseTrades>) {
+  try {
+    const result = await task;
+    return {
+      result,
+      attempt: { provider: result.meta.provider, status: result.data.length ? "REQUEST_SUCCESS_WITH_DATA" as const : "REQUEST_SUCCESS_EMPTY" as const, records: result.data.length },
+    };
+  } catch (error) {
+    const normalized = normalizeProviderError("fmp", error);
+    return {
+      result: null,
+      attempt: { provider: normalized.provider, status: normalized.code === "RATE_LIMITED" ? "RATE_LIMITED" as const : "SOURCE_UNAVAILABLE" as const, records: 0 },
+    };
+  }
+}
 
 async function resolvePoliticalInstrument(symbol: string): Promise<ResolvedInstrument | null> {
   const result = await financialProviderRouter.profile(symbol).catch(() => null); if (!result) return null;
@@ -18,11 +58,11 @@ async function resolvePoliticalInstrument(symbol: string): Promise<ResolvedInstr
   return { canonicalSymbol: symbol, name: profile.name, kind: profile.quoteType.toUpperCase().includes("ETF") ? "ETF" : "EQUITY", exchange: profile.exchange, mic: null, currency: profile.currency, tradingCurrency: profile.currency, countryCode: profile.country, issuer: { legalName: profile.name, countryCode: profile.country, lei: null, cik: null, isin: null, website: profile.website, sector: profile.sector, industry: profile.industry }, mappings: [{ provider: result.meta.provider, symbol, exchangeCode: profile.exchange, providerInstrumentId: null, confidence: .9, verifiedAt: result.meta.fetchedAt }], resolutionQuality: result.meta.quality, warnings: [] };
 }
 
-async function normalizeRows(rows: PoliticalDisclosure[], fetchedAt: string): Promise<LoadedPoliticalData> {
-  const symbols = [...new Set(rows.map((row) => row.symbol?.trim().toUpperCase()).filter((symbol): symbol is string => Boolean(symbol && /^[A-Z0-9.^=-]{1,32}$/.test(symbol))))].slice(0, 24);
-  const resolutions = new Map<string, ResolvedInstrument | null>();
-  for (let index = 0; index < symbols.length; index += 8) {
-    const batch = symbols.slice(index, index + 8);
+export async function normalizePoliticalRows(rows: PoliticalDisclosure[], fetchedAt: string, options: { resolveInstruments?: boolean; resolutionCache?: Map<string, ResolvedInstrument | null> } = {}): Promise<Omit<LoadedPoliticalData, "provenance">> {
+  const symbols = [...new Set(rows.map((row) => row.symbol?.trim().toUpperCase()).filter((symbol): symbol is string => Boolean(symbol && /^[A-Z0-9.^=-]{1,32}$/.test(symbol))))];
+  const resolutions = options.resolutionCache ?? new Map<string, ResolvedInstrument | null>();
+  if (options.resolveInstruments !== false) for (let index = 0; index < symbols.length; index += 8) {
+    const batch = symbols.slice(index, index + 8).filter((symbol) => !resolutions.has(symbol));
     const resolved = await Promise.all(batch.map(resolvePoliticalInstrument));
     batch.forEach((symbol, position) => resolutions.set(symbol, resolved[position] ?? null));
   }
@@ -32,9 +72,9 @@ async function normalizeRows(rows: PoliticalDisclosure[], fetchedAt: string): Pr
   for (const transaction of deduped.data) {
     if (politicianMap.has(transaction.politicianId)) continue;
     const name = normalizePoliticianName(transaction.politicianName);
-    politicianMap.set(transaction.politicianId, { id: transaction.politicianId, normalizedName: name.normalizedName, displayName: transaction.politicianName, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, activeStatus: "UNKNOWN", sourceIdentifiers: { fmp: transaction.politicianId }, createdAt: transaction.createdAt, updatedAt: transaction.updatedAt });
+    politicianMap.set(transaction.politicianId, { id: transaction.politicianId, normalizedName: name.normalizedName, displayName: transaction.politicianName, chamber: transaction.chamber, party: transaction.party, state: transaction.state, district: transaction.district, activeStatus: "UNKNOWN", sourceIdentifiers: { [transaction.provider]: transaction.sourceId }, createdAt: transaction.createdAt, updatedAt: transaction.updatedAt });
   }
-  return { transactions: deduped.data, politicians: [...politicianMap.values()], duplicatesRemoved: deduped.duplicatesRemoved, duplicateRate: deduped.duplicateRate, fetchedAt, invalidRecords };
+  return { transactions: deduped.data, sourceTransactions: deduped.sourceRows, politicians: [...politicianMap.values()], duplicatesRemoved: deduped.duplicatesRemoved, duplicateRate: deduped.duplicateRate, fetchedAt, invalidRecords };
 }
 
 function filterTransactions(transactions: PoliticalTransaction[], filters: PoliticalFilters) {
@@ -54,22 +94,54 @@ function filterTransactions(transactions: PoliticalTransaction[], filters: Polit
 
 export class PoliticalDataRouter {
   private async latest(limit = 100): Promise<LoadedPoliticalData> {
+    const persisted = await loadPersistedPoliticalTransactions({ limit });
+    if (persisted) return { ...persisted, provenance: databaseProvenance("AVAILABLE", [...new Set(persisted.transactions.map((row) => row.provider))]) };
     const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(undefined, limit)), settle(financialProviderRouter.senateTrades(undefined, limit))]);
     const rows = [...(house?.data ?? []), ...(senate?.data ?? [])]; const fetchedAt = house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString();
-    return normalizeRows(rows, fetchedAt);
+    return { ...(await normalizePoliticalRows(rows, fetchedAt)), provenance: databaseProvenance("UNAVAILABLE", [...new Set([house?.meta.provider, senate?.meta.provider].filter((value): value is string => Boolean(value)))]) };
   }
 
-  private async bySymbol(symbolInput: string, limit = 500): Promise<LoadedPoliticalData> {
-    const symbol = normalizeSymbol(symbolInput); const [house, senate] = await Promise.all([settle(financialProviderRouter.houseTrades(symbol, limit)), settle(financialProviderRouter.senateTrades(symbol, limit))]);
-    if (house || senate) return normalizeRows([...(house?.data ?? []), ...(senate?.data ?? [])], house?.meta.fetchedAt ?? senate?.meta.fetchedAt ?? new Date().toISOString());
-    const latest = await this.latest(Math.min(500, limit));
-    return { ...latest, transactions: latest.transactions.filter((row) => row.rawTicker === symbol || row.symbol === symbol) };
+  async getTradesByAssetContext(context: PoliticalAssetContext, limit = 2_000): Promise<LoadedPoliticalData> {
+    const persisted = await loadPoliticalTransactionsForAsset(context, limit);
+    if (persisted.databaseStatus === "AVAILABLE") {
+      return { ...persisted, assetContext: context, duplicatesRemoved: 0, duplicateRate: 0, invalidRecords: 0, provenance: databaseProvenance("AVAILABLE", [...new Set(persisted.transactions.map((row) => row.provider))]) };
+    }
+
+    const fmpSymbol = context.providerMappings.find((mapping) => mapping.provider === "fmp")?.symbol ?? context.requestedSymbol;
+    const [house, senate] = await Promise.all([
+      providerAttempt(financialProviderRouter.houseTrades(fmpSymbol, limit)),
+      providerAttempt(financialProviderRouter.senateTrades(fmpSymbol, limit)),
+    ]);
+    const rawRows = [...(house.result?.data ?? []), ...(senate.result?.data ?? [])];
+    const normalized = await normalizePoliticalRows(rawRows, house.result?.meta.fetchedAt ?? senate.result?.meta.fetchedAt ?? new Date().toISOString());
+    const transactions = normalized.transactions.filter((row) => politicalTransactionMatchesContext(row, context));
+    const attempts = [house.attempt, senate.attempt];
+    const providers = [...new Set(attempts.map((attempt) => attempt.provider))];
+    return {
+      ...normalized,
+      transactions,
+      assetContext: context,
+      provenance: {
+        sourceMode: providers.length ? "PROVIDER_FALLBACK" : "UNAVAILABLE",
+        providers,
+        databaseUsed: false,
+        fallbackUsed: true,
+        databaseStatus: persisted.databaseStatus,
+        providerAttempts: attempts,
+        lastSuccessfulSync: null,
+      },
+    };
+  }
+
+  private async bySymbol(symbolInput: string, limit = 2_000): Promise<LoadedPoliticalData> {
+    const context = await resolvePoliticalAssetContext(normalizeSymbol(symbolInput));
+    return this.getTradesByAssetContext(context, limit);
   }
 
   getTradesBySymbol(symbol: string, limit = 500) { return this.bySymbol(symbol, limit); }
   async getTradesByPolitician(nameOrId: string, limit = 500) { const data = await this.latest(limit); const query = nameOrId.toLowerCase(); return { ...data, transactions: data.transactions.filter((row) => row.politicianId === nameOrId || row.politicianName.toLowerCase().includes(query)) }; }
-  async getLatestHouseTrades(limit = 100) { const result = await settle(financialProviderRouter.houseTrades(undefined, limit)); return normalizeRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString()); }
-  async getLatestSenateTrades(limit = 100) { const result = await settle(financialProviderRouter.senateTrades(undefined, limit)); return normalizeRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString()); }
+  async getLatestHouseTrades(limit = 100) { const result = await settle(financialProviderRouter.houseTrades(undefined, limit)); return { ...(await normalizePoliticalRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString())), provenance: databaseProvenance("UNAVAILABLE", result ? [result.meta.provider] : []) }; }
+  async getLatestSenateTrades(limit = 100) { const result = await settle(financialProviderRouter.senateTrades(undefined, limit)); return { ...(await normalizePoliticalRows(result?.data ?? [], result?.meta.fetchedAt ?? new Date().toISOString())), provenance: databaseProvenance("UNAVAILABLE", result ? [result.meta.provider] : []) }; }
   async getTradesByDateRange(from: string, to: string, limit = 500) { const data = await this.latest(limit); return { ...data, transactions: data.transactions.filter((row) => row.disclosureDate >= from && row.disclosureDate <= to) }; }
   async getTradesByAsset(query: string, limit = 500) { const data = await this.latest(limit); const normalized = query.toLowerCase(); return { ...data, transactions: data.transactions.filter((row) => row.symbol?.toLowerCase() === normalized || row.assetName.toLowerCase().includes(normalized)) }; }
   async getTradesByParty(party: PoliticalParty, limit = 500) { const data = await this.latest(limit); return { ...data, transactions: data.transactions.filter((row) => row.party === party) }; }

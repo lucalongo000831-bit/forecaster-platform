@@ -28,7 +28,7 @@ export function componentClassification(score: number | null) {
   return "EXTREME";
 }
 export function metric(key: string, label: string, value: number | null, stressScore: number | null, options: Partial<Omit<RiskMetric, "key" | "label" | "value" | "stressScore" | "displayValue">> & { displayValue?: string } = {}): RiskMetric {
-  return { key, label, value, stressScore, displayValue: options.displayValue ?? (value === null ? "Unavailable" : round(value, 2).toString()), dataType: options.dataType ?? (value === null ? "UNAVAILABLE" : "KAIRO_CALCULATED"), source: options.source ?? "KAIRO calculated", asOf: options.asOf ?? null, detail: options.detail };
+  return { key, label, value, stressScore, displayValue: options.displayValue ?? (value === null ? "Unavailable" : round(value, 2).toString()), dataType: options.dataType ?? (value === null ? "MISSING" : "CALCULATED_FROM_DIRECT"), source: options.source ?? "KAIRO calculated from direct inputs", asOf: options.asOf ?? null, detail: options.detail };
 }
 export function buildComponent(key: GlobalRiskComponentKey, label: string, metrics: RiskMetric[], summary: string): GlobalRiskComponent {
   const valid = metrics.filter((item) => item.stressScore !== null);

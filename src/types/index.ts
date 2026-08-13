@@ -7,3 +7,5 @@ export type * from "./asset-intelligence";
 export type * from "./data-coverage";
 export type * from "./global-market-brief";
 export type * from "./political-intelligence";
+export type * from "./data-architecture-v2";
+export { DATA_STATUSES } from "./data-architecture-v2";

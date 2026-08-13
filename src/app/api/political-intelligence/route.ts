@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     if (filters.symbol) {
       const report = await getSymbolPoliticalIntelligence(filters.symbol, filters);
       if (filters.format === "csv") return new Response(politicalCsv(report.transactions), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${filters.symbol}-congressional-disclosures.csv"`, "Cache-Control": "private, no-store" } });
-      return jsonSuccess(report, context, { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=21600" }, meta: { provider: "fmp", modelVersion: report.summary.modelVersion, dataCompleteness: report.summary.dataCompleteness } });
+      return jsonSuccess(report, context, { headers: { "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600" }, meta: { providers: report.provenance.providers, sourceMode: report.provenance.sourceMode, databaseStatus: report.provenance.databaseStatus, modelVersion: report.summary.modelVersion, dataCompleteness: report.summary.dataCompleteness } });
     }
     const report = await getPoliticalLeaderboard(filters);
     if (filters.format === "csv") return new Response(politicalCsv(report.latest), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": "attachment; filename=congressional-disclosures.csv", "Cache-Control": "private, no-store" } });

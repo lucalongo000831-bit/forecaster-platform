@@ -1,16 +1,58 @@
 import type { MarketChartPoint } from "./market-api";
+import type { InstrumentKind, ProviderSymbolMapping } from "./data-coverage";
 
 export type PoliticalChamber = "HOUSE" | "SENATE" | "UNKNOWN";
 export type PoliticalParty = "DEMOCRATIC" | "REPUBLICAN" | "INDEPENDENT" | "OTHER" | "UNKNOWN";
 export type PoliticalOwnerType = "SELF" | "SPOUSE" | "DEPENDENT" | "JOINT" | "TRUST" | "OTHER" | "UNKNOWN";
 export type PoliticalTransactionType = "PURCHASE" | "SALE_FULL" | "SALE_PARTIAL" | "SALE" | "EXCHANGE" | "OPTION" | "OTHER" | "UNKNOWN";
-export type PoliticalVerificationStatus = "PROVIDER_ONLY" | "OFFICIAL_SOURCE_VERIFIED" | "SOURCE_MISMATCH" | "PENDING" | "UNVERIFIABLE";
+export type PoliticalVerificationStatus = "PROVIDER_ONLY" | "OFFICIAL_SOURCE_VERIFIED" | "SOURCE_MISMATCH" | "PENDING" | "UNVERIFIABLE" | "BARGO_ONLY" | "FMP_ONLY" | "CAPITOL_EXPOSED_ONLY" | "BARGO_FMP_MATCH" | "HOUSE_OFFICIAL_VERIFIED" | "SENATE_OFFICIAL_VERIFIED" | "MULTI_SOURCE_VERIFIED" | "CONFLICT" | "PENDING_VERIFICATION";
 export type PoliticalAmountMethod = "EXACT" | "MIDPOINT_ESTIMATE" | "UNKNOWN";
 export type PoliticalDirection = "STRONG_BUYING" | "BUYING" | "BALANCED" | "NEUTRAL" | "SELLING" | "STRONG_SELLING" | "INSUFFICIENT_DATA";
 export type PoliticalConfidence = "VERY_LOW" | "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH";
 export type PoliticalClusterStrength = "NONE" | "WEAK" | "MODERATE" | "STRONG";
 export type PoliticalPeriod = "7D" | "30D" | "90D" | "6M" | "1Y" | "3Y" | "5Y" | "MAX";
 export type PoliticalPerformanceClassification = "OUTPERFORMED" | "UNDERPERFORMED" | "NEUTRAL" | "INSUFFICIENT_HISTORY";
+export type PoliticalResultStatus = "VERIFIED_ACTIVITY" | "VERIFIED_ZERO" | "PARTIAL_DATA" | "DATASET_INITIALIZING" | "LAST_KNOWN_GOOD" | "UNSUPPORTED";
+export type PoliticalAssetDataStatus = "HAS_ACTIVITY" | "VERIFIED_ZERO" | "PARTIAL_DATA" | "SOURCE_TEMPORARILY_UNAVAILABLE" | "DATABASE_UNAVAILABLE" | "UNRESOLVED_ASSET";
+export type PoliticalProviderAttemptStatus = "REQUEST_SUCCESS_WITH_DATA" | "REQUEST_SUCCESS_EMPTY" | "RATE_LIMITED" | "SOURCE_UNAVAILABLE";
+
+export interface PoliticalAssetContext {
+  requestedSymbol: string;
+  canonicalSymbol: string;
+  assetClass: InstrumentKind;
+  instrumentId: string | null;
+  issuerId: string | null;
+  aliases: string[];
+  providerMappings: ProviderSymbolMapping[];
+  resolutionQuality: "verified" | "partial" | "estimated" | "unavailable";
+  cacheIdentity: string;
+  matchStrategy: "CANONICAL_ISSUER" | "CANONICAL_INSTRUMENT" | "CANONICAL_SYMBOL" | "UNRESOLVED";
+}
+
+export interface PoliticalAssetProvenance {
+  sourceMode: "DATABASE" | "PROVIDER_FALLBACK" | "DATABASE_AND_PROVIDER" | "UNAVAILABLE";
+  providers: string[];
+  databaseUsed: boolean;
+  fallbackUsed: boolean;
+  databaseStatus: "AVAILABLE" | "NOT_CONFIGURED" | "UNAVAILABLE";
+  providerAttempts: Array<{ provider: string; status: PoliticalProviderAttemptStatus; records: number }>;
+  lastSuccessfulSync: string | null;
+}
+
+export interface PoliticalDatasetCoverage {
+  status: PoliticalResultStatus;
+  requestedFrom: string | null;
+  requestedTo: string;
+  historyFrom: string | null;
+  historyTo: string | null;
+  historyCoveragePercent: number;
+  mappingRate: number;
+  ingestedRecords: number;
+  sourceHealthy: boolean;
+  isLastKnownGood: boolean;
+  reason: string;
+  suggestedPeriod: PoliticalPeriod | null;
+}
 
 export interface Politician {
   id: string;
@@ -61,7 +103,7 @@ export interface PoliticalTransaction {
   sourceUrl: string | null;
   filingId: string | null;
   filingType: string | null;
-  provider: "fmp";
+  provider: "fmp" | "bargo" | "capitol-exposed";
   fetchedAt: string;
   verified: boolean;
   verificationStatus: PoliticalVerificationStatus;
@@ -70,6 +112,17 @@ export interface PoliticalTransaction {
   amendment: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export type PoliticalHistoryMonthStatus = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "NOT_CHECKED";
+export interface PoliticalHistoryMonthCoverage {
+  month: string;
+  status: PoliticalHistoryMonthStatus;
+  recordCount: number;
+  houseRecords: number;
+  senateRecords: number;
+  sources: string[];
+  checkedAt: string | null;
 }
 
 export interface PoliticalTradePerformance {
@@ -196,6 +249,13 @@ export interface PoliticalIntelligenceReport {
   sources: Array<{ provider: string; label: string; url: string | null; fetchedAt: string; verificationStatus: PoliticalVerificationStatus }>;
   limitations: string[];
   calculatedAt: string;
+  resultStatus: PoliticalResultStatus;
+  dataStatus: PoliticalAssetDataStatus;
+  coverage: PoliticalDatasetCoverage;
+  canonicalResolution: PoliticalAssetContext | null;
+  provenance: PoliticalAssetProvenance;
+  availablePeriods: PoliticalPeriod[];
+  activityOutsideSelectedPeriod: boolean;
 }
 
 export interface PoliticianActivityReport {
@@ -233,6 +293,8 @@ export interface PoliticalLeaderboardReport {
   verifiedRecords: number;
   dataCompleteness: number;
   calculatedAt: string;
+  resultStatus: PoliticalResultStatus;
+  coverage: PoliticalDatasetCoverage;
 }
 
 export interface PoliticalFilters {

@@ -1,4 +1,4 @@
-export type CalendarEventType = "EARNINGS" | "DIVIDEND" | "MACRO";
+export type CalendarEventType = "EARNINGS" | "DIVIDEND" | "MACRO" | "CENTRAL_BANK";
 export interface MarketCalendarEvent {
   id: string;
   type: CalendarEventType;
@@ -21,9 +21,12 @@ export interface MarketCalendarEvent {
 }
 
 export interface CalendarAvailability {
-  status: "AVAILABLE" | "UNAVAILABLE";
+  status: import("./data-architecture-v2").DataStatus;
   provider: string | null;
   reason: string | null;
+  count: number | null;
+  lastUpdated: string | null;
+  isLastKnownGood: boolean;
 }
 
 export interface MarketCalendarAnalysis {
@@ -32,6 +35,12 @@ export interface MarketCalendarAnalysis {
   monthLabel: string;
   events: MarketCalendarEvent[];
   availability: Record<CalendarEventType, CalendarAvailability>;
+  coverage: {
+    implementedCategories: CalendarEventType[];
+    availableCategories: CalendarEventType[];
+    categoryCoverage: Record<CalendarEventType, number>;
+    overallCoverage: number;
+  };
   persisted: boolean;
   calculatedAt: string;
 }
