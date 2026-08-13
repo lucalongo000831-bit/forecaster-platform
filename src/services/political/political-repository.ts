@@ -68,6 +68,40 @@ export async function persistPoliticalHistoryMonths(months: Array<{ month: strin
   return true;
 }
 
+export async function summarizePersistedPoliticalTransactionsByMonth(from: string, to: string) {
+  if (!isDatabaseConfigured()) return [];
+  const database = getDatabase();
+  const start = new Date(`${from.slice(0, 10)}T00:00:00Z`);
+  const end = new Date(`${to.slice(0, 10)}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  const rows = await database.execute<{
+    month: string;
+    record_count: number;
+    house_records: number;
+    senate_records: number;
+    sources: string[];
+  }>(sql`
+    select
+      to_char(${politicalTransactions.disclosureDate} at time zone 'UTC', 'YYYY-MM') as month,
+      count(*)::int as record_count,
+      count(*) filter (where ${politicalTransactions.chamber} = 'HOUSE')::int as house_records,
+      count(*) filter (where ${politicalTransactions.chamber} = 'SENATE')::int as senate_records,
+      coalesce(array_agg(distinct ${politicalTransactions.provider}), array[]::varchar[]) as sources
+    from ${politicalTransactions}
+    where ${politicalTransactions.disclosureDate} >= ${start}
+      and ${politicalTransactions.disclosureDate} < ${end}
+    group by 1
+    order by 1
+  `);
+  return rows.map((row) => ({
+    month: row.month,
+    recordCount: Number(row.record_count ?? 0),
+    houseRecords: Number(row.house_records ?? 0),
+    senateRecords: Number(row.senate_records ?? 0),
+    sources: Array.isArray(row.sources) ? row.sources : [],
+  }));
+}
+
 export async function loadPoliticalHistoryMonths() {
   if (!isDatabaseConfigured()) return [];
   try { return (await getDatabase().select().from(politicalHistoryMonths).orderBy(politicalHistoryMonths.month)).map((row) => ({ month: row.month, status: row.status as "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "NOT_CHECKED", recordCount: row.recordCount, houseRecords: row.houseRecords, senateRecords: row.senateRecords, sources: row.sources, checkedAt: row.checkedAt?.toISOString() ?? null })); } catch { return []; }
