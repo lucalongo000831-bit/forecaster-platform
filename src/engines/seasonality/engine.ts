@@ -351,7 +351,7 @@ export function analyzeSeasonality(symbol: string, input: MarketChartPoint[], wi
   const closeReturns: Observation[] = [];
   for (let index = 1; index < bars.length; index += 1) {
     const bar = bars[index]; const previous = bars[index - 1];
-    if (bar.year !== previous.year && bar.date.slice(5) === "01-01") continue;
+    if (bar.year !== previous.year) continue;
     closeReturns.push({ key: bar.day, value: (bar.adjustedClose / previous.adjustedClose - 1) * 100, sequence: index, year: bar.year });
   }
   const monthlyBuckets = Array.from({ length: 12 }, (_, index) => index + 1).map((key) => summarize(key, MONTHS[key - 1], monthlyObservations.filter((item) => item.key === key), completedYears.length));
@@ -365,8 +365,9 @@ export function analyzeSeasonality(symbol: string, input: MarketChartPoint[], wi
 
   const matrixRows = [...completedYears, ...(currentBars.length ? [currentYear] : [])].sort((a, b) => b - a).map((year) => ({ year, current: year === currentYear, cells: Array.from({ length: 12 }, (_, index): SeasonalityMonthlyCell => {
     const month = index + 1; const group = monthGroups.get(`${year}-${String(month).padStart(2, "0")}`) ?? []; const value = monthReturn(group);
-    if (value === null) return { month, returnPct: null, status: "MISSING" };
-    return { month, returnPct: value, status: year === currentYear && month >= now.getUTCMonth() + 1 ? "IN_PROGRESS" : "COMPLETE" };
+    const isCurrentMonth = year === currentYear && month === now.getUTCMonth() + 1;
+    if (value === null) return { month, returnPct: null, status: isCurrentMonth && group.length > 0 ? "IN_PROGRESS" : "MISSING" };
+    return { month, returnPct: value, status: isCurrentMonth ? "IN_PROGRESS" : "COMPLETE" };
   }) }));
   const monthlyMatrix = options.includeTable === false ? null : { rows: matrixRows, summary: monthlyBuckets.map((bucket) => ({ month: bucket.key, probability: bucket.hitRate, averageReturn: bucket.mean, medianReturn: bucket.median, observations: bucket.observations, years: monthlyObservations.filter((item) => item.key === bucket.key).map((item) => item.year), quality: bucket.quality, dataCompleteness: completeness(bucket.observations, completedYears.length) })), methodology: "Monthly returns use adjusted first-session open to adjusted last-session close. The current incomplete month is shown but excluded from historical summaries." };
 

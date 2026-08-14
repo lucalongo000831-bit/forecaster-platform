@@ -48,6 +48,22 @@ function mockRefresh() {
 }
 
 describe("SeasonalityExplorer interactions", () => {
+  it("renders the complete Seasonality V2 research workflow", () => {
+    render(<SeasonalityExplorer symbol="AAPL" initial={fixture}/>);
+    for (const heading of ["Seasonality charts", "Correlation", "Trade stats", "Historical trade table", "Monthly matrix", "Daily", "Weekly", "Monthly"]) {
+      expect(screen.getByRole("heading", { name: heading })).toBeVisible();
+      expect(screen.getByLabelText(`About ${heading}`)).toBeVisible();
+    }
+    expect(screen.getByText("Chart series")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Long" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Short" })).toBeVisible();
+    expect(screen.getByLabelText("Start date")).toBeVisible();
+    expect(screen.getByLabelText("End date")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Download all available seasonality curves as CSV" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Download monthly matrix as CSV" })).toBeVisible();
+    expect(screen.getByText(/Current year remains separate from every historical average/)).toBeVisible();
+  });
+
   it("toggles chart series and persists the selection for the session", async () => {
     render(<SeasonalityExplorer symbol="AAPL" initial={fixture}/>);
     const fiveYear = screen.getByRole("button", { name: /^5Y historical average$/ });
