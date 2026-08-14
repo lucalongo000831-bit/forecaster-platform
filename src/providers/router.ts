@@ -133,6 +133,33 @@ export class FinancialProviderRouter {
     return providerCached(`analytics-chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, () => firstAvailable("analytics-chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
   }
 
+  seasonalityChart(symbolInput: string, preferredYears = 25) {
+    const symbol = normalizeSymbol(symbolInput);
+    const order = this.marketOrder();
+    return providerCached(`seasonality-chart:v2:${symbol}:${preferredYears}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, async () => {
+      let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
+      let lastError: unknown = null;
+      for (let index = 0; index < order.length; index += 1) {
+        const adapter = order[index];
+        if (!adapter.isConfigured() || !adapter.supportsSymbol(symbol)) continue;
+        try {
+          const candidate = await adapter.getHistoricalBars(symbol, "MAX", "1d");
+          if (candidate.data.points.length < 2) continue;
+          if (!best || candidate.data.points.length > best.data.points.length) best = { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+          const first = Date.parse(candidate.data.points[0].timestamp);
+          const last = Date.parse(candidate.data.points.at(-1)!.timestamp);
+          const spanYears = Number.isFinite(first) && Number.isFinite(last) ? (last - first) / (365.2425 * 86_400_000) : 0;
+          if (spanYears >= preferredYears) return { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+        } catch (error) {
+          lastError = error;
+          structuredLog("warn", "provider.router.seasonality.fallback", { provider: adapter.name, operation: "seasonality-chart", symbol, code: error instanceof ProviderError ? error.code : "UPSTREAM_UNAVAILABLE" });
+        }
+      }
+      if (best) return best;
+      throw lastError ?? new ProviderError("yahoo", "NOT_FOUND", "Storico daily non disponibile per Seasonality.", false, 404);
+    });
+  }
+
   marketStatus(market = "US") {
     const order = this.marketOrder();
     return providerCached(`market-status:${market}`, { freshSeconds: 30, staleSeconds: 300 }, () => firstAvailable("market-status", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getMarketStatus(market) }))));

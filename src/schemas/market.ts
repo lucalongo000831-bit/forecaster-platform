@@ -29,8 +29,30 @@ export const earningsRequestSchema = z.object({
 }).refine((value) => value.from <= value.to, { message: "Intervallo date non valido" });
 export const analysisHorizonSchema = z.enum(["intraday", "1d", "1w", "1m", "3m", "6m", "12m", "long"]);
 export const technicalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m"), benchmark: symbolSchema.default("^GSPC") });
-export const seasonalityWindowSchema = z.enum(["1Y", "5Y", "10Y", "15Y", "20Y", "MAX"]);
-export const seasonalityRequestSchema = z.object({ symbol: symbolSchema, window: seasonalityWindowSchema.default("20Y") });
+export const seasonalityWindowSchema = z.enum(["1Y", "3Y", "5Y", "7Y", "10Y", "15Y", "20Y", "25Y", "MAX"]);
+const seasonalityBooleanSchema = z.preprocess((value) => value === "true" ? true : value === "false" ? false : value, z.boolean()).default(true);
+const seasonalityDatePartSchema = z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/).refine((value) => new Date(`2024-${value}T00:00:00Z`).toISOString().slice(5, 10) === value, "Data MM-DD non valida");
+export const seasonalityRequestSchema = z.object({
+  symbol: symbolSchema,
+  window: seasonalityWindowSchema.default("20Y"),
+  windows: z.string().max(80).optional().transform((value, context) => {
+    if (!value) return undefined;
+    const parsed = [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+    if (!parsed.length || parsed.length > 9 || parsed.some((item) => !seasonalityWindowSchema.safeParse(item).success)) {
+      context.addIssue({ code: "custom", message: "Finestre stagionali non valide" });
+      return z.NEVER;
+    }
+    return parsed as Array<z.infer<typeof seasonalityWindowSchema>>;
+  }),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  rangeStart: seasonalityDatePartSchema.default("01-01"),
+  rangeEnd: seasonalityDatePartSchema.default("12-31"),
+  side: z.enum(["LONG", "SHORT"]).default("LONG"),
+  includeCycles: seasonalityBooleanSchema,
+  includeCorrelations: seasonalityBooleanSchema,
+  includeTradeStats: seasonalityBooleanSchema,
+  includeTable: seasonalityBooleanSchema,
+});
 export const signalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m") });
 export const targetHorizonSchema = z.enum(["3m", "6m", "12m", "long"]);
 export const targetRequestSchema = z.object({ symbol: symbolSchema, horizon: targetHorizonSchema.default("12m") });
