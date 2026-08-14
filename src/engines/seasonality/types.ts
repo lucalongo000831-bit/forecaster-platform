@@ -152,6 +152,7 @@ export interface SeasonalityDirectionalBucket {
   key: number;
   label: string;
   score: number | null;
+  meanReturn: number | null;
   positiveHitRate: number | null;
   sampleSize: number;
   years: number[];

@@ -242,7 +242,7 @@ export function signedDirectionalScore(values: number[]) {
 function directionalBucket(key: number, label: string, observations: Observation[], expectedYears: number): SeasonalityDirectionalBucket {
   const values = observations.map((item) => item.value);
   const years = [...new Set(observations.map((item) => item.year))].sort((a, b) => a - b);
-  return { key, label, score: signedDirectionalScore(values), positiveHitRate: values.length ? values.filter((value) => value > 0).length / values.length * 100 : null, sampleSize: values.length, years, quality: qualityFor(values.length, years.length), dataCompleteness: completeness(years.length, expectedYears) };
+  return { key, label, score: signedDirectionalScore(values), meanReturn: mean(values), positiveHitRate: values.length ? values.filter((value) => value > 0).length / values.length * 100 : null, sampleSize: values.length, years, quality: qualityFor(values.length, years.length), dataCompleteness: completeness(years.length, expectedYears) };
 }
 
 function directionalSeries(id: string, label: string, observations: Observation[], keys: number[], labels: (key: number) => string, expectedYears: number): SeasonalityDirectionalSeries {
@@ -383,8 +383,8 @@ export function analyzeSeasonality(symbol: string, input: MarketChartPoint[], wi
     };
   };
   const directionalInputs = [
-    ...historicalCurves,
-    ...presidentialCycles.map((item) => item.curve),
+    ...historicalCurves.filter((curve) => curve.available),
+    ...presidentialCycles.map((item) => item.curve).filter((curve) => curve.available),
     ...(bestCurve ? [bestCurve] : []),
   ];
   const directionalSets = directionalInputs.map((curve) => directionalForYears(curve.id, curve.label, curve.sampleYears));
@@ -392,7 +392,10 @@ export function analyzeSeasonality(symbol: string, input: MarketChartPoint[], wi
   let tradeRange = null;
   if (options.includeTradeStats !== false) {
     const start = mmdd(options.rangeStart ?? "01-01"); const end = mmdd(options.rangeEnd ?? "12-31"); const side = options.side ?? "LONG";
-    const statistics = historicalCurves.map((curve) => summarizeTrades(curve.id, curve.label, curve.sampleYears.flatMap((year) => { const trade = tradeForYear(bars, year, start, end, side); return trade ? [trade] : []; }), curve.sampleYears.length));
+    const statistics = historicalCurves.map((curve) => {
+      const summary = summarizeTrades(curve.id, curve.label, curve.sampleYears.flatMap((year) => { const trade = tradeForYear(bars, year, start, end, side); return trade ? [trade] : []; }), curve.sampleYears.length);
+      return curve.available ? summary : { ...summary, status: curve.status, probability: null, averageReturn: null, medianReturn: null, bestReturn: null, worstReturn: null, avgMaxRise: null, avgMaxDrop: null, trades: [] };
+    });
     for (const cycle of presidentialCycles) statistics.push(summarizeTrades(cycle.curve.id, cycle.label, cycle.sampleYears.flatMap((year) => { const trade = tradeForYear(bars, year, start, end, side); return trade ? [trade] : []; }), cycle.sampleYears.length));
     if (bestCurve?.year) { const trade = tradeForYear(bars, bestCurve.year, start, end, side); statistics.push(summarizeTrades(bestCurve.id, bestCurve.label, trade ? [trade] : [], 1)); }
     tradeRange = { rangeStart: start, rangeEnd: end, side, crossesYear: end < start, statistics };

@@ -95,6 +95,7 @@ describe("seasonality V2 engine", () => {
     expect(daily.buckets.some((bucket) => bucket.score !== null)).toBe(true);
     expect(weekly.buckets.map((bucket) => bucket.label)).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri"]);
     expect(monthly.buckets).toHaveLength(12);
+    expect(daily.buckets.some((bucket) => bucket.meanReturn !== null)).toBe(true);
     for (const bucket of [...daily.buckets, ...weekly.buckets, ...monthly.buckets]) if (bucket.score !== null) expect(bucket.score === 0 || Math.abs(bucket.score) >= 50).toBe(true);
   });
 
