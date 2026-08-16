@@ -64,6 +64,7 @@ export function KairoChatProvider({ children, enabled }: { children: React.React
     if (seed) setDraft(seed);
     void refreshHistory();
   }, [refreshHistory]);
+  const contextValue = useMemo(() => ({ openKairo }), [openKairo]);
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [messages, status]);
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -128,7 +129,7 @@ export function KairoChatProvider({ children, enabled }: { children: React.React
     }
   };
 
-  return <KairoContext.Provider value={{ openKairo }}>
+  return <KairoContext.Provider value={contextValue}>
     {children}
     {open && <>
       <button className="kairo-backdrop" aria-label="Close Ask Kairo" onClick={() => setOpen(false)}/>

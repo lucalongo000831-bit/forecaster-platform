@@ -40,6 +40,12 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
     } catch { /* The last verified snapshot remains visible with its timestamp. */ }
   }, [instrument.symbol]);
 
+  const prefetchSeasonality = useCallback(() => {
+    void import("@/components/financial/seasonality-explorer-loader").then(({ prefetchSeasonalityAnalysis }) => {
+      prefetchSeasonalityAnalysis(instrument.symbol);
+    });
+  }, [instrument.symbol]);
+
   useEffect(() => {
     let timer: number | undefined;
     const schedule = () => {
@@ -80,7 +86,7 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
           {tabs.map(([route,label]) => {
             const href = instrumentPath(instrument, route);
             const active = route.startsWith("fundamentals") ? pathname.includes("/fundamentals") : pathname.endsWith(route);
-            return <Link key={route} className={active ? "active" : ""} href={href}>{label}</Link>;
+            return <Link key={route} className={active ? "active" : ""} href={href} onPointerEnter={route === "seasonality" ? prefetchSeasonality : undefined} onFocus={route === "seasonality" ? prefetchSeasonality : undefined}>{label}</Link>;
           })}
         </nav>
         <button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => setFavorite(!favorite)} aria-pressed={favorite} aria-label="Toggle favorite"><Star size={18} fill={favorite ? "currentColor" : "none"}/><span>{favorite ? "Watching" : "Watch"}</span></button>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight, CalendarDays, CircleDollarSign, Globe2, Radar, Sparkles, Star, TrendingUp } from "lucide-react";
 import { MainPriceChart } from "@/components/charts/market-charts";
 import { KairoLensButton } from "@/components/ai/kairo-lens-button";
@@ -12,19 +13,33 @@ import { getMarketCalendar } from "@/services/calendar/calendar-service";
 import { DashboardAutoRefresh } from "@/components/financial/dashboard-auto-refresh";
 import { getGlobalRiskCurrent } from "@/services/global-risk";
 
+function GlobalRiskFallback() {
+  return <div className="gr-dashboard-widget unknown" aria-busy="true"><span className="gr-dashboard-icon"><Globe2/></span><div><span className="page-kicker">Global risk</span><strong>Updating monitor</strong><small>Loading the latest verified risk snapshot…</small></div><ArrowRight/></div>;
+}
+
+async function GlobalRiskWidget({ now }: { now: number }) {
+  const globalRisk = await getGlobalRiskCurrent().catch(() => null);
+  return <Link href="/global-markets" className={`gr-dashboard-widget ${globalRisk?.status.toLowerCase() ?? "unknown"}`}><span className="gr-dashboard-icon"><Globe2/></span><div><span className="page-kicker">Global risk</span><strong>{globalRisk ? `${globalRisk.status} · ${globalRisk.score}/100` : "Unavailable"}</strong><small>{globalRisk ? `${globalRisk.systemicStress === "NONE" ? "No systemic stress" : `Systemic ${globalRisk.systemicStress.toLowerCase()}`} · Updated ${Math.max(0, Math.floor((now - new Date(globalRisk.calculatedAt).getTime()) / 60_000))}m ago` : "Automatic monitor temporarily unavailable"}</small></div><ArrowRight/></Link>;
+}
+
 export default async function DashboardPage(){
-  const data = await financialDataService.getDashboardData(); const user = await getCurrentUser().catch(() => null); const today = new Date(); const nextWeek = new Date(today.getTime() + 7 * 86_400_000);
-  const [privateData, calendar, globalRisk] = await Promise.all([
-    user && isDatabaseConfigured() ? Promise.all([listPortfolios(user.id), listWatchlists(user.id)]).then(([portfolios, lists]) => ({ portfolios, lists })).catch(() => null) : Promise.resolve(null),
+  const today = new Date(); const nextWeek = new Date(today.getTime() + 7 * 86_400_000);
+  const userPromise = getCurrentUser().catch(() => null);
+  const privateDataPromise = userPromise.then((user) => user && isDatabaseConfigured()
+    ? Promise.all([listPortfolios(user.id), listWatchlists(user.id)]).then(([portfolios, lists]) => ({ portfolios, lists })).catch(() => null)
+    : null);
+  const [data, user, privateData, calendar] = await Promise.all([
+    financialDataService.getDashboardData(),
+    userPromise,
+    privateDataPromise,
     getMarketCalendar(today.toISOString().slice(0, 10), nextWeek.toISOString().slice(0, 10)).catch(() => null),
-    getGlobalRiskCurrent().catch(() => null),
   ]);
   const portfolio = privateData?.portfolios[0]; const privateItems = privateData?.lists.flatMap((list) => list.items) ?? []; const directional = privateItems.filter((item) => item.signal && item.signal !== "HOLD"); const constructive = directional.filter((item) => item.signal?.includes("BUY")).length; const constructivePercent = directional.length ? constructive / directional.length * 100 : null;
   const greeting = user?.name?.trim().split(/\s+/)[0];
   return <div className="container-shell page-stack dashboard-page"><DashboardAutoRefresh/><DataSourceNotice source={data.source}/>
   <header className="dashboard-heading"><div><span className="page-kicker">Personal intelligence workspace</span><h1 className="page-title">Good afternoon{greeting ? `, ${greeting}` : ""}.</h1><p className="muted mt-3 text-base">Focus on what moved, what matters and what comes next.</p></div><Link className="button-primary" href="/search"><Radar size={17}/>Explore markets</Link></header>
   <section className="market-pulse"><div className="pulse-label"><i/><span>Market pulse</span><small>US session</small></div>{data.pulse.map(({ name, value, change }) => <div className="pulse-item" key={name}><span>{name}</span><strong>{value}</strong><small>{change}</small></div>)}</section>
-  <Link href="/global-markets" className={`gr-dashboard-widget ${globalRisk?.status.toLowerCase() ?? "unknown"}`}><span className="gr-dashboard-icon"><Globe2/></span><div><span className="page-kicker">Global risk</span><strong>{globalRisk ? `${globalRisk.status} · ${globalRisk.score}/100` : "Unavailable"}</strong><small>{globalRisk ? `${globalRisk.systemicStress === "NONE" ? "No systemic stress" : `Systemic ${globalRisk.systemicStress.toLowerCase()}`} · Updated ${Math.max(0, Math.floor((today.getTime() - new Date(globalRisk.calculatedAt).getTime()) / 60_000))}m ago` : "Automatic monitor temporarily unavailable"}</small></div><ArrowRight/></Link>
+  <Suspense fallback={<GlobalRiskFallback/>}><GlobalRiskWidget now={today.getTime()}/></Suspense>
   <section className="grid-3 metric-grid">{[
     ["Portfolio value", portfolio ? formatCurrency(portfolio.totalMarketValue, portfolio.baseCurrency, 0) : "Unavailable", portfolio ? `${formatCurrency(portfolio.unrealizedPnl, portfolio.baseCurrency, 0)} unrealized P/L` : user ? "Create a portfolio to begin" : "Sign in for private holdings", CircleDollarSign, "mint"],
     ["Signal balance", directional.length ? `${constructive}/${directional.length} constructive` : "Unavailable", constructivePercent === null ? "No calculated private-list signals" : `${constructivePercent.toFixed(0)}% constructive`, TrendingUp, "violet"],

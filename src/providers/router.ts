@@ -108,16 +108,13 @@ export class FinancialProviderRouter {
 
   quotes(symbolInputs: string[]) {
     const symbols = unique(symbolInputs.map(normalizeSymbol)).slice(0, 50);
-    return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 15, staleSeconds: 60 }, async () => {
-      const settled = await Promise.allSettled(symbols.map((symbol) => this.quote(symbol)));
-      const results = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      if (!results.length) throw settled.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason ?? new ProviderError("yahoo", "NOT_FOUND", "Nessuna quotazione disponibile.", false, 404);
-      const providers = unique(results.map((result) => result.meta.provider));
-      const timestamps = results.map((result) => result.meta.sourceTimestamp).filter((value): value is string => Boolean(value)).sort();
-      const freshnessTypes = results.map((result) => result.meta.freshnessType);
-      const freshnessType = freshnessTypes.includes("STALE") ? "STALE" : freshnessTypes.includes("DELAYED") ? "DELAYED" : freshnessTypes.every((value) => value === "REALTIME") ? "REALTIME" : freshnessTypes.every((value) => value === "CACHED") ? "CACHED" : "NEAR_REALTIME";
-      return providerResult(results[0]!.meta.provider, results.map((result) => result.data), { sourceTimestamp: timestamps.at(-1) ?? null, freshness: freshnessType === "STALE" ? "stale" : freshnessType === "CACHED" ? "cached" : freshnessType === "REALTIME" || freshnessType === "NEAR_REALTIME" ? "realtime" : "delayed", freshnessType, quality: results.length === symbols.length ? "verified" : "partial", isFallback: providers.length > 1 || results.some((result) => result.meta.isFallback) });
-    });
+    const order = unique([marketAdapters.yahoo, ...this.marketOrder()]);
+    return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 15, staleSeconds: 60 }, () => firstAvailable("quotes", undefined, order.map((adapter) => ({
+      name: adapter.name,
+      configured: adapter.isConfigured(),
+      supported: symbols.every((symbol) => adapter.supportsSymbol(symbol)),
+      task: () => adapter.getQuotes(symbols),
+    }))));
   }
 
   chart(symbolInput: string, range: ChartRange, interval?: string | null) {

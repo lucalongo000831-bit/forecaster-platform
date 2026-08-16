@@ -3,6 +3,8 @@ import "server-only";
 import type { FinancialDataProvider } from "./financial-data-provider";
 import { brandIdentity } from "@/config/brand";
 import { financialProviderRouter } from "@/providers";
+import { providerCached } from "@/providers/cache";
+import { providerResult } from "@/providers/metadata";
 import { analyticalClose, annualPerformance, drawdowns, periodReturns, relativeStrengthIndex, simpleMovingAverage, toTimeSeries } from "./yahoo/analytics";
 import { instrumentHref, marketSlug, normalizeSymbol } from "./yahoo/symbol-resolver";
 import { canFallback, safeServerLog } from "./yahoo/errors";
@@ -34,6 +36,16 @@ const DEFAULT_SYMBOL = "NVDA";
 const DEFAULT_REF: InstrumentRef = { market: "nasdaq", symbol: DEFAULT_SYMBOL };
 const WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA"];
 const DISCOVERY_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "^GSPC", "BTC-USD", "ENI.MI", "STLAM.MI"];
+const SHELL_SEARCH_RESULTS: ShellData["searchResults"] = [
+  ["Apple Inc.", "AAPL", "NASDAQ", "EQUITY"],
+  ["Microsoft Corporation", "MSFT", "NASDAQ", "EQUITY"],
+  ["NVIDIA Corporation", "NVDA", "NASDAQ", "EQUITY"],
+  ["Tesla, Inc.", "TSLA", "NASDAQ", "EQUITY"],
+  ["S&P 500", "^GSPC", "INDEX", "INDEX"],
+  ["Bitcoin USD", "BTC-USD", "CRYPTO", "CRYPTOCURRENCY"],
+  ["Eni S.p.A.", "ENI.MI", "MILAN", "EQUITY"],
+  ["Stellantis N.V.", "STLAM.MI", "MILAN", "EQUITY"],
+].map(([name, symbol, exchange, type]) => ({ name, meta: `${symbol} · ${exchange}`, href: instrumentHref(symbol, exchange, type) }));
 
 function refSymbol(ref: InstrumentRef) { return normalizeSymbol(decodeURIComponent(ref.symbol)); }
 function signal(change: number): Signal { return change >= 0.75 ? "BUY" : change <= -0.75 ? "SELL" : "HOLD"; }
@@ -66,19 +78,7 @@ export class YahooFinanceProvider implements FinancialDataProvider {
 
   async getShellData() {
     const brand = await this.getBrand();
-    return this.fallback<ShellData>("shell", undefined, async () => {
-      const quotesResult = await financialProviderRouter.quotes(DISCOVERY_SYMBOLS);
-      const quotes = quotesResult.data;
-      const primary = quotes.find((item) => item.symbol === DEFAULT_SYMBOL) ?? (await financialProviderRouter.quote(DEFAULT_SYMBOL)).data;
-      return {
-        brand,
-        primaryInstrument: DEFAULT_REF,
-        searchResults: quotes.map((item) => ({ name: item.name, meta: `${item.symbol} · ${item.exchange}`, href: instrumentHref(item.symbol, item.exchange, item.quoteType) })),
-        marketStatus: primary.marketState === "REGULAR" ? "US market open" : "US market closed",
-        marketClosesIn: primary.isDelayed ? "Quotations may be delayed" : `Updated ${primary.asOf ? new Date(primary.asOf).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "recently"}`,
-        source: quotesResult.meta.provider,
-      };
-    }, async () => ({ brand, primaryInstrument: DEFAULT_REF, searchResults: [], marketStatus: "Market data unavailable", marketClosesIn: "Provider connection will retry", source: "unavailable" as const }));
+    return { brand, primaryInstrument: DEFAULT_REF, searchResults: SHELL_SEARCH_RESULTS, marketStatus: "Market status loading", marketClosesIn: "Updating in background", source: "calculated" as const };
   }
 
   async getWatchlist(): Promise<WatchlistEntry[]> {
@@ -116,12 +116,14 @@ export class YahooFinanceProvider implements FinancialDataProvider {
   async getInstrument(ref: InstrumentRef): Promise<InstrumentProfile> {
     const symbol = refSymbol(ref);
     return this.fallback<InstrumentProfile>("instrument", symbol, async () => {
-      const quoteResult = await financialProviderRouter.quote(symbol);
+      const [quoteResult, profile] = await Promise.all([
+        financialProviderRouter.quote(symbol),
+        financialProviderRouter.profile(symbol).then((result) => result.data).catch((error) => {
+          safeServerLog("profile:partial", symbol, error);
+          return null;
+        }),
+      ]);
       const quote = quoteResult.data;
-      const profile = await financialProviderRouter.profile(symbol).then((result) => result.data).catch((error) => {
-        safeServerLog("profile:partial", symbol, error);
-        return null;
-      });
       return {
         market: marketSlug(quote.exchange, quote.quoteType),
         symbol,
@@ -375,24 +377,27 @@ export class YahooFinanceProvider implements FinancialDataProvider {
 
   async getDashboardData(): Promise<DashboardData> {
     return this.fallback<DashboardData>("dashboard", undefined, async () => {
-      const [watchlist, spotlight, chart, pulseQuotes] = await Promise.all([
-        this.getWatchlist(), this.getInstrument(DEFAULT_REF), financialProviderRouter.chart(DEFAULT_SYMBOL, "1Y"), financialProviderRouter.quotes(["^GSPC", "^NDX", "^TNX", "^VIX"]),
-      ]);
-      return {
-        greetingName: "",
-        pulse: pulseQuotes.data.map((item) => ({ name: item.name, value: item.price.toLocaleString("en-US", { maximumFractionDigits: 2 }), change: `${item.changePercent >= 0 ? "+" : ""}${item.changePercent.toFixed(2)}%` })),
-        watchlist,
-        spotlight,
-        spotlightSeries: toTimeSeries(chart.data.points),
-        briefTitle: "Narrative automatica non disponibile",
-        briefBody: "Automated narrative is currently unavailable while Kairo AI is disabled.",
-        portfolioValue: null,
-        monthlyPortfolioChange: null,
-        signalSummary: "Dato non disponibile",
-        constructivePercent: null,
-        upcomingEvents: null,
-        source: chart.meta.provider,
-      };
+      return (await providerCached("presentation:dashboard:v1", { freshSeconds: 30, staleSeconds: 300 }, async () => {
+        const [watchlist, spotlight, chart, pulseQuotes] = await Promise.all([
+          this.getWatchlist(), this.getInstrument(DEFAULT_REF), financialProviderRouter.chart(DEFAULT_SYMBOL, "1Y"), financialProviderRouter.quotes(["^GSPC", "^NDX", "^TNX", "^VIX"]),
+        ]);
+        const data: DashboardData = {
+          greetingName: "",
+          pulse: pulseQuotes.data.map((item) => ({ name: item.name, value: item.price.toLocaleString("en-US", { maximumFractionDigits: 2 }), change: `${item.changePercent >= 0 ? "+" : ""}${item.changePercent.toFixed(2)}%` })),
+          watchlist,
+          spotlight,
+          spotlightSeries: toTimeSeries(chart.data.points),
+          briefTitle: "Narrative automatica non disponibile",
+          briefBody: "Automated narrative is currently unavailable while Kairo AI is disabled.",
+          portfolioValue: null,
+          monthlyPortfolioChange: null,
+          signalSummary: "Dato non disponibile",
+          constructivePercent: null,
+          upcomingEvents: null,
+          source: chart.meta.provider,
+        };
+        return providerResult(chart.meta.provider, data, { sourceTimestamp: chart.meta.sourceTimestamp, freshness: chart.meta.freshness, freshnessType: chart.meta.freshnessType, quality: chart.meta.quality });
+      })).data;
     });
   }
 

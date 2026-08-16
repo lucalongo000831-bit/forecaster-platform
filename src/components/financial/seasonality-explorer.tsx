@@ -216,7 +216,7 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
       <RangeControls rangeStart={rangeStart} rangeEnd={rangeEnd} side={side} loading={loading} crossesYear={analysis.tradeRange?.crossesYear ?? false} onStart={setRangeStart} onEnd={setRangeEnd} onSide={changeSide} onApply={() => void refresh()} onClear={clearRange}/>
     </section>
 
-    <section aria-labelledby="correlation-title">
+    <section className="seasonality-deferred-section" aria-labelledby="correlation-title">
       <SectionHeading id="correlation-title" title="Correlation" help="Pearson correlation is calculated only over the observed current-year segment. The 0–100 score expresses positive similarity; negative correlations are clipped to zero. It is descriptive, not predictive."><TrendingUp className="text-[var(--accent-dark)]"/></SectionHeading>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {analysis.correlations.filter((item) => analysis.curves.some((curve) => curve.id === item.seriesId && curve.type === "HISTORICAL_WINDOW")).map((item) => <CorrelationCard key={item.seriesId} label={item.label} raw={item.correlation.rawCorrelation} score={item.correlation.correlationScore} sample={item.correlation.sampleSize} quality={item.correlation.quality}/>) }
@@ -225,7 +225,7 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
       </div>
     </section>
 
-    <section aria-labelledby="trade-stats-title">
+    <section className="seasonality-deferred-section" aria-labelledby="trade-stats-title">
       <SectionHeading id="trade-stats-title" title="Trade stats" help="For every completed historical sample, Kairo enters at the first valid session on or after the start date and exits at the last valid session on or before the end date. SHORT reverses return and excursion direction."><CalendarDays className="text-[var(--violet)]"/></SectionHeading>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {statistics.map((item, index) => <button key={item.seriesId} disabled={item.status !== "AVAILABLE"} onClick={() => setSelectedStatsId(item.seriesId)} className={`soft-card p-5 text-left transition ${selectedStatsId === item.seriesId ? "ring-2 ring-[var(--accent)]" : "hover:-translate-y-0.5"}`} title={item.status === "AVAILABLE" ? `${item.observations} completed observations` : item.status}>
@@ -236,12 +236,12 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
       </div>
     </section>
 
-    <section aria-labelledby="trade-table-title">
+    <section className="seasonality-deferred-section" aria-labelledby="trade-table-title">
       <SectionHeading id="trade-table-title" title="Historical trade table" help="The selected distribution is expanded below, newest observation first. MFE and MAE are direction-aware maximum favorable and adverse excursions."/>
       {activeStats ? <><div className="grid-3 mb-5"><Kpi label="Average / median" value={pct(activeStats.averageReturn)} detail={`Median ${pct(activeStats.medianReturn)}`}/><Kpi label="Best / worst" value={pct(activeStats.bestReturn)} detail={`Worst ${pct(activeStats.worstReturn)}`}/><Kpi label="Average excursion" value={pct(activeStats.avgMaxRise)} detail={`Average max drop ${pct(activeStats.avgMaxDrop)}`}/></div><div className="table-shell"><table className="data-table"><thead><tr><th>Year</th><th>Open</th><th>Close</th><th>Return</th><th>Max rise</th><th>Max drop</th><th>MFE</th><th>MAE</th></tr></thead><tbody>{activeStats.trades.slice().sort((a, b) => b.year - a.year).map((trade) => <tr key={`${trade.year}-${trade.openDate}`}><td>{trade.year}</td><td>{trade.openDate}</td><td>{trade.closeDate}</td><td className={trade.returnPct >= 0 ? "positive" : "negative"}>{pct(trade.returnPct)}</td><td>{pct(trade.maxRisePct)}</td><td>{pct(trade.maxDropPct)}</td><td>{pct(trade.maxFavorableExcursionPct)}</td><td>{pct(trade.maxAdverseExcursionPct)}</td></tr>)}</tbody></table></div></> : <EmptyPanel message="Trade statistics are unavailable for this range."/>}
     </section>
 
-    <section aria-labelledby="matrix-title">
+    <section className="seasonality-deferred-section" aria-labelledby="matrix-title">
       <SectionHeading id="matrix-title" title="Monthly matrix" help="Every cell uses the first adjusted open and final adjusted close of a completed calendar month. Current partial months are marked; future months remain blank and never enter summaries.">
         <button className="icon-button" onClick={downloadMatrix} aria-label="Download monthly matrix as CSV"><Download size={18}/></button>
       </SectionHeading>
@@ -290,7 +290,7 @@ function CorrelationCard({ label, raw, score, sample, quality }: { label: string
 }
 
 function DirectionalSection({ id, title, help, series, visibleIds, month, onMonth, onApply, loading = false }: { id: string; title: string; help: string; series: SeasonalityAnalysis["directional"]["daily"]; visibleIds: Set<string>; month?: number; onMonth?: (value: number) => void; onApply?: () => void; loading?: boolean }) {
-  return <section aria-labelledby={id}><SectionHeading id={id} title={title} help={help}><span className="badge">−100 → +100</span></SectionHeading>
+  return <section className="seasonality-deferred-section" aria-labelledby={id}><SectionHeading id={id} title={title} help={help}><span className="badge">−100 → +100</span></SectionHeading>
     {month && onMonth ? <div className="mb-5 flex flex-wrap items-end gap-3"><label><span className="small-label mb-2 block">Calendar month</span><select aria-label="Calendar month" className="h-11 rounded-xl border border-[var(--border)] bg-white px-4" value={month} onChange={(event) => onMonth(Number(event.target.value))}>{MONTHS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</select></label><button className="button-secondary" onClick={onApply} disabled={loading}>Update daily view</button></div> : null}
     <div className="rounded-2xl border border-[var(--border)] bg-white p-2 sm:p-4"><SeasonalityDirectionalChart series={series} visibleIds={visibleIds}/></div>
   </section>;

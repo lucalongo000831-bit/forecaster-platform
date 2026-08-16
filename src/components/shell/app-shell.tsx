@@ -31,6 +31,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [mobileRail, setMobileRail] = useState(false);
   const [query, setQuery] = useState("");
+  const [marketStatus, setMarketStatus] = useState(() => ({ label: data.marketStatus, detail: data.marketClosesIn }));
 
   useEffect(() => {
     const handleKeys = (event: KeyboardEvent) => {
@@ -41,6 +42,19 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     };
     window.addEventListener("keydown", handleKeys);
     return () => window.removeEventListener("keydown", handleKeys);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/market/status?market=US", { signal: controller.signal }).then(async (response) => {
+      const body = await response.json() as { data?: { state?: string; asOf?: string | null } };
+      if (!response.ok || !body.data) return;
+      const state = body.data.state?.toLowerCase();
+      const label = state === "open" ? "US market open" : state === "extended" ? "US extended hours" : state === "closed" ? "US market closed" : "US market status unavailable";
+      const detail = body.data.asOf ? `Updated ${new Date(body.data.asOf).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}` : "Quotations may be delayed";
+      setMarketStatus({ label, detail });
+    }).catch(() => undefined);
+    return () => controller.abort();
   }, []);
 
   const initialSearch = useMemo<SearchInstrument[]>(() => data.searchResults.map((item) => ({ symbol: item.meta.split(" · ")[0] || item.name, name: item.name, type: "Stock", venue: item.meta, price: 0, href: item.href, source: data.source, currency: "USD" })), [data.searchResults, data.source]);
@@ -89,7 +103,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
           <span className="lens-icon"><Sparkles size={18}/></span>
           <span><strong>Kairo Lens</strong><small>Daily market narrative</small></span>
         </button>
-        <div className="market-status"><span className="status-dot"/><span><strong>{data.marketStatus}</strong><small>{data.marketClosesIn}</small></span></div>
+        <div className="market-status"><span className="status-dot"/><span><strong>{marketStatus.label}</strong><small>{marketStatus.detail}</small></span></div>
       </aside>
 
       <div className="app-workspace">
