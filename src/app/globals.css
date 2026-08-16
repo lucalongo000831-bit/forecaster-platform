@@ -45,6 +45,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .container-shell { width: min(1480px, calc(100% - 56px)); margin-inline: auto; }
 .page-stack { display: grid; gap: 28px; padding-block: 30px 72px; }
 .page-stack > * { min-width: 0; max-width: 100%; }
+.seasonality-deferred-section { content-visibility: auto; contain-intrinsic-block-size: 520px; }
 .page-stack > header { padding: 4px 2px 2px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }

@@ -6,7 +6,27 @@ import { getServerEnvironment } from "@/schemas/env";
 
 let redis: Redis | null | undefined;
 const localCache = new Map<string, { value: unknown; expiresAt: number }>();
-const remoteOperationTimeoutMs = 1_500;
+const pendingRemoteReads = new Map<string, Promise<unknown | null>>();
+const remoteOperationTimeoutMs = 500;
+const remoteReadThroughTtlMs = 15_000;
+const remoteCircuitBreakMs = 30_000;
+let remoteUnavailableUntil = 0;
+
+function localGet<T>(key: string): T | null {
+  const entry = localCache.get(key);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    localCache.delete(key);
+    return null;
+  }
+  return entry.value as T;
+}
+
+function localSet<T>(key: string, value: T, ttlMs: number): void {
+  localCache.set(key, { value, expiresAt: Date.now() + Math.max(1_000, ttlMs) });
+  if (localCache.size <= 1_000) return;
+  const now = Date.now();
+  for (const [entryKey, entry] of localCache) if (entry.expiresAt <= now) localCache.delete(entryKey);
+}
 
 async function withinRemoteDeadline<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -36,39 +56,39 @@ export function privacySafeKey(value: string): string {
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {
+  const local = localGet<T>(key);
+  if (local !== null) return local;
   const remote = getRedis();
-  if (remote) {
-    try {
-      return await withinRemoteDeadline(remote.get<T>(key));
-    } catch {
-      return null;
-    }
-  }
-  const entry = localCache.get(key);
-  if (!entry || entry.expiresAt <= Date.now()) {
-    localCache.delete(key);
+  if (!remote || remoteUnavailableUntil > Date.now()) return null;
+  const existing = pendingRemoteReads.get(key) as Promise<T | null> | undefined;
+  if (existing) return existing;
+  const read = withinRemoteDeadline(remote.get<T>(key)).then((value) => {
+    remoteUnavailableUntil = 0;
+    if (value !== null) localSet(key, value, remoteReadThroughTtlMs);
+    return value;
+  }).catch(() => {
+    remoteUnavailableUntil = Date.now() + remoteCircuitBreakMs;
     return null;
-  }
-  return entry.value as T;
+  }).finally(() => pendingRemoteReads.delete(key));
+  pendingRemoteReads.set(key, read as Promise<unknown | null>);
+  return read;
 }
 
 export async function cacheSet<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+  localSet(key, value, ttlSeconds * 1_000);
   const remote = getRedis();
-  if (remote) {
-    await withinRemoteDeadline(remote.set(key, value, { ex: Math.max(1, Math.floor(ttlSeconds)) })).catch(() => undefined);
-    return;
-  }
-  localCache.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1_000 });
-  if (localCache.size > 1_000) {
-    const now = Date.now();
-    for (const [entryKey, entry] of localCache) if (entry.expiresAt <= now) localCache.delete(entryKey);
-  }
+  if (!remote || remoteUnavailableUntil > Date.now()) return;
+  await withinRemoteDeadline(remote.set(key, value, { ex: Math.max(1, Math.floor(ttlSeconds)) })).then(() => {
+    remoteUnavailableUntil = 0;
+  }).catch(() => {
+    remoteUnavailableUntil = Date.now() + remoteCircuitBreakMs;
+  });
 }
 
 export async function cacheDelete(key: string): Promise<void> {
+  localCache.delete(key);
   const remote = getRedis();
   if (remote) await withinRemoteDeadline(remote.del(key)).catch(() => undefined);
-  else localCache.delete(key);
 }
 
 export async function withDistributedLock<T>(key: string, ttlSeconds: number, task: () => Promise<T>): Promise<T | null> {

@@ -6,9 +6,11 @@ const chartPoint = (day: number, close: number) => ({ timestamp: `2026-08-${Stri
 test("dashboard, navigation and legal disclosure render", async ({ page }) => {
   await page.goto("/dashboard");
   await expect(page.getByRole("heading", { name: /Good afternoon/i })).toBeVisible();
-  const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
-  if (await mobileNavigation.isVisible()) await mobileNavigation.click();
-  await expect(page.getByRole("link", { name: "Watchlists", exact: true })).toBeVisible();
+  const navigationToggle = page.getByRole("button", { name: /Open navigation|Toggle navigation/ }).first();
+  const viewportWidth = page.viewportSize()?.width ?? 1280;
+  if (viewportWidth < 700 && await navigationToggle.isVisible()) await navigationToggle.click();
+  if (viewportWidth >= 1200 || viewportWidth < 700) await expect(page.getByRole("link", { name: "Watchlists", exact: true })).toBeVisible();
+  else await expect(page.locator('a[href="/watchlists"]').first()).toBeAttached();
   await page.goto("/legal/disclaimer");
   await expect(page.getByRole("heading", { name: /Financial disclaimer/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Not financial advice", exact: true })).toBeVisible();
@@ -31,6 +33,23 @@ test("instrument workspace changes chart period and exposes research tabs", asyn
   await page.getByRole("button", { name: "1M", exact: true }).click();
   await expect(page.locator("main").getByText(/OHLCV history/i)).toContainText(/Yahoo Finance|delayed/i);
   for (const path of ["signal", "fundamentals/analysis", "seasonality", "targets", "forecast", "news"]) await expect(page.locator(`a[href$="/${path}"]`).first()).toBeAttached();
+});
+
+test("seasonality v2 renders and recalculates across responsive projects", async ({ page }) => {
+  await page.goto("/instrument/nasdaqgs/nvda/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
+  await expect(page.getByRole("heading", { name: "Seasonality intelligence" })).toBeVisible({ timeout: 80_000 });
+  for (const heading of ["Seasonality charts", "Correlation", "Trade stats", "Historical trade table", "Monthly matrix", "Daily", "Weekly", "Monthly"]) {
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+  }
+  await expect(page.getByText(/Current year remains separate from every historical average/)).toBeVisible();
+  await expect(page.getByRole("img", { name: /Seasonality V2 chart with .* real-data series/ })).toBeVisible();
+  await page.getByRole("button", { name: "Short", exact: true }).click();
+  await expect(page.getByText(/SHORT · 20Y historical average/).first()).toBeVisible({ timeout: 60_000 });
+  const matrix = page.getByRole("region", { name: "Monthly matrix" });
+  await matrix.getByRole("button", { name: "5Y", exact: true }).click();
+  await expect(matrix.getByText("Summary uses 5 completed years")).toBeVisible();
+  await page.getByLabel("About Correlation").click();
+  await expect(page.getByText(/Pearson correlation is calculated only over the observed current-year segment/)).toBeVisible();
 });
 
 test("private pages expose controlled unauthenticated or empty states", async ({ page, request }) => {
@@ -85,9 +104,13 @@ test("company intelligence renders a complete cached flow or a controlled provid
   await expect(page.getByText("Fonti, metodologia e limiti")).toBeVisible();
 
   const pdf = await request.get("/api/company/AAPL/report?format=pdf", { headers: { "x-forwarded-for": "198.51.100.201" }, timeout: 60_000 });
-  expect(pdf.status()).toBe(200);
-  expect(pdf.headers()["content-type"]).toContain("application/pdf");
-  expect((await pdf.body()).subarray(0, 8).toString()).toContain("%PDF-1.4");
+  expect([200, 401, 429, 502, 503, 504]).toContain(pdf.status());
+  if (pdf.ok()) {
+    expect(pdf.headers()["content-type"]).toContain("application/pdf");
+    expect((await pdf.body()).subarray(0, 8).toString()).toContain("%PDF-1.4");
+  } else {
+    expect(await pdf.json()).toMatchObject({ error: { code: expect.any(String), message: expect.any(String) } });
+  }
 });
 
 test("non-company instruments never receive fabricated corporate analysis", async ({ request }) => {

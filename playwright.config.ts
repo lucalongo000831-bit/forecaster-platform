@@ -14,6 +14,7 @@ export default defineConfig({
   use: { baseURL, trace: "retain-on-failure", screenshot: "only-on-failure", video: "off" },
   projects: [
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], channel: localChannel } },
+    { name: "tablet-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 1366 }, channel: localChannel } },
     { name: "mobile-chromium", use: { ...devices["Pixel 7"], channel: localChannel } },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : { command: "npm run dev", url: baseURL, reuseExistingServer: true, timeout: 120_000 },

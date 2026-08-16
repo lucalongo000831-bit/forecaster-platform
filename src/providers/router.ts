@@ -108,16 +108,13 @@ export class FinancialProviderRouter {
 
   quotes(symbolInputs: string[]) {
     const symbols = unique(symbolInputs.map(normalizeSymbol)).slice(0, 50);
-    return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 15, staleSeconds: 60 }, async () => {
-      const settled = await Promise.allSettled(symbols.map((symbol) => this.quote(symbol)));
-      const results = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      if (!results.length) throw settled.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason ?? new ProviderError("yahoo", "NOT_FOUND", "Nessuna quotazione disponibile.", false, 404);
-      const providers = unique(results.map((result) => result.meta.provider));
-      const timestamps = results.map((result) => result.meta.sourceTimestamp).filter((value): value is string => Boolean(value)).sort();
-      const freshnessTypes = results.map((result) => result.meta.freshnessType);
-      const freshnessType = freshnessTypes.includes("STALE") ? "STALE" : freshnessTypes.includes("DELAYED") ? "DELAYED" : freshnessTypes.every((value) => value === "REALTIME") ? "REALTIME" : freshnessTypes.every((value) => value === "CACHED") ? "CACHED" : "NEAR_REALTIME";
-      return providerResult(results[0]!.meta.provider, results.map((result) => result.data), { sourceTimestamp: timestamps.at(-1) ?? null, freshness: freshnessType === "STALE" ? "stale" : freshnessType === "CACHED" ? "cached" : freshnessType === "REALTIME" || freshnessType === "NEAR_REALTIME" ? "realtime" : "delayed", freshnessType, quality: results.length === symbols.length ? "verified" : "partial", isFallback: providers.length > 1 || results.some((result) => result.meta.isFallback) });
-    });
+    const order = unique([marketAdapters.yahoo, ...this.marketOrder()]);
+    return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 15, staleSeconds: 60 }, () => firstAvailable("quotes", undefined, order.map((adapter) => ({
+      name: adapter.name,
+      configured: adapter.isConfigured(),
+      supported: symbols.every((symbol) => adapter.supportsSymbol(symbol)),
+      task: () => adapter.getQuotes(symbols),
+    }))));
   }
 
   chart(symbolInput: string, range: ChartRange, interval?: string | null) {
@@ -131,6 +128,33 @@ export class FinancialProviderRouter {
     const symbol = normalizeSymbol(symbolInput);
     const order = this.marketOrder();
     return providerCached(`analytics-chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, () => firstAvailable("analytics-chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
+  }
+
+  seasonalityChart(symbolInput: string, preferredYears = 25) {
+    const symbol = normalizeSymbol(symbolInput);
+    const order = this.marketOrder();
+    return providerCached(`seasonality-chart:v2:${symbol}:${preferredYears}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, async () => {
+      let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
+      let lastError: unknown = null;
+      for (let index = 0; index < order.length; index += 1) {
+        const adapter = order[index];
+        if (!adapter.isConfigured() || !adapter.supportsSymbol(symbol)) continue;
+        try {
+          const candidate = await adapter.getHistoricalBars(symbol, "MAX", "1d");
+          if (candidate.data.points.length < 2) continue;
+          if (!best || candidate.data.points.length > best.data.points.length) best = { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+          const first = Date.parse(candidate.data.points[0].timestamp);
+          const last = Date.parse(candidate.data.points.at(-1)!.timestamp);
+          const spanYears = Number.isFinite(first) && Number.isFinite(last) ? (last - first) / (365.2425 * 86_400_000) : 0;
+          if (spanYears >= preferredYears) return { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+        } catch (error) {
+          lastError = error;
+          structuredLog("warn", "provider.router.seasonality.fallback", { provider: adapter.name, operation: "seasonality-chart", symbol, code: error instanceof ProviderError ? error.code : "UPSTREAM_UNAVAILABLE" });
+        }
+      }
+      if (best) return best;
+      throw lastError ?? new ProviderError("yahoo", "NOT_FOUND", "Storico daily non disponibile per Seasonality.", false, 404);
+    });
   }
 
   marketStatus(market = "US") {
