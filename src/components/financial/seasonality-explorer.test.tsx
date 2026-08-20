@@ -12,11 +12,19 @@ vi.mock("@/components/charts/seasonality-v2-charts", () => ({
   seasonalityColorFor: () => "#40d7a5",
   ProbabilityRing: ({ value, label }: { value: number | null; label: string }) => <div>{label}: {value ?? "N/A"}%</div>,
   SeasonalityCurvesChart: ({ onRangeChange }: { onRangeChange?: (start: string, end: string) => void }) => <button onClick={() => onRangeChange?.("03-01", "04-01")}>Select chart range</button>,
-  SeasonalityDirectionalChart: ({ series, visibleIds }: { series: Array<{ buckets: Array<{ label: string }> }>; visibleIds?: Set<string> }) => <div><span data-testid="directional-visible">Visible: {[...(visibleIds ?? [])].join(",")}</span><span>Weekdays: {series[0]?.buckets.map((bucket) => bucket.label).join(",")}</span></div>,
+  SeasonalityDirectionalChart: ({ series, visibleIds }: {
+    series: Array<{ seriesId: string; buckets: Array<{ key: string | number; label: string; score: number | null }> }>;
+    visibleIds?: Set<string>;
+  }) => {
+    const visible = series.filter((item) => !visibleIds || visibleIds.has(item.seriesId));
+    const values = visible.map((item) => ({ id: item.seriesId, buckets: item.buckets.map((bucket) => [bucket.key, bucket.score]) }));
+    return <div><span data-testid="directional-visible">Visible: {[...(visibleIds ?? [])].join(",")}</span><output data-testid="directional-values">{JSON.stringify(values)}</output><span>Weekdays: {series[0]?.buckets.map((bucket) => bucket.label).join(",")}</span></div>;
+  },
 }));
 
 const NOW = new Date("2026-08-01T12:00:00.000Z");
 let fixture: SeasonalityAnalysis;
+let longFixture: SeasonalityAnalysis;
 let etfFixture: SeasonalityAnalysis;
 let cryptoFixture: SeasonalityAnalysis;
 
@@ -34,6 +42,7 @@ function dailyHistory(includeWeekends = false, fromYear = 2011): MarketChartPoin
 
 beforeAll(() => {
   fixture = analyzeSeasonality("AAPL", dailyHistory(), { windows: [...SEASONALITY_HISTORICAL_WINDOWS], now: NOW, rangeStart: "01-15", rangeEnd: "02-15", includeCycles: true, includeCorrelations: true, includeTradeStats: true, includeTable: true }, "test", "fixture");
+  longFixture = analyzeSeasonality("NVDA", dailyHistory(false, 1990), { windows: [...SEASONALITY_HISTORICAL_WINDOWS], now: NOW, includeCycles: true, includeCorrelations: true, includeTradeStats: true, includeTable: true }, "test", "fixture");
   etfFixture = analyzeSeasonality("SPY", dailyHistory(), { assetClass: "ETF", windows: ["5Y", "10Y"], now: NOW }, "test", "fixture");
   cryptoFixture = analyzeSeasonality("BTC-USD", dailyHistory(true, 2018), { assetClass: "CRYPTO", windows: [...SEASONALITY_HISTORICAL_WINDOWS], now: NOW }, "test", "fixture");
 });
@@ -201,5 +210,60 @@ describe("SeasonalityExplorer interactions", () => {
     render(<SeasonalityExplorer symbol="BTC-USD" initial={cryptoFixture}/>);
     const weekly = screen.getByRole("heading", { name: "Weekly Average" }).closest("section")!;
     expect(within(weekly).getByText(/Weekdays: Mon,Tue,Wed,Thu,Fri,Sat,Sun$/)).toBeInTheDocument();
+  });
+});
+
+describe("Seasonality Average Series final audit", () => {
+  it("keeps Daily, Weekly and Monthly quantitative values identical after hide and restore", () => {
+    const request = mockRefresh();
+    render(<SeasonalityExplorer symbol="NVDA" initial={longFixture}/>);
+    const sections = ["Daily Average", "Weekly Average", "Monthly Average"].map((name) => screen.getByRole("heading", { name }).closest("section")!);
+    const before = sections.map((section) => within(section).getByTestId("directional-values").textContent);
+
+    fireEvent.click(within(sections[0]).getByRole("button", { name: "Configure average series" }));
+    fireEvent.click(screen.getByRole("switch", { name: "10 years" }));
+    for (const section of sections) expect(within(section).getByTestId("directional-values")).not.toHaveTextContent('"id":"10Y"');
+    fireEvent.click(screen.getByRole("switch", { name: "10 years" }));
+
+    sections.forEach((section, index) => expect(within(section).getByTestId("directional-values").textContent).toBe(before[index]));
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("preserves a supported 25Y preference across an incompatible crypto asset", async () => {
+    localStorage.setItem("kairo:seasonality:average-series", JSON.stringify({ version: 1, selected: ["25Y"] }));
+    const first = render(<SeasonalityExplorer symbol="NVDA" initial={longFixture}/>);
+    await waitFor(() => expect(within(screen.getByRole("heading", { name: "Daily Average" }).closest("section")!).getByTestId("directional-visible")).toHaveTextContent("25Y"));
+    first.unmount();
+
+    const second = render(<SeasonalityExplorer symbol="BTC-USD" initial={cryptoFixture}/>);
+    fireEvent.click(within(screen.getByRole("heading", { name: "Daily Average" }).closest("section")!).getByRole("button", { name: "Configure average series" }));
+    expect(screen.getByRole("switch", { name: "25 years" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "25 years" })).toHaveAttribute("aria-checked", "false");
+    second.unmount();
+
+    render(<SeasonalityExplorer symbol="NVDA" initial={longFixture}/>);
+    await waitFor(() => expect(within(screen.getByRole("heading", { name: "Daily Average" }).closest("section")!).getByTestId("directional-visible")).toHaveTextContent("25Y"));
+  });
+
+  it("ignores an obsolete localStorage schema and safely restores Kairo defaults", async () => {
+    localStorage.setItem("kairo:seasonality:average-series", JSON.stringify({ version: 0, selected: ["3Y"] }));
+    render(<SeasonalityExplorer symbol="AAPL" initial={fixture}/>);
+    const daily = screen.getByRole("heading", { name: "Daily Average" }).closest("section")!;
+    await waitFor(() => expect(within(daily).getByTestId("directional-visible")).toHaveTextContent("5Y"));
+    expect(within(daily).getByTestId("directional-visible")).not.toHaveTextContent("3Y");
+  });
+
+  it("keeps average-series visibility after a Daily month recalculation", async () => {
+    const request = mockRefresh();
+    render(<SeasonalityExplorer symbol="AAPL" initial={fixture}/>);
+    const daily = screen.getByRole("heading", { name: "Daily Average" }).closest("section")!;
+    fireEvent.click(within(daily).getByRole("button", { name: "Configure average series" }));
+    fireEvent.click(screen.getByRole("switch", { name: "10 years" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Calendar month" }), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update daily view" }));
+
+    await waitFor(() => expect(String(request.mock.calls.at(-1)?.[0])).toContain("month=9"));
+    expect(within(daily).getByTestId("directional-visible")).not.toHaveTextContent("10Y");
+    expect(screen.getByRole("switch", { name: "10 years" })).toHaveAttribute("aria-checked", "false");
   });
 });

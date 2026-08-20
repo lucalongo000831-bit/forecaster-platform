@@ -1,7 +1,52 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { SEASONALITY_HISTORICAL_WINDOWS, analyzeSeasonality, type SeasonalityAnalysis, type SeasonalityAssetClass } from "../src/engines/seasonality";
+import type { MarketChartPoint } from "../src/types";
 
 const mockedSearch = { data: [{ symbol: "KAIRO.MI", name: "Kairo Test Instrument", type: "Stock", venue: "Milan", price: 214.3, currency: "EUR", href: "/instrument/milan/kairo.mi/overview", source: "yahoo" }], meta: { source: "yahoo" } };
 const chartPoint = (day: number, close: number) => ({ timestamp: `2026-08-${String(day).padStart(2, "0")}T20:00:00.000Z`, open: close - 1, high: close + 2, low: close - 2, close, volume: 10_000_000 });
+const SEASONALITY_AUDIT_NOW = new Date("2026-08-20T12:00:00.000Z");
+const seasonalityAuditCache = new Map<string, SeasonalityAnalysis>();
+
+function seasonalityAuditHistory(assetClass: SeasonalityAssetClass): MarketChartPoint[] {
+  const rows: MarketChartPoint[] = [];
+  const fromYear = assetClass === "CRYPTO" ? 2018 : 1990;
+  let price = assetClass === "CRYPTO" ? 8_000 : 40;
+  for (let date = new Date(Date.UTC(fromYear, 0, 1)); date <= SEASONALITY_AUDIT_NOW; date = new Date(date.getTime() + 86_400_000)) {
+    if (assetClass !== "CRYPTO" && [0, 6].includes(date.getUTCDay())) continue;
+    const open = price;
+    price *= 1 + Math.sin((date.getUTCDate() + date.getUTCMonth()) / 5) * 0.001 + 0.00025;
+    rows.push({ timestamp: date.toISOString(), open, high: Math.max(open, price) * 1.003, low: Math.min(open, price) * 0.997, close: price, adjustedClose: price, volume: 1_000_000 });
+  }
+  return rows;
+}
+
+function seasonalityAuditAnalysis(symbol: string) {
+  const normalized = symbol.toUpperCase();
+  const cached = seasonalityAuditCache.get(normalized);
+  if (cached) return cached;
+  const assetClass: SeasonalityAssetClass = normalized.endsWith("-USD") ? "CRYPTO" : normalized === "SPY" ? "ETF" : "EQUITY";
+  const analysis = analyzeSeasonality(normalized, seasonalityAuditHistory(assetClass), {
+    assetClass,
+    windows: [...SEASONALITY_HISTORICAL_WINDOWS],
+    now: SEASONALITY_AUDIT_NOW,
+    rangeStart: "01-01",
+    rangeEnd: "12-31",
+    side: "LONG",
+    includeCycles: true,
+    includeCorrelations: true,
+    includeTradeStats: true,
+    includeTable: true,
+  }, "e2e-audit", "generated-fixture");
+  seasonalityAuditCache.set(normalized, analysis);
+  return analysis;
+}
+
+async function mockSeasonalityAnalysis(page: Page) {
+  await page.route("**/api/analysis/seasonality?**", async (route) => {
+    const symbol = new URL(route.request().url()).searchParams.get("symbol") ?? "NVDA";
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: seasonalityAuditAnalysis(symbol), meta: { source: "e2e-audit" } }) });
+  });
+}
 
 test("dashboard, navigation and legal disclosure render", async ({ page }) => {
   await page.goto("/dashboard");
@@ -36,6 +81,7 @@ test("instrument workspace changes chart period and exposes research tabs", asyn
 });
 
 test("seasonality v2 renders and recalculates across responsive projects", async ({ page }) => {
+  await mockSeasonalityAnalysis(page);
   await page.goto("/instrument/nasdaqgs/nvda/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
   await expect(page.getByRole("heading", { name: "Seasonality intelligence" })).toBeVisible({ timeout: 80_000 });
   for (const heading of ["Seasonality charts", "Correlation", "Trade stats", "Historical trade table", "Monthly matrix", "Daily Average", "Weekly Average", "Monthly Average"]) {
@@ -54,30 +100,47 @@ test("seasonality v2 renders and recalculates across responsive projects", async
   const monthly = page.getByRole("region", { name: "Monthly Average" });
   await daily.getByRole("button", { name: "Configure average series" }).click();
   const selector = page.getByRole("dialog", { name: "Configure average series" });
-  await selector.getByRole("switch", { name: "5 years", exact: true }).click();
-  await expect(daily.getByLabel("Daily Average visible series legend")).not.toContainText("5Y historical average");
-  await expect(weekly.getByLabel("Weekly Average visible series legend")).not.toContainText("5Y historical average");
-  await expect(monthly.getByLabel("Monthly Average visible series legend")).not.toContainText("5Y historical average");
+  await selector.getByRole("switch", { name: "10 years", exact: true }).click();
+  await expect(daily.getByLabel("Daily Average visible series legend")).not.toContainText("10Y historical average");
+  await expect(weekly.getByLabel("Weekly Average visible series legend")).not.toContainText("10Y historical average");
+  await expect(monthly.getByLabel("Monthly Average visible series legend")).not.toContainText("10Y historical average");
   await page.keyboard.press("Escape");
   await weekly.getByRole("button", { name: "Configure average series" }).click();
-  await expect(page.getByRole("switch", { name: "5 years", exact: true })).toHaveAttribute("aria-checked", "false");
-  await page.getByRole("switch", { name: "5 years", exact: true }).click();
-  await expect(weekly.getByLabel("Weekly Average visible series legend")).toContainText("5Y historical average");
+  await expect(page.getByRole("switch", { name: "10 years", exact: true })).toHaveAttribute("aria-checked", "false");
+  await page.getByRole("switch", { name: "10 years", exact: true }).click();
+  await expect(weekly.getByLabel("Weekly Average visible series legend")).toContainText("10Y historical average");
 });
 
 test("seasonality average selector respects ETF and crypto availability", async ({ page }) => {
-  await page.goto("/instrument/us/spy/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
-  await expect(page.getByRole("heading", { name: "Daily Average" })).toBeVisible({ timeout: 80_000 });
-  await page.getByRole("region", { name: "Daily Average" }).getByRole("button", { name: "Configure average series" }).click();
-  await expect(page.getByRole("dialog", { name: "Configure average series" })).toBeVisible();
+  await mockSeasonalityAnalysis(page);
+  const route = async (path: string, heading: "Daily Average" | "Weekly Average") => {
+    await page.goto(path, { waitUntil: "domcontentloaded", timeout: 120_000 });
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible({ timeout: 80_000 });
+    await page.getByRole("region", { name: heading, exact: true }).getByRole("button", { name: "Configure average series" }).click();
+    await expect(page.getByRole("dialog", { name: "Configure average series" })).toBeVisible();
+  };
+
+  await route("/instrument/nasdaqgs/nvda/seasonality", "Daily Average");
+  await page.getByRole("button", { name: "Show all available" }).click();
+  await expect(page.getByRole("switch", { name: "25 years", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 
-  await page.goto("/instrument/crypto/btc-usd/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
-  await expect(page.getByRole("heading", { name: "Weekly Average" })).toBeVisible({ timeout: 80_000 });
-  await page.getByRole("region", { name: "Weekly Average" }).getByRole("button", { name: "Configure average series" }).click();
-  await expect(page.getByRole("switch", { name: "25 years", exact: true })).toBeDisabled();
-  await expect(page.getByRole("region", { name: "Weekly Average" })).toContainText("Sat");
-  await expect(page.getByRole("region", { name: "Weekly Average" })).toContainText("Sun");
+  for (const path of ["/instrument/nasdaq/aapl/seasonality", "/instrument/us/spy/seasonality"]) {
+    await route(path, "Daily Average");
+    await expect(page.getByRole("switch", { name: "25 years", exact: true })).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+  }
+
+  for (const path of ["/instrument/crypto/btc-usd/seasonality", "/instrument/crypto/eth-usd/seasonality"]) {
+    await route(path, "Weekly Average");
+    await expect(page.getByRole("switch", { name: "25 years", exact: true })).toBeDisabled();
+    await expect(page.getByRole("region", { name: "Weekly Average" })).toContainText("Sat");
+    await expect(page.getByRole("region", { name: "Weekly Average" })).toContainText("Sun");
+    await page.keyboard.press("Escape");
+  }
+
+  await route("/instrument/nasdaqgs/nvda/seasonality", "Daily Average");
+  await expect(page.getByRole("switch", { name: "25 years", exact: true })).toHaveAttribute("aria-checked", "true");
 });
 
 test("private pages expose controlled unauthenticated or empty states", async ({ page, request }) => {

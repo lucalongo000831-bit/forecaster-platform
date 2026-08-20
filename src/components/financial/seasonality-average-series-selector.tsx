@@ -82,7 +82,8 @@ export function SeasonalityAverageSeriesSelector({
       const spaceBelow = window.innerHeight - rect.bottom - 16;
       const preferredHeight = Math.min(640, popover.scrollHeight);
       const openAbove = spaceBelow < Math.min(360, preferredHeight) && rect.top > spaceBelow;
-      const maxHeight = openAbove ? Math.max(160, rect.top - 24) : Math.max(160, spaceBelow);
+      const availableHeight = openAbove ? rect.top - 24 : spaceBelow;
+      const maxHeight = Math.max(160, Math.min(640, availableHeight));
       const top = openAbove ? Math.max(16, rect.top - Math.min(preferredHeight, maxHeight) - 8) : Math.max(16, rect.bottom + 8);
       popover.style.inset = `${top}px auto auto ${left}px`;
       popover.style.width = `${width}px`;
@@ -139,14 +140,15 @@ export function SeasonalityAverageSeriesSelector({
       id={popoverId}
       role="dialog"
       aria-label="Configure average series"
-      className="fixed inset-x-4 top-20 z-[100] max-h-[calc(100dvh-6rem)] overflow-y-auto rounded-2xl border border-[#cad3e1] bg-white p-4 shadow-[0_24px_70px_rgba(11,25,49,0.24)]"
+      className="fixed inset-x-4 top-20 z-[100] flex max-h-[calc(100dvh-6rem)] flex-col overflow-hidden rounded-2xl border border-[#cad3e1] bg-white p-4 shadow-[0_24px_70px_rgba(11,25,49,0.24)]"
     >
       <div className="mb-4 flex items-start justify-between gap-4 border-b border-slate-100 pb-3">
         <div><strong className="block text-sm">Average series</strong><p className="muted mt-1 text-xs">Shared across daily, weekly and monthly views.</p></div>
         <span className="badge bg-[#e8fbf4] text-[var(--accent-dark)]">{activeCount} active</span>
       </div>
 
-      <div className="space-y-5">
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="space-y-5">
         {GROUPS.map((group) => <section key={group.id} aria-labelledby={`${popoverId}-${group.id}`}>
           <h3 id={`${popoverId}-${group.id}`} className="small-label mb-2">{group.label}</h3>
           <div className="space-y-1">
@@ -172,12 +174,15 @@ export function SeasonalityAverageSeriesSelector({
             })}
           </div>
         </section>)}
+        </div>
       </div>
 
-      <p className={`mt-3 min-h-4 text-xs font-semibold ${feedback ? "text-[#b82f47]" : "text-transparent"}`} role="status" aria-live="polite">{feedback || "Selection updated"}</p>
-      <div className="mt-1 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
-        <button type="button" className="text-xs font-bold text-[var(--muted)] hover:text-[var(--ink)]" onClick={() => { onReset(); setFeedback(""); }}>Reset</button>
-        <button type="button" className="rounded-lg bg-[var(--navy)] px-3 py-2 text-xs font-bold text-white hover:bg-[var(--ink-2)]" onClick={() => { onShowAll(); setFeedback(""); }}>Show all available</button>
+      <div className="-mx-4 -mb-4 mt-3 shrink-0 border-t border-slate-100 bg-white px-4 pb-4">
+        <p className={`min-h-7 pt-2 text-xs font-semibold ${feedback ? "text-[#b82f47]" : "text-transparent"}`} role="status" aria-live="polite">{feedback || "Selection updated"}</p>
+        <div className="flex items-center justify-between gap-3">
+          <button type="button" className="text-xs font-bold text-[var(--muted)] hover:text-[var(--ink)]" onClick={() => { onReset(); setFeedback(""); }}>Reset</button>
+          <button type="button" className="rounded-lg bg-[var(--navy)] px-3 py-2 text-xs font-bold text-white hover:bg-[var(--ink-2)]" onClick={() => { onShowAll(); setFeedback(""); }}>Show all available</button>
+        </div>
       </div>
     </div>, document.body) : null}
   </div>;
