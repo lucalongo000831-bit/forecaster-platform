@@ -27,12 +27,34 @@ import {
 } from "@/engines/seasonality";
 import { formatPercent } from "@/lib";
 import type { ApiSuccess } from "@/types";
+import {
+  SEASONALITY_AVERAGE_SERIES_IDS,
+  SeasonalityAverageSeriesSelector,
+  type SeasonalityAverageSeriesId,
+  type SeasonalityAverageSeriesOption,
+} from "./seasonality-average-series-selector";
 import { DataError } from "./data-state";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const tableRanges = [5, 10, 15, 20, 25, "ALL"] as const;
 type TableRange = (typeof tableRanges)[number];
 type RequestSettings = { windows: SeasonalityHistoricalWindow[]; month: number; rangeStart: string; rangeEnd: string; side: SeasonalitySide };
+const AVERAGE_SERIES_STORAGE_KEY = "kairo:seasonality:average-series";
+const AVERAGE_SERIES_STORAGE_VERSION = 1;
+const DEFAULT_AVERAGE_SERIES: SeasonalityAverageSeriesId[] = ["5Y", "10Y", "20Y", "MAX"];
+const AVERAGE_SERIES_ID_SET = new Set<string>(SEASONALITY_AVERAGE_SERIES_IDS);
+const AVERAGE_LABELS: Partial<Record<SeasonalityAverageSeriesId, string>> = {
+  CURRENT: "Current",
+  "1Y": "Last year",
+  "3Y": "3 years",
+  "5Y": "5 years",
+  "7Y": "7 years",
+  "10Y": "10 years",
+  "15Y": "15 years",
+  "20Y": "20 years",
+  "25Y": "25 years",
+  MAX: "All history",
+};
 
 function pct(value: number | null, signed = true) {
   return value === null ? "Dato non disponibile" : formatPercent(value, signed);
@@ -76,6 +98,64 @@ function selectedRangeStats(statistics: SeasonalityRangeStats[], selectedId: str
   return statistics.find((item) => item.seriesId === selectedId && item.status === "AVAILABLE") ?? statistics.find((item) => item.status === "AVAILABLE") ?? null;
 }
 
+function defaultAverageSeries() {
+  return new Set<SeasonalityAverageSeriesId>(DEFAULT_AVERAGE_SERIES);
+}
+
+export function parseAverageSeriesPreference(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { version?: unknown; selected?: unknown };
+    if (parsed.version !== AVERAGE_SERIES_STORAGE_VERSION || !Array.isArray(parsed.selected)) return null;
+    const selected = parsed.selected.filter((id): id is SeasonalityAverageSeriesId => typeof id === "string" && AVERAGE_SERIES_ID_SET.has(id));
+    return selected.length ? new Set(selected) : null;
+  } catch {
+    return null;
+  }
+}
+
+function averageSeriesOptions(analysis: SeasonalityAnalysis): SeasonalityAverageSeriesOption[] {
+  const curves = allCurves(analysis);
+  const curveById = new Map(curves.map((curve) => [curve.id, curve]));
+  const directionalById = new Map(
+    [...analysis.directional.daily, ...analysis.directional.weekly, ...analysis.directional.monthly].map((series) => [series.seriesId, series]),
+  );
+  const option = (
+    id: SeasonalityAverageSeriesId,
+    curveId: string | null,
+    label: string,
+    group: SeasonalityAverageSeriesOption["group"],
+    unavailableDetail = `${analysis.availableYears} completed years available`,
+  ): SeasonalityAverageSeriesOption => {
+    const curve = curveId ? curveById.get(curveId) : null;
+    const directional = curveId ? directionalById.get(curveId) : null;
+    const available = Boolean(curve?.available && directional?.status === "AVAILABLE");
+    const detail = available
+      ? `${curve?.sampleYears.length ?? 0} completed ${curve?.sampleYears.length === 1 ? "year" : "years"} · ${curve?.quality ?? "N/A"} quality`
+      : unavailableDetail;
+    return { id, curveId, label, group, available, detail, color: seasonalityColorFor(curveId ?? id) };
+  };
+
+  const historical = (["CURRENT", "1Y", "3Y", "5Y", "7Y", "10Y", "15Y", "20Y", "25Y", "MAX"] as const).map((id) => option(
+    id,
+    id,
+    AVERAGE_LABELS[id] ?? id,
+    "AVERAGES",
+    id === "CURRENT" ? "Current-year directional series is not available" : `${analysis.availableYears} completed years available`,
+  ));
+  const cycles = (["POST_ELECTION", "MIDTERM", "PRE_ELECTION", "ELECTION"] as const).map((id) => {
+    const curveId = `CYCLE_${id}`;
+    const curve = curveById.get(curveId);
+    return option(id, curveId, curve?.label ?? AVERAGE_LABELS[id] ?? id, "PRESIDENTIAL", `${curve?.sampleYears.length ?? 0} completed cycle years available`);
+  });
+  const bestCurve = analysis.bestCorrelatedYear.curve;
+  const bestLabel = analysis.bestCorrelatedYear.year ? `Best correlated year · ${analysis.bestCorrelatedYear.year}` : "Best correlated year";
+  const bestDetail = analysis.bestCorrelatedYear.year
+    ? `${analysis.bestCorrelatedYear.year} · r ${analysis.bestCorrelatedYear.correlation.rawCorrelation?.toFixed(3) ?? "N/A"}`
+    : "No completed comparable year available";
+  return [...historical, ...cycles, option("BEST_CORRELATED", bestCurve?.id ?? null, bestLabel, "BEST_CORRELATED", bestDetail)].map((item) => item.id === "BEST_CORRELATED" && item.available ? { ...item, detail: bestDetail } : item);
+}
+
 export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initial: SeasonalityAnalysis }) {
   const [analysis, setAnalysis] = useState(initial);
   const [selectedWindows, setSelectedWindows] = useState<SeasonalityHistoricalWindow[]>(initial.windows);
@@ -86,6 +166,8 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
   const [side, setSide] = useState<SeasonalitySide>(initial.tradeRange?.side ?? "LONG");
   const [tableRange, setTableRange] = useState<TableRange>(10);
   const [selectedStatsId, setSelectedStatsId] = useState(() => initial.tradeRange?.statistics.find((item) => item.seriesId === "20Y" && item.status === "AVAILABLE")?.seriesId ?? initial.tradeRange?.statistics.find((item) => item.status === "AVAILABLE")?.seriesId ?? "");
+  const [averageSeriesPreference, setAverageSeriesPreference] = useState(defaultAverageSeries);
+  const [averagePreferenceReady, setAveragePreferenceReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -100,7 +182,30 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
     const values = historicalMatrixRows.map((row) => row.cells[index]).filter((cell) => cell.status === "COMPLETE" && cell.returnPct !== null).map((cell) => cell.returnPct as number);
     return { month: index + 1, probability: values.length ? values.filter((value) => value > 0).length / values.length * 100 : null, averageReturn: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, observations: values.length };
   });
-  const directionalVisibleIds = new Set([...visibleIds].filter((id) => id !== "CURRENT"));
+  const averageOptions = useMemo(() => averageSeriesOptions(analysis), [analysis]);
+  const availableAverageIds = useMemo(() => new Set(averageOptions.filter((option) => option.available).map((option) => option.id)), [averageOptions]);
+  const effectiveAveragePreference = useMemo(() => {
+    if (averageOptions.some((option) => option.available && averageSeriesPreference.has(option.id))) return averageSeriesPreference;
+    const fallback = averageOptions.find((option) => option.available && DEFAULT_AVERAGE_SERIES.includes(option.id)) ?? averageOptions.find((option) => option.available);
+    return fallback ? new Set([...averageSeriesPreference, fallback.id]) : averageSeriesPreference;
+  }, [averageOptions, averageSeriesPreference]);
+  const directionalVisibleIds = useMemo(() => new Set(averageOptions.filter((option) => option.available && option.curveId && effectiveAveragePreference.has(option.id)).map((option) => option.curveId as string)), [averageOptions, effectiveAveragePreference]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const restored = parseAverageSeriesPreference(localStorage.getItem(AVERAGE_SERIES_STORAGE_KEY));
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (restored) setAverageSeriesPreference(restored);
+      setAveragePreferenceReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!averagePreferenceReady) return;
+    localStorage.setItem(AVERAGE_SERIES_STORAGE_KEY, JSON.stringify({ version: AVERAGE_SERIES_STORAGE_VERSION, selected: [...averageSeriesPreference] }));
+  }, [averagePreferenceReady, averageSeriesPreference]);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +265,23 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
 
   function toggleSeries(id: string) {
     setVisibleIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
+
+  function toggleAverageSeries(id: SeasonalityAverageSeriesId) {
+    const isActive = effectiveAveragePreference.has(id) && availableAverageIds.has(id);
+    const activeCount = averageOptions.filter((option) => option.available && effectiveAveragePreference.has(option.id)).length;
+    if (isActive && activeCount <= 1) return false;
+    setAverageSeriesPreference((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    return true;
+  }
+
+  function showAllAverageSeries() {
+    setAverageSeriesPreference((current) => new Set([...current, ...averageOptions.filter((option) => option.available).map((option) => option.id)]));
   }
 
   function updateChartRange(start: string, end: string) {
@@ -249,9 +371,9 @@ export function SeasonalityExplorer({ symbol, initial }: { symbol: string; initi
       <div className="table-shell"><table className="data-table"><thead><tr><th>Year</th>{MONTHS.map((month) => <th key={month}>{month}</th>)}</tr></thead><tbody>{matrixRows.map((row) => <tr key={row.year}><td><strong>{row.year}</strong>{row.current ? <span className="ml-2 text-xs text-[var(--violet)]">YTD</span> : null}</td>{row.cells.map((cell) => <td key={cell.month} className={cell.returnPct === null ? "muted" : cell.returnPct >= 0 ? "positive" : "negative"}>{cell.returnPct === null ? "—" : pct(cell.returnPct)}{cell.status === "IN_PROGRESS" ? "*" : ""}</td>)}</tr>)}<tr className="bg-slate-50"><td><strong>Probability</strong></td>{matrixSummary.map((cell) => <td key={cell.month} title={`n=${cell.observations}`}>{cell.probability === null ? "—" : <span className={cell.probability >= 50 ? "positive" : "negative"}>{cell.probability >= 50 ? "↗" : "↘"} {cell.probability.toFixed(0)}%</span>}</td>)}</tr><tr className="bg-slate-50"><td><strong>Average</strong></td>{matrixSummary.map((cell) => <td key={cell.month} className={cell.averageReturn === null ? "muted" : cell.averageReturn >= 0 ? "positive" : "negative"}>{pct(cell.averageReturn)}</td>)}</tr></tbody></table></div><p className="muted mt-3 text-xs">* Incomplete current month: visible for context, excluded from every historical summary.</p>
     </section>
 
-    <DirectionalSection id="daily-title" title="Daily" help="Day-of-month bars use the selected calendar month and show the signed positive-hit-rate score. Missing days remain absent rather than interpolated." series={analysis.directional.daily} visibleIds={directionalVisibleIds} month={selectedMonth} onMonth={setSelectedMonth} onApply={() => void refresh()} loading={loading}/>
-    <DirectionalSection id="weekly-title" title="Weekly" help={analysis.assetClass === "CRYPTO" ? "Crypto uses all seven UTC weekdays." : "Equities and ETFs use valid Monday–Friday exchange sessions only."} series={analysis.directional.weekly} visibleIds={directionalVisibleIds}/>
-    <DirectionalSection id="monthly-title" title="Monthly" help="Monthly bars compare complete calendar-month returns across every selected historical series, presidential cycle and best analogue." series={analysis.directional.monthly} visibleIds={directionalVisibleIds}/>
+    <DirectionalSection id="daily-title" title="Daily Average" help="Day-of-month bars use the selected calendar month and show the signed positive-hit-rate score. Missing days remain absent rather than interpolated." series={analysis.directional.daily} visibleIds={directionalVisibleIds} averageOptions={averageOptions} selectedAverageSeries={effectiveAveragePreference} onAverageToggle={toggleAverageSeries} onAverageReset={() => setAverageSeriesPreference(defaultAverageSeries())} onAverageShowAll={showAllAverageSeries} month={selectedMonth} onMonth={setSelectedMonth} onApply={() => void refresh()} loading={loading}/>
+    <DirectionalSection id="weekly-title" title="Weekly Average" help={analysis.assetClass === "CRYPTO" ? "Crypto uses all seven UTC weekdays." : "Equities and ETFs use valid Monday–Friday exchange sessions only."} series={analysis.directional.weekly} visibleIds={directionalVisibleIds} averageOptions={averageOptions} selectedAverageSeries={effectiveAveragePreference} onAverageToggle={toggleAverageSeries} onAverageReset={() => setAverageSeriesPreference(defaultAverageSeries())} onAverageShowAll={showAllAverageSeries}/>
+    <DirectionalSection id="monthly-title" title="Monthly Average" help="Monthly bars compare complete calendar-month returns across every selected historical series, presidential cycle and best analogue." series={analysis.directional.monthly} visibleIds={directionalVisibleIds} averageOptions={averageOptions} selectedAverageSeries={effectiveAveragePreference} onAverageToggle={toggleAverageSeries} onAverageReset={() => setAverageSeriesPreference(defaultAverageSeries())} onAverageShowAll={showAllAverageSeries}/>
 
     <footer className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-white px-5 py-4 text-xs text-[var(--muted)]">
       <span>Source: {analysis.provider} / {analysis.source}</span><span>Through {analysis.availableHistory.lastDate}</span><span>{analysis.modelVersion} · {analysis.quality} quality · descriptive research</span>
@@ -289,11 +411,37 @@ function CorrelationCard({ label, raw, score, sample, quality }: { label: string
   return <div className="soft-card p-5"><div className="flex items-start justify-between gap-3"><div><span className="small-label">Current-year fit</span><strong className="mt-1 block">{label}</strong></div><span className="badge">{quality}</span></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-gradient-to-r from-[var(--violet)] to-[var(--accent)]" style={{ width: `${safe}%` }}/></div><div className="mt-3 flex justify-between text-sm"><strong>{score?.toFixed(1) ?? "N/A"}</strong><span className="muted">r {raw?.toFixed(3) ?? "—"} · n={sample}</span></div></div>;
 }
 
-function DirectionalSection({ id, title, help, series, visibleIds, month, onMonth, onApply, loading = false }: { id: string; title: string; help: string; series: SeasonalityAnalysis["directional"]["daily"]; visibleIds: Set<string>; month?: number; onMonth?: (value: number) => void; onApply?: () => void; loading?: boolean }) {
-  return <section className="seasonality-deferred-section" aria-labelledby={id}><SectionHeading id={id} title={title} help={help}><span className="badge">−100 → +100</span></SectionHeading>
+function DirectionalSection({ id, title, help, series, visibleIds, averageOptions, selectedAverageSeries, onAverageToggle, onAverageReset, onAverageShowAll, month, onMonth, onApply, loading = false }: {
+  id: string;
+  title: string;
+  help: string;
+  series: SeasonalityAnalysis["directional"]["daily"];
+  visibleIds: Set<string>;
+  averageOptions: SeasonalityAverageSeriesOption[];
+  selectedAverageSeries: ReadonlySet<SeasonalityAverageSeriesId>;
+  onAverageToggle: (id: SeasonalityAverageSeriesId) => boolean;
+  onAverageReset: () => void;
+  onAverageShowAll: () => void;
+  month?: number;
+  onMonth?: (value: number) => void;
+  onApply?: () => void;
+  loading?: boolean;
+}) {
+  const visibleSeries = series.filter((item) => item.status === "AVAILABLE" && visibleIds.has(item.seriesId));
+  return <section className="seasonality-deferred-section" aria-labelledby={id}><SectionHeading id={id} title={title} help={help}>
+      <SeasonalityAverageSeriesSelector options={averageOptions} selectedSeries={selectedAverageSeries} onToggle={onAverageToggle} onReset={onAverageReset} onShowAll={onAverageShowAll}/>
+      <span className="badge">−100 → +100</span>
+    </SectionHeading>
     {month && onMonth ? <div className="mb-5 flex flex-wrap items-end gap-3"><label><span className="small-label mb-2 block">Calendar month</span><select aria-label="Calendar month" className="h-11 rounded-xl border border-[var(--border)] bg-white px-4" value={month} onChange={(event) => onMonth(Number(event.target.value))}>{MONTHS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}</select></label><button className="button-secondary" onClick={onApply} disabled={loading}>Update daily view</button></div> : null}
+    <DirectionalSeriesLegend title={title} series={visibleSeries}/>
     <div className="rounded-2xl border border-[var(--border)] bg-white p-2 sm:p-4"><SeasonalityDirectionalChart series={series} visibleIds={visibleIds}/></div>
   </section>;
+}
+
+function DirectionalSeriesLegend({ title, series }: { title: string; series: SeasonalityAnalysis["directional"]["daily"] }) {
+  return <div className="mb-3 flex min-h-5 flex-wrap gap-x-4 gap-y-2" aria-label={`${title} visible series legend`}>
+    {series.map((item, index) => <span key={item.seriesId} data-series-id={item.seriesId} className="flex items-center gap-2 text-[11px] font-semibold"><span className="h-0.5 w-5 rounded" style={{ backgroundColor: seasonalityColorFor(item.seriesId, index) }}/>{item.label}</span>)}
+  </div>;
 }
 
 function MethodologyHelp({ disclaimer }: { disclaimer: string }) {

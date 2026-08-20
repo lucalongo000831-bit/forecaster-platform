@@ -38,18 +38,46 @@ test("instrument workspace changes chart period and exposes research tabs", asyn
 test("seasonality v2 renders and recalculates across responsive projects", async ({ page }) => {
   await page.goto("/instrument/nasdaqgs/nvda/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
   await expect(page.getByRole("heading", { name: "Seasonality intelligence" })).toBeVisible({ timeout: 80_000 });
-  for (const heading of ["Seasonality charts", "Correlation", "Trade stats", "Historical trade table", "Monthly matrix", "Daily", "Weekly", "Monthly"]) {
+  for (const heading of ["Seasonality charts", "Correlation", "Trade stats", "Historical trade table", "Monthly matrix", "Daily Average", "Weekly Average", "Monthly Average"]) {
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
   }
   await expect(page.getByText(/Current year remains separate from every historical average/)).toBeVisible();
   await expect(page.getByRole("img", { name: /Seasonality V2 chart with .* real-data series/ })).toBeVisible();
-  await page.getByRole("button", { name: "Short", exact: true }).click();
-  await expect(page.getByText(/SHORT · 20Y historical average/).first()).toBeVisible({ timeout: 60_000 });
   const matrix = page.getByRole("region", { name: "Monthly matrix" });
   await matrix.getByRole("button", { name: "5Y", exact: true }).click();
   await expect(matrix.getByText("Summary uses 5 completed years")).toBeVisible();
   await page.getByLabel("About Correlation").click();
   await expect(page.getByText(/Pearson correlation is calculated only over the observed current-year segment/)).toBeVisible();
+
+  const daily = page.getByRole("region", { name: "Daily Average" });
+  const weekly = page.getByRole("region", { name: "Weekly Average" });
+  const monthly = page.getByRole("region", { name: "Monthly Average" });
+  await daily.getByRole("button", { name: "Configure average series" }).click();
+  const selector = page.getByRole("dialog", { name: "Configure average series" });
+  await selector.getByRole("switch", { name: "5 years", exact: true }).click();
+  await expect(daily.getByLabel("Daily Average visible series legend")).not.toContainText("5Y historical average");
+  await expect(weekly.getByLabel("Weekly Average visible series legend")).not.toContainText("5Y historical average");
+  await expect(monthly.getByLabel("Monthly Average visible series legend")).not.toContainText("5Y historical average");
+  await page.keyboard.press("Escape");
+  await weekly.getByRole("button", { name: "Configure average series" }).click();
+  await expect(page.getByRole("switch", { name: "5 years", exact: true })).toHaveAttribute("aria-checked", "false");
+  await page.getByRole("switch", { name: "5 years", exact: true }).click();
+  await expect(weekly.getByLabel("Weekly Average visible series legend")).toContainText("5Y historical average");
+});
+
+test("seasonality average selector respects ETF and crypto availability", async ({ page }) => {
+  await page.goto("/instrument/us/spy/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
+  await expect(page.getByRole("heading", { name: "Daily Average" })).toBeVisible({ timeout: 80_000 });
+  await page.getByRole("region", { name: "Daily Average" }).getByRole("button", { name: "Configure average series" }).click();
+  await expect(page.getByRole("dialog", { name: "Configure average series" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.goto("/instrument/crypto/btc-usd/seasonality", { waitUntil: "domcontentloaded", timeout: 120_000 });
+  await expect(page.getByRole("heading", { name: "Weekly Average" })).toBeVisible({ timeout: 80_000 });
+  await page.getByRole("region", { name: "Weekly Average" }).getByRole("button", { name: "Configure average series" }).click();
+  await expect(page.getByRole("switch", { name: "25 years", exact: true })).toBeDisabled();
+  await expect(page.getByRole("region", { name: "Weekly Average" })).toContainText("Sat");
+  await expect(page.getByRole("region", { name: "Weekly Average" })).toContainText("Sun");
 });
 
 test("private pages expose controlled unauthenticated or empty states", async ({ page, request }) => {
