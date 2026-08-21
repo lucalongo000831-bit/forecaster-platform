@@ -52,13 +52,20 @@ async function mockPattern(page: Page) {
 
 const paths = [
   ["NVDA", "/instrument/nasdaqgs/nvda/pattern"],
-  ["SPY", "/instrument/us/spy/pattern"],
-  ["BTC-USD", "/instrument/crypto/btc-usd/pattern"],
   ["AAPL", "/instrument/nasdaq/aapl/pattern"],
+  ["MSFT", "/instrument/nasdaqgs/msft/pattern"],
+  ["STLAM.MI", "/instrument/bit/stlam.mi/pattern"],
+  ["SPY", "/instrument/us/spy/pattern"],
+  ["QQQ", "/instrument/us/qqq/pattern"],
+  ["BTC-USD", "/instrument/crypto/btc-usd/pattern"],
+  ["ETH-USD", "/instrument/crypto/eth-usd/pattern"],
 ] as const;
 
 test("Pattern V2 latest research experience works for equities, ETF and crypto", async ({ page }) => {
   await mockPattern(page);
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
   for (const [symbol, path] of paths) {
     await page.goto(path, { waitUntil: "domcontentloaded", timeout: 120_000 });
     await expect(page.getByRole("heading", { name: "Pattern Intelligence" })).toBeVisible({ timeout: 80_000 });
@@ -69,6 +76,7 @@ test("Pattern V2 latest research experience works for equities, ETF and crypto",
     await expect(page.getByText("pattern-v2.0.0").first()).toBeVisible();
     await expect(page.getByText(new RegExp(symbol === "BTC-USD" ? "24/7|CRYPTO" : "Pattern Intelligence", "i")).first()).toBeVisible();
   }
+  expect(consoleErrors.filter((message) => /hydration|react|uncaught|typeerror|referenceerror/i.test(message))).toEqual([]);
 });
 
 test("Pattern V2 recalculates historical as-of and lookback while Single Events stays local", async ({ page }) => {

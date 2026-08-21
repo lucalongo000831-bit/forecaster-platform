@@ -53,6 +53,11 @@ describe("Pattern V2 research experience", () => {
     expect(screen.getByTestId("pattern-strength-card")).toHaveTextContent(fixture.strength.classification.replaceAll("_", " "));
     const best = screen.getByTestId("most-correlated-card");
     for (const label of ["Trade", "Date", "Performance", "Max Drop", "Max Rise"]) expect(within(best).getByText(label)).toBeVisible();
+    for (const direction of ["BULLISH", "BEARISH", "NEUTRAL"] as const) {
+      const expected = fixture.matchedEvents.filter((event) => event.direction === direction).length;
+      if (expected) expect(screen.getByRole("button", { name: new RegExp(`${direction[0]}${direction.slice(1).toLowerCase()} cases \\(${expected}\\)`) })).toBeVisible();
+    }
+    expect(within(best).getByText(fixture.mostCorrelated!.direction)).toBeVisible();
     expect(screen.getByRole("heading", { name: "Correlated Past Events" })).toBeVisible();
     expect(screen.getByText(/Historical analogue analysis does not predict future performance/)).toBeVisible();
   });

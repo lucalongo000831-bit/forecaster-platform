@@ -153,8 +153,14 @@ test("private pages expose controlled unauthenticated or empty states", async ({
     ["/settings", /Make Kairo yours/i, /No active session|Sessione non disponibile/i],
   ] as const;
   for (const [path, heading, state] of pages) {
-    const warmup = await request.get(path);
-    expect(warmup.ok()).toBeTruthy();
+    await expect.poll(async () => {
+      try {
+        const warmup = await request.get(path, { timeout: 60_000 });
+        return warmup.ok();
+      } catch {
+        return false;
+      }
+    }, { timeout: 120_000 }).toBe(true);
     await page.goto(path, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     await expect(page.getByText(state).first()).toBeVisible();
@@ -177,6 +183,9 @@ test("global symbol matrix never exposes an unhandled server crash", async ({ re
 });
 
 test("company intelligence renders a complete cached flow or a controlled provider state", async ({ page, request }) => {
+  const reactErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error" && /react|hydration|same key|unique key/i.test(message.text())) reactErrors.push(message.text()); });
+  page.on("pageerror", (error) => reactErrors.push(error.message));
   const analysis = await request.get("/api/company/AAPL/analysis", { headers: { "x-forwarded-for": "198.51.100.200" }, timeout: 60_000 });
   expect([200, 404, 429, 502, 503, 504]).toContain(analysis.status());
   const payload = await analysis.json();
@@ -188,11 +197,19 @@ test("company intelligence renders a complete cached flow or a controlled provid
 
   expect(payload).toMatchObject({ data: { symbol: "AAPL", applicable: true, modelVersion: expect.any(String), reportVersion: expect.any(String) } });
   await page.goto("/instrument/nasdaq/aapl/analysis", { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await expect(page.getByText("Company Intelligence").first()).toBeVisible();
+  const companyIntelligence = page.getByText("Company Intelligence").first();
+  const controlledProviderState = page.getByRole("heading", { name: "Market data temporarily unavailable" });
+  await expect(companyIntelligence.or(controlledProviderState)).toBeVisible({ timeout: 30_000 });
+  if (await controlledProviderState.isVisible()) {
+    await expect(page.getByText("The provider did not respond and no safe fallback could be loaded.")).toBeVisible();
+    expect(reactErrors).toEqual([]);
+    return;
+  }
   await expect(page.getByText("Downside prima dell’upside")).toBeVisible();
   await expect(page.getByText("Multipli, reverse DCF e DCF")).toBeVisible();
   await expect(page.getByText("Rischi, red flag e tesi short")).toBeVisible();
   await expect(page.getByText("Fonti, metodologia e limiti")).toBeVisible();
+  expect(reactErrors).toEqual([]);
 
   const pdf = await request.get("/api/company/AAPL/report?format=pdf", { headers: { "x-forwarded-for": "198.51.100.201" }, timeout: 60_000 });
   expect([200, 401, 429, 502, 503, 504]).toContain(pdf.status());
