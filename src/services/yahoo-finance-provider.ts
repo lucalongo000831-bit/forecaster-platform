@@ -11,6 +11,7 @@ import { canFallback, safeServerLog } from "./yahoo/errors";
 import { analyzeTechnical } from "@/engines/technical";
 import { analyzeFundamentals, statementValue } from "@/engines/fundamental";
 import { getSeasonalityAnalysis } from "@/services/analysis/seasonality-service";
+import { getPatternAnalysis } from "@/services/analysis/pattern-service";
 import type {
   DashboardData,
   FundamentalsData,
@@ -22,7 +23,6 @@ import type {
   InstrumentRef,
   MarketChartDto,
   MomentumData,
-  PatternCase,
   PatternData,
   SearchInstrument,
   SeasonalityData,
@@ -210,30 +210,30 @@ export class YahooFinanceProvider implements FinancialDataProvider {
   async getPatterns(ref: InstrumentRef): Promise<PatternData> {
     const symbol = refSymbol(ref);
     return this.fallback<PatternData>("patterns", symbol, async () => {
-      const points = (await financialProviderRouter.chart(symbol, "5Y")).data.points;
-      const window = 21;
-      const cases: PatternCase[] = [];
-      for (let index = window; index < points.length; index += window) {
-        const segment = points.slice(index - window, index + 1);
-        const start = segment[0]; const end = segment.at(-1)!;
-        const startClose = analyticalClose(start);
-        const returns = segment.map((point) => ((analyticalClose(point) / startClose) - 1) * 100);
-        const performance = returns.at(-1) ?? 0;
-        cases.push({ id: cases.length + 1, direction: performance >= 0 ? "bullish" : "bearish", start: start.timestamp.slice(0, 10), end: end.timestamp.slice(0, 10), performance, drop: Math.min(...returns), rise: Math.max(...returns) });
-      }
-      const recent = points.slice(-90);
-      const usable = cases.slice(-24);
-      const bullish = usable.filter((item) => item.direction === "bullish").length;
-      const bullishProbability = usable.length ? Math.round(bullish / usable.length * 100) : 50;
-      const mostCorrelated = usable.at(-1);
+      const analysis = await getPatternAnalysis(symbol, { lookback: "1M" });
+      const entryPrice = analysis.reference.entryPrice ?? 1;
+      const mostPath = analysis.mostCorrelated?.normalizedFuturePath ?? analysis.historicalObservedPath;
+      const longByObservation = new Map(analysis.averageLong?.points.map((point) => [point.observation, point.value]) ?? []);
+      const shortByObservation = new Map(analysis.averageShort?.points.map((point) => [point.observation, point.value]) ?? []);
+      const mostCorrelated = analysis.mostCorrelated;
       return {
-        series: toTimeSeries(recent),
-        probability: { bullish: bullishProbability, bearish: 100 - bullishProbability },
-        robustness: Math.min(5, Math.max(1, Math.round(usable.length / 5))),
-        strength: Math.abs(bullishProbability - 50) >= 20 ? "Strong" : "Moderate",
-        assessment: "Historical rolling-window statistic calculated from Yahoo price history; it is not a forecast.",
-        correlatedEvent: mostCorrelated ? { trade: mostCorrelated.direction === "bullish" ? "Bullish" : "Bearish", date: mostCorrelated.start, performance: mostCorrelated.performance, maxDrop: mostCorrelated.drop } : { trade: "Dato non disponibile", date: "—", performance: 0, maxDrop: 0 },
-        cases: usable,
+        series: mostPath.map((point) => ({
+          label: point.date ?? `T+${point.observation}`,
+          value: entryPrice * (1 + point.value),
+          comparison: longByObservation.has(point.observation) ? entryPrice * (1 + longByObservation.get(point.observation)!) : undefined,
+          sell: shortByObservation.has(point.observation) ? entryPrice * (1 + shortByObservation.get(point.observation)!) : undefined,
+        })),
+        probability: { bullish: analysis.probability.bullish, bearish: analysis.probability.bearish, neutral: analysis.probability.neutral },
+        robustness: analysis.robustness.stars,
+        strength: `${analysis.strength.classification}${analysis.strength.direction === "UNCERTAIN" ? "" : ` ${analysis.strength.direction}`}`,
+        assessment: analysis.quality.status === "AVAILABLE"
+          ? `${analysis.matchedEvents.length} de-correlated historical analogues · minimum similarity ${analysis.quality.minimumSimilarity}% · descriptive research, not a forecast.`
+          : `${analysis.quality.status}: no probability is published until the minimum valid sample is available.`,
+        correlatedEvent: mostCorrelated ? { trade: mostCorrelated.direction, date: mostCorrelated.matchEndDate, performance: mostCorrelated.performance * 100, maxDrop: mostCorrelated.maxDrop * 100, maxRise: mostCorrelated.maxRise * 100, similarity: mostCorrelated.similarity } : { trade: "Dato non disponibile", date: "—", performance: null, maxDrop: null, maxRise: null, similarity: null },
+        cases: analysis.matchedEvents.map((event) => ({ id: event.id, direction: event.direction.toLowerCase() as "bullish" | "bearish" | "neutral", start: event.startDate, end: event.outcomeEndDate, performance: event.performance * 100, drop: event.maxDrop * 100, rise: event.maxRise * 100, similarity: event.similarity, rank: event.rank })),
+        modelVersion: analysis.modelVersion,
+        qualityStatus: analysis.quality.status,
+        referenceDate: analysis.reference.resolvedDate,
         source: "calculated",
       };
     });
