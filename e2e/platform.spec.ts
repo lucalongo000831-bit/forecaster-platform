@@ -150,7 +150,7 @@ test("private pages expose controlled unauthenticated or empty states", async ({
     ["/watchlists", /Your watchlists/i, /Workspace unavailable|Create your first private watchlist/i],
     ["/portfolio", /Your portfolio/i, /Private workspace unavailable|Create a portfolio to start/i],
     ["/alerts", /Alerts & notifications/i, /Alert workspace unavailable|No alert rules configured/i],
-    ["/settings", /Make Kairo yours/i, /No active session|Sessione non disponibile/i],
+    ["/settings", /Make Kairo yours/i, /No active session|Session status unavailable|Sessione non disponibile/i],
   ] as const;
   for (const [path, heading, state] of pages) {
     await expect.poll(async () => {

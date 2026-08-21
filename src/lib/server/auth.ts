@@ -8,9 +8,11 @@ import { getDatabase } from "@/db/client";
 import { sessions, users } from "@/db/schema";
 import { getServerEnvironment } from "@/schemas/env";
 import { AppError } from "./app-error";
+import { withServerTimeout } from "./promise-timeout";
 
 const SESSION_COOKIE = "kairo_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_LOOKUP_TIMEOUT_MS = 5_000;
 
 function authSecret(): string {
   const secret = getServerEnvironment().AUTH_SECRET;
@@ -55,12 +57,16 @@ export async function destroySession() {
 export async function getCurrentUser() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || !getServerEnvironment().AUTH_SECRET) return null;
-  const rows = await getDatabase()
-    .select({ id: users.id, email: users.email, name: users.name, role: users.role })
-    .from(sessions)
-    .innerJoin(users, eq(sessions.userId, users.id))
-    .where(and(eq(sessions.tokenHash, tokenHash(token)), gt(sessions.expiresAt, new Date())))
-    .limit(1);
+  const rows = await withServerTimeout(
+    getDatabase()
+      .select({ id: users.id, email: users.email, name: users.name, role: users.role })
+      .from(sessions)
+      .innerJoin(users, eq(sessions.userId, users.id))
+      .where(and(eq(sessions.tokenHash, tokenHash(token)), gt(sessions.expiresAt, new Date())))
+      .limit(1),
+    SESSION_LOOKUP_TIMEOUT_MS,
+    "Verifica della sessione scaduta",
+  );
   return rows[0] ?? null;
 }
 
