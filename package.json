@@ -30,6 +30,7 @@
     "test:kairo-data-v2": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-kairo-data-v2-providers.ts",
     "test:kairo-data-v2:security": "node --env-file-if-exists=.env.local scripts/verify-kairo-data-v2-security.mjs",
     "test:seasonality-audit": "node --conditions=react-server --env-file-if-exists=.env.local --import=tsx scripts/audit-seasonality-v2.ts",
+    "test:pattern-audit": "node --conditions=react-server --env-file-if-exists=.env.local --import=tsx scripts/audit-pattern-v2.ts",
     "data-v2:diagnose": "node scripts/diagnose-kairo-data-v2.mjs",
     "data-v2:backfill": "node --env-file-if-exists=.env.local scripts/backfill-kairo-data-v2.mjs",
     "issuer:backfill": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/issuer-backfill.ts",
