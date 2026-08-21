@@ -46,6 +46,12 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
     });
   }, [instrument.symbol]);
 
+  const prefetchPattern = useCallback(() => {
+    void import("@/components/financial/pattern-analysis-client").then(({ prefetchPatternAnalysis }) => {
+      prefetchPatternAnalysis(instrument.symbol);
+    });
+  }, [instrument.symbol]);
+
   useEffect(() => {
     let timer: number | undefined;
     const schedule = () => {
@@ -86,7 +92,8 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
           {tabs.map(([route,label]) => {
             const href = instrumentPath(instrument, route);
             const active = route.startsWith("fundamentals") ? pathname.includes("/fundamentals") : pathname.endsWith(route);
-            return <Link key={route} className={active ? "active" : ""} href={href} onPointerEnter={route === "seasonality" ? prefetchSeasonality : undefined} onFocus={route === "seasonality" ? prefetchSeasonality : undefined}>{label}</Link>;
+            const prefetch = route === "seasonality" ? prefetchSeasonality : route === "pattern" ? prefetchPattern : undefined;
+            return <Link key={route} className={active ? "active" : ""} href={href} onPointerEnter={prefetch} onFocus={prefetch}>{label}</Link>;
           })}
         </nav>
         <button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => setFavorite(!favorite)} aria-pressed={favorite} aria-label="Toggle favorite"><Star size={18} fill={favorite ? "currentColor" : "none"}/><span>{favorite ? "Watching" : "Watch"}</span></button>

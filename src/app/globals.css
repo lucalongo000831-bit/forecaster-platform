@@ -509,6 +509,13 @@ kbd { display: inline-flex; align-items: center; gap: 2px; padding: 4px 7px; bor
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
+/* Pattern V2 research */
+.pattern-controls { position: relative; z-index: 15; display: flex; align-items: end; justify-content: space-between; gap: 16px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 20px; background: #fff; box-shadow: var(--shadow-soft); }
+.pattern-chart-shell { min-width: 0; overflow: hidden; }
+.pattern-controls button:focus-visible,.pattern-controls select:focus-visible,[data-testid="pattern-research-view"] button:focus-visible,[data-testid="pattern-research-view"] tr:focus-visible { outline: 3px solid rgb(101 118 237 / 38%); outline-offset: 2px; }
+@media (max-width: 1100px) { .pattern-controls { align-items: stretch; flex-wrap: wrap; }.pattern-controls > * { flex: 1 1 auto; }.pattern-controls > [data-testid="pattern-date-stepper"] { flex: 1 1 340px; justify-content: center; } }
+@media (max-width: 767px) { .pattern-controls { align-items: stretch; flex-direction: column; padding: 14px; }.pattern-controls > * { width: 100%; }.pattern-controls select { width: 100%; }.pattern-controls > [data-testid="pattern-date-stepper"] { flex-basis: auto; }.pattern-controls > [data-testid="pattern-date-stepper"] > div { flex: 1; min-width: 0; }.pattern-chart-shell { margin-inline: -5px; }.pattern-chart-shell > div:first-child { padding-inline: 5px; }.pattern-chart-shell .recharts-wrapper { font-size: 10px; } }
+
 /* Global Markets / Global Risk Monitor */
 .gr-page { display: grid; gap: 22px; padding-block: 28px 64px; }
 .gr-hero { --risk-color: var(--risk-yellow); position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0,1.4fr) 230px minmax(260px,.72fr); align-items: stretch; gap: 1px; border-radius: 26px; color: #fff; background: rgb(255 255 255 / 11%); box-shadow: 0 28px 70px rgb(10 21 38 / 18%); }
