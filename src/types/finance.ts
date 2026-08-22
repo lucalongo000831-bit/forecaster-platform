@@ -228,28 +228,35 @@ export interface SeasonalityData {
 }
 
 export interface PatternCase {
-  id: number;
-  direction: "bullish" | "bearish";
+  id: number | string;
+  direction: "bullish" | "bearish" | "neutral";
   start: string;
   end: string;
   performance: number;
   drop: number;
   rise: number;
+  similarity?: number;
+  rank?: number;
 }
 
 export interface PatternData {
   series: TimePoint[];
-  probability: { bullish: number; bearish: number };
-  robustness: number;
+  probability: { bullish: number | null; bearish: number | null; neutral?: number | null };
+  robustness: number | null;
   strength: string;
   assessment: string;
   correlatedEvent: {
     trade: string;
     date: string;
-    performance: number;
-    maxDrop: number;
+    performance: number | null;
+    maxDrop: number | null;
+    maxRise?: number | null;
+    similarity?: number | null;
   };
   cases: PatternCase[];
+  modelVersion?: string;
+  qualityStatus?: string;
+  referenceDate?: string | null;
   source?: DataSource;
 }
 

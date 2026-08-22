@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const localChannel = process.platform === "darwin" ? "chrome" : undefined;
+const localServerCommand = process.env.PLAYWRIGHT_SERVER_COMMAND ?? "node node_modules/next/dist/bin/next dev --webpack";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,5 +18,15 @@ export default defineConfig({
     { name: "tablet-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 1366 }, channel: localChannel } },
     { name: "mobile-chromium", use: { ...devices["Pixel 7"], channel: localChannel } },
   ],
-  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : { command: "npm run dev", url: baseURL, reuseExistingServer: true, timeout: 120_000 },
+  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
+    command: localServerCommand,
+    url: baseURL,
+    reuseExistingServer: false,
+    timeout: 120_000,
+    env: {
+      ...process.env,
+      KAIRO_E2E_PROVIDER_FIXTURES: "true",
+      KAIRO_E2E_RUN: "playwright",
+    },
+  },
 });

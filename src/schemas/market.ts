@@ -53,6 +53,12 @@ export const seasonalityRequestSchema = z.object({
   includeTradeStats: seasonalityBooleanSchema,
   includeTable: seasonalityBooleanSchema,
 });
+export const patternLookbackSchema = z.enum(["1M", "3M", "6M"]);
+export const patternRequestSchema = z.object({
+  symbol: symbolSchema,
+  referenceDate: z.iso.date().optional(),
+  lookback: patternLookbackSchema.default("1M"),
+});
 export const signalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m") });
 export const targetHorizonSchema = z.enum(["3m", "6m", "12m", "long"]);
 export const targetRequestSchema = z.object({ symbol: symbolSchema, horizon: targetHorizonSchema.default("12m") });

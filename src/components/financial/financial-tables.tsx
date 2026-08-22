@@ -14,15 +14,20 @@ export function InsiderTable({ transactions }: { transactions: InsiderTransactio
 export function PatternCasesTable({ cases }: { cases: PatternCase[] }) {
   const [bullish, setBullish] = useState(true);
   const [bearish, setBearish] = useState(true);
-  const [selected, setSelected] = useState(7);
+  const [neutral, setNeutral] = useState(true);
+  const [selected, setSelected] = useState<number | string | null>(null);
   const bullishCases = cases.filter((row) => row.direction === "bullish");
   const bearishCases = cases.filter((row) => row.direction === "bearish");
-  const renderRow = (row: PatternCase) => <tr className={selected === row.id ? "selected" : ""} onClick={() => setSelected(row.id)} key={row.id}><td>{row.start}</td><td>{row.end}</td><td className="positive font-bold">+{row.performance}%</td><td className="negative font-bold">{row.drop}%</td><td className="positive font-bold">+{row.rise}%</td></tr>;
-  return <div className="table-shell"><table className="data-table"><thead><tr><th>Start Date</th><th>End Date</th><th>Performance</th><th>Max Drop (%)</th><th>Max Rise (%)</th></tr></thead><tbody>
-    <tr><td colSpan={5}><button className="border-0 bg-transparent font-bold" onClick={() => setBullish(!bullish)}>⌄ Bullish cases ({bullishCases.length})</button></td></tr>
+  const neutralCases = cases.filter((row) => row.direction === "neutral");
+  const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  const renderRow = (row: PatternCase) => <tr className={selected === row.id ? "selected" : ""} onClick={() => setSelected(row.id)} key={row.id}><td>{row.start}</td><td>{row.end}</td><td className={row.performance > 0 ? "positive font-bold" : row.performance < 0 ? "negative font-bold" : "font-bold"}>{signed(row.performance)}</td><td className="negative font-bold">{signed(row.drop)}</td><td className="positive font-bold">{signed(row.rise)}</td><td>{row.similarity === undefined ? "—" : `${row.similarity.toFixed(1)}%`}</td></tr>;
+  return <div className="table-shell"><table className="data-table"><thead><tr><th>Start Date</th><th>End Date</th><th>Performance</th><th>Max Drop</th><th>Max Rise</th><th>Similarity</th></tr></thead><tbody>
+    <tr><td colSpan={6}><button className="border-0 bg-transparent font-bold" onClick={() => setBullish(!bullish)}>⌄ Bullish cases ({bullishCases.length})</button></td></tr>
     {bullish && bullishCases.map(renderRow)}
-    <tr><td colSpan={5}><button className="border-0 bg-transparent font-bold" onClick={() => setBearish(!bearish)}>⌄ Bearish cases ({bearishCases.length})</button></td></tr>
+    <tr><td colSpan={6}><button className="border-0 bg-transparent font-bold" onClick={() => setBearish(!bearish)}>⌄ Bearish cases ({bearishCases.length})</button></td></tr>
     {bearish && bearishCases.map(renderRow)}
+    <tr><td colSpan={6}><button className="border-0 bg-transparent font-bold" onClick={() => setNeutral(!neutral)}>⌄ Neutral cases ({neutralCases.length})</button></td></tr>
+    {neutral && neutralCases.map(renderRow)}
   </tbody></table></div>;
 }
 

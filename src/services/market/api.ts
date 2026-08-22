@@ -20,6 +20,7 @@ export function providerApiSuccess<T>(result: ProviderResult<T>, context: Reques
       fallback: result.meta.isFallback,
       stale: result.meta.freshness === "stale",
       delayed: result.meta.freshness === "delayed",
+      providerRequestId: result.meta.requestId,
     },
   });
 }

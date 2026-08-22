@@ -3,6 +3,7 @@ import "server-only";
 import { getServerEnvironment } from "@/schemas/env";
 import type { ChartInterval, ChartRange, MarketChartDto, MarketQuoteDto, SearchInstrument } from "@/types";
 import { instrumentHref, normalizeSearchQuery, normalizeSymbol } from "@/services/yahoo/symbol-resolver";
+import { verifiedInstrumentKind } from "@/services/instruments/instrument-kind";
 import { ProviderError } from "../errors";
 import { massiveGet, massiveNumber, massiveString, recordValue } from "../massive/client";
 import { providerResult } from "../metadata";
@@ -30,6 +31,10 @@ function timestampToIso(value: number | null): string | null {
 
 function isCrypto(symbol: string) { return symbol.endsWith("-USD"); }
 function massiveSymbol(symbol: string) { return isCrypto(symbol) ? `X:${symbol.replace("-", "")}` : symbol; }
+function quoteType(symbol: string) {
+  const kind = verifiedInstrumentKind(symbol);
+  return kind === "ETF" || kind === "FUND" ? "ETF" : kind === "INDEX" ? "INDEX" : kind === "CRYPTO" ? "CRYPTOCURRENCY" : "EQUITY";
+}
 
 function mapUnifiedSnapshot(row: Record<string, unknown>, requestedSymbol: string): MarketQuoteDto {
   const session = recordValue(row, "session");
@@ -47,7 +52,7 @@ function mapUnifiedSnapshot(row: Record<string, unknown>, requestedSymbol: strin
     symbol: requestedSymbol,
     name: requestedSymbol,
     exchange: crypto ? "CRYPTO" : "US",
-    quoteType: crypto ? "CRYPTOCURRENCY" : "EQUITY",
+    quoteType: quoteType(requestedSymbol),
     currency: "USD",
     price,
     change,
@@ -81,7 +86,7 @@ async function aggregateQuote(symbol: string): Promise<{ data: MarketQuoteDto; d
   const volume = sessionRows.reduce((sum, row) => sum + (massiveNumber(row, "v") ?? 0), 0);
   const change = previousClose === null ? 0 : price - previousClose; const changePercent = previousClose ? change / previousClose * 100 : 0;
   const delayed = massiveString(response, "status") === "DELAYED" || Date.now() - new Date(asOf).getTime() > 120_000;
-  return { delayed, data: { symbol, name: symbol, exchange: isCrypto(symbol) ? "CRYPTO" : "US", quoteType: isCrypto(symbol) ? "CRYPTOCURRENCY" : "EQUITY", currency: "USD", price, change, changePercent, open, previousClose, dayLow, dayHigh, volume, marketCap: null, bid: null, ask: null, marketState: isCrypto(symbol) ? "REGULAR" : "REGULAR", asOf, isDelayed: delayed, source: "massive" } };
+  return { delayed, data: { symbol, name: symbol, exchange: isCrypto(symbol) ? "CRYPTO" : "US", quoteType: quoteType(symbol), currency: "USD", price, change, changePercent, open, previousClose, dayLow, dayHigh, volume, marketCap: null, bid: null, ask: null, marketState: isCrypto(symbol) ? "REGULAR" : "REGULAR", asOf, isDelayed: delayed, source: "massive" } };
 }
 
 export class MassiveMarketDataAdapter implements MarketDataProvider {
