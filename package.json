@@ -17,6 +17,7 @@
     "test:e2e": "playwright test",
     "test:providers": "node scripts/test-financial-providers.mjs",
     "test:live-providers": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-live-providers.ts",
+    "test:live-provider-smoke": "node --conditions=react-server --env-file-if-exists=.env.local --import=tsx scripts/test-live-provider-smoke.ts",
     "test:new-providers": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-new-data-providers.ts",
     "test:complete-data-stack": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/test-complete-data-stack.ts",
     "test:political": "node --env-file-if-exists=.env.local scripts/test-political-intelligence.mjs",

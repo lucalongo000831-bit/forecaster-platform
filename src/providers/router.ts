@@ -24,6 +24,7 @@ import { YahooMarketDataAdapter } from "./market-data/yahoo-adapter";
 import { EodhdMarketDataAdapter } from "./market-data/eodhd-adapter";
 import { finnhubCompanyAdapter } from "./finnhub/company-adapter";
 import { yahooFinanceClient } from "@/services/yahoo/yahoo-finance-client";
+import { deterministicE2EProvider } from "./testing/deterministic-e2e-provider";
 import type {
   FundamentalsProvider,
   MarketDataProvider,
@@ -96,18 +97,21 @@ export class FinancialProviderRouter {
 
   search(queryInput: string) {
     const query = normalizeSearchQuery(queryInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.search(query);
     const order = [marketAdapters.fmp, marketAdapters.eodhd, marketAdapters.massive, marketAdapters.yahoo];
     return providerCached(`search:${query.toLowerCase()}`, { freshSeconds: 300, staleSeconds: 1_800 }, () => firstAvailable("search", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.searchInstruments(query) }))));
   }
 
   quote(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.quote(symbol);
     const order = this.marketOrder();
     return providerCached(`quote:${symbol}`, { freshSeconds: 3, staleSeconds: 30 }, () => firstAvailable("quote", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getQuote(symbol) }))));
   }
 
   quotes(symbolInputs: string[]) {
     const symbols = unique(symbolInputs.map(normalizeSymbol)).slice(0, 50);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.quotes(symbols);
     const order = unique([marketAdapters.yahoo, ...this.marketOrder()]);
     return providerCached(`quotes:${symbols.join(",")}`, { freshSeconds: 15, staleSeconds: 60 }, () => firstAvailable("quotes", undefined, order.map((adapter) => ({
       name: adapter.name,
@@ -119,6 +123,7 @@ export class FinancialProviderRouter {
 
   chart(symbolInput: string, range: ChartRange, interval?: string | null) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.chart(symbol, range, interval);
     const order = this.marketOrder();
     const intraday = range === "1D" || range === "5D";
     return providerCached(`chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: intraday ? 10 : 900, staleSeconds: intraday ? 60 : 21_600 }, () => firstAvailable("chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
@@ -126,12 +131,14 @@ export class FinancialProviderRouter {
 
   analyticsChart(symbolInput: string, range: ChartRange = "MAX", interval: string | null = "1d") {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.chart(symbol, range, interval);
     const order = this.marketOrder();
     return providerCached(`analytics-chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, () => firstAvailable("analytics-chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
   }
 
   seasonalityChart(symbolInput: string, preferredYears = 25) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.chart(symbol, "MAX", "1d");
     const order = this.marketOrder();
     return providerCached(`seasonality-chart:v2:${symbol}:${preferredYears}`, { freshSeconds: 3_600, staleSeconds: 86_400 }, async () => {
       let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
@@ -158,23 +165,27 @@ export class FinancialProviderRouter {
   }
 
   marketStatus(market = "US") {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.marketStatus(market);
     const order = this.marketOrder();
     return providerCached(`market-status:${market}`, { freshSeconds: 30, staleSeconds: 300 }, () => firstAvailable("market-status", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getMarketStatus(market) }))));
   }
 
   profile(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.profile(symbol);
     const order = this.fundamentalOrder();
     return providerCached(`profile:${symbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, () => firstAvailable("profile", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getCompanyProfile(symbol) }))));
   }
 
   fundamentals(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.fundamentals(symbol);
     const order = this.fundamentalOrder();
     return providerCached(`fundamentals:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("fundamentals", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getFundamentals(symbol) }))));
   }
 
   fundamentalsForInstrument(instrument: ResolvedInstrument) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.fundamentals(instrument.canonicalSymbol);
     const order = this.fundamentalOrder();
     const cacheIdentity = instrument.issuer?.cik ?? instrument.issuer?.lei ?? instrument.canonicalSymbol;
     return providerCached(`fundamentals:issuer:${cacheIdentity}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("fundamentals", instrument.canonicalSymbol, order.map((adapter) => {
@@ -184,6 +195,7 @@ export class FinancialProviderRouter {
   }
 
   supplementalFundamentalsForInstrument(instrument: ResolvedInstrument) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.fundamentals(instrument.canonicalSymbol);
     const adapter = fundamentalAdapters.yahoo;
     const symbol = mappedSymbol(instrument, "yahoo");
     return providerCached(`fundamentals:supplemental:yahoo:${instrument.issuer?.cik ?? symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("supplemental-fundamentals", symbol, [
@@ -193,11 +205,13 @@ export class FinancialProviderRouter {
 
   statements(symbolInput: string, kind: StatementKind, period: StatementPeriod, limit = 5) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.statements(symbol, kind, period, limit);
     const order = this.fundamentalOrder();
     return providerCached(`statements:${symbol}:${kind}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, () => firstAvailable("statements", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getStatements(symbol, kind, period, limit) }))));
   }
 
   statementsForInstrument(instrument: ResolvedInstrument, kind: StatementKind, period: StatementPeriod, limit = 5) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.statements(instrument.canonicalSymbol, kind, period, limit);
     const order = this.fundamentalOrder();
     const cacheIdentity = instrument.issuer?.cik ?? instrument.issuer?.lei ?? instrument.canonicalSymbol;
     return providerCached(`statements:issuer:${cacheIdentity}:${kind}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, async () => {
@@ -214,17 +228,20 @@ export class FinancialProviderRouter {
 
   ratios(symbolInput: string, period: StatementPeriod, limit = 5) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.ratios(symbol, period, limit);
     const order = this.fundamentalOrder();
     return providerCached(`ratios:${symbol}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, () => firstAvailable("ratios", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getRatios(symbol, period, limit) }))));
   }
 
   analystConsensus(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.analystConsensus(symbol);
     const order = this.fundamentalOrder();
     return providerCached(`analyst:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystConsensus(symbol) }))));
   }
 
   analystConsensusForInstrument(instrument: ResolvedInstrument) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.analystConsensus(instrument.canonicalSymbol);
     const order = this.fundamentalOrder();
     return providerCached(`analyst:issuer:${instrument.issuer?.cik ?? instrument.canonicalSymbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst", instrument.canonicalSymbol, order.map((adapter) => {
       const symbol = mappedSymbol(instrument, adapter.name);
@@ -234,21 +251,25 @@ export class FinancialProviderRouter {
 
   analystEstimates(symbolInput: string, limit = 8) {
     const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.analystEstimates(symbol, limit);
     return providerCached(`analyst-estimates:${symbol}:${limit}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst-estimates", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystEstimates(symbol, limit) }]));
   }
 
   analystRatings(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.analystRatings(symbol);
     return providerCached(`analyst-ratings:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, () => firstAvailable("analyst-ratings", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getAnalystRatings(symbol) }]));
   }
 
   growth(symbolInput: string, period: StatementPeriod = "annual", limit = 10) {
     const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.growth(symbol, period, limit);
     return providerCached(`growth:${symbol}:${period}:${limit}`, { freshSeconds: 21_600, staleSeconds: 604_800 }, () => firstAvailable("growth", symbol, [{ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getGrowth(symbol, period, limit) }]));
   }
 
   peers(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput); const adapter = fundamentalAdapters.fmp;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.peers(symbol);
     return providerCached(`peers:${symbol}`, { freshSeconds: 86_400, staleSeconds: 604_800 }, () => firstAvailable("peers", symbol, [
       { name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getPeers(symbol) },
       { name: finnhubCompanyAdapter.name, configured: finnhubCompanyAdapter.isConfigured(), supported: !symbol.startsWith("^") && !symbol.endsWith("-USD"), task: async () => providerResult("finnhub", await finnhubCompanyAdapter.getPeers(symbol), { freshness: "cached", freshnessType: "END_OF_DAY" }) },
@@ -257,6 +278,7 @@ export class FinancialProviderRouter {
   }
 
   peersForInstrument(instrument: ResolvedInstrument) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.peers(instrument.canonicalSymbol);
     const fmp = fundamentalAdapters.fmp;
     const fmpSymbol = mappedSymbol(instrument, "fmp");
     const finnhubSymbol = mappedSymbol(instrument, "finnhub");
@@ -277,45 +299,53 @@ export class FinancialProviderRouter {
 
   earningsCalendar(from: string, to: string, symbol?: string) {
     const normalized = symbol ? normalizeSymbol(symbol) : undefined;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.earningsCalendar(from, to, normalized);
     const order = this.fundamentalOrder();
     return providerCached(`earnings:${from}:${to}:${normalized ?? "all"}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("earnings-calendar", normalized, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: !normalized || adapter.supportsSymbol(normalized), task: () => adapter.getEarningsCalendar(from, to, normalized) }))));
   }
 
   dividendCalendar(from: string, to: string, symbol?: string) {
     const normalized = symbol ? normalizeSymbol(symbol) : undefined;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.dividendCalendar(from, to, normalized);
     const order = this.fundamentalOrder();
     return providerCached(`dividends:${from}:${to}:${normalized ?? "all"}`, { freshSeconds: 7_200, staleSeconds: 86_400 }, () => firstAvailable("dividends-calendar", normalized, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: !normalized || adapter.supportsSymbol(normalized), task: () => adapter.getDividendCalendar(from, to, normalized) }))));
   }
 
   economicCalendar(from: string, to: string) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.economicCalendar(from, to);
     const order = this.fundamentalOrder();
     return providerCached(`economic-calendar:${from}:${to}`, { freshSeconds: 600, staleSeconds: 3_600 }, () => firstAvailable("economic-calendar", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getEconomicCalendar(from, to) }))));
   }
 
   news(symbolInput: string, limit = 20) {
     const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.news(symbol, limit);
     const order = this.newsOrder();
     return providerCached(`news:${symbol}:${limit}`, { freshSeconds: 600, staleSeconds: 3_600 }, () => firstAvailable("news", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getTickerNews(symbol, limit) }))));
   }
 
   topicNews(topics: string[], limit = 20) {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.topicNews(topics, limit);
     const order = this.newsOrder().filter((adapter) => adapter.name === "alpha-vantage" || adapter.name === "fmp");
     return providerCached(`topic-news:${topics.join(",")}:${limit}`, { freshSeconds: 900, staleSeconds: 3_600 }, () => firstAvailable("topic-news", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getTopicNews(topics, limit) }))));
   }
 
   senateTrades(symbolInput?: string, limit = 100) {
     const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.political("SENATE", symbol, limit);
     const order = [politicalAdapters.fmp, politicalAdapters.bargo];
     return providerCached(`political:senate:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("senate-trades", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getSenateTrades(symbol, limit) }))));
   }
 
   houseTrades(symbolInput?: string, limit = 100) {
     const symbol = symbolInput ? normalizeSymbol(symbolInput) : undefined;
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.political("HOUSE", symbol, limit);
     const order = [politicalAdapters.fmp, politicalAdapters.bargo];
     return providerCached(`political:house:${symbol ?? "latest"}:${limit}`, { freshSeconds: 3_600, staleSeconds: 21_600 }, () => firstAvailable("house-trades", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getHouseTrades(symbol, limit) }))));
   }
 
   macroIndicator(indicator: "INFLATION" | "RATES" | "GDP" | "EMPLOYMENT") {
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.macro(indicator);
     const order = [macroAdapters.fmp, macroAdapters["alpha-vantage"]];
     return providerCached(`macro:${indicator}`, { freshSeconds: 21_600, staleSeconds: 86_400 }, () => firstAvailable("macro-indicator", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.getIndicator(indicator) }))));
   }

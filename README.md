@@ -67,6 +67,7 @@ Generate `AUTH_SECRET`, `CRON_SECRET` and `INTERNAL_API_SECRET` with a cryptogra
 | `npm run db:generate` | generate a migration from schema changes |
 | `npm run db:migrate` | apply committed PostgreSQL migrations |
 | `npm run test:live-providers` | safe Massive/FMP/Alpha live smoke test; prints only OK/ERROR |
+| `npm run test:live-provider-smoke` | serial router smoke for representative equity, ETF and crypto assets; reports health without exposing credentials |
 | `npm run test:new-providers` | safe EODHD/Finnhub/CoinGecko/SEC authentication smoke test |
 | `npm run test:complete-data-stack` | provider and optional Preview route smoke matrix; never prints keys |
 | `npm run test:company-smoke` | Company Intelligence symbol/archetype smoke matrix against a running app |

@@ -175,11 +175,18 @@ test("calendar, backtest and invalid ticker produce controlled UI/API states", a
 
 test("global symbol matrix never exposes an unhandled server crash", async ({ request }) => {
   const symbols = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "^GSPC", "^IXIC", "BTC-USD", "ETH-USD", "ENI.MI", "STLAM.MI"];
-  for (const symbol of symbols) {
-    const response = await request.get(`/api/market/quote?symbol=${encodeURIComponent(symbol)}`);
-    expect([200, 404, 429, 502, 503, 504]).toContain(response.status());
-    const body = await response.json(); expect(body).toMatchObject(response.ok() ? { data: expect.any(Object) } : { error: expect.any(Object) });
+  for (const [index, symbol] of symbols.entries()) {
+    const response = await request.get(`/api/market/quote?symbol=${encodeURIComponent(symbol)}`, { headers: { "x-forwarded-for": `198.51.100.${20 + index}` } });
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ data: { symbol, source: "mock" }, meta: { providerRequestId: "deterministic-e2e-provider" } });
   }
+});
+
+test("deterministic provider preserves an explicit unavailable response", async ({ request }) => {
+  const response = await request.get("/api/market/quote?symbol=E2E-UNAVAILABLE", { headers: { "x-forwarded-for": "198.51.100.240" } });
+  expect(response.status()).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: "PROVIDER_ERROR", message: expect.any(String) } });
 });
 
 test("company intelligence renders a complete cached flow or a controlled provider state", async ({ page, request }) => {
@@ -229,4 +236,10 @@ test("non-company instruments never receive fabricated corporate analysis", asyn
     if (response.ok()) expect(payload).toMatchObject({ data: { applicable: false, verdict: "INSUFFICIENT_DATA" } });
     else expect(payload).toMatchObject({ error: { code: expect.any(String) } });
   }
+});
+
+test("deterministic suite made no outbound financial-provider request", async ({ request }) => {
+  const response = await request.get("/api/testing/provider-audit");
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toMatchObject({ data: { enabled: true, installed: true, blockedAttempts: 0, hosts: {} } });
 });
