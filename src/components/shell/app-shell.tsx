@@ -115,6 +115,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
           </button>
           <div className="header-actions">
             <Link href="/alerts" className="header-icon" aria-label="Notifications"><Bell size={19}/><i/></Link>
+            <button className="chat-mobile" aria-label="Open Kairo assistant" onClick={() => openKairo()}><MessageCircle size={19}/></button>
             <button className="header-icon" aria-label="Open tools" onClick={() => { setLauncherOpen(!launcherOpen); setSearchOpen(false); }}><Grid3X3 size={19}/></button>
             <button className="avatar" aria-label="Profile">SD</button>
           </div>

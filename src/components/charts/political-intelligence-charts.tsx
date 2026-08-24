@@ -15,18 +15,31 @@ export function PoliticalPriceDisclosureChart({ prices, transactions }: { prices
     const ordered = [...prices].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
     const nearestTradingDate = (date: string) => ordered.find((point) => point.timestamp.slice(0, 10) >= date)?.timestamp.slice(0, 10) ?? ordered.at(-1)?.timestamp.slice(0, 10) ?? date;
     const metadata = new Map<string, string[]>();
-    const markers = transactions.flatMap((row) => ([
+    const markerGroups = new Map<string, { time: NonNullable<ReturnType<typeof normalizeChartTime>>; position: "aboveBar" | "belowBar"; shape: "arrowUp" | "arrowDown"; color: string; labels: Set<string>; details: string[] }>();
+    transactions.flatMap((row) => ([
       { date: nearestTradingDate(row.transactionDate), label: "T", phase: "transaction", row },
       { date: nearestTradingDate(row.disclosureDate), label: "D", phase: "disclosure", row },
-    ])).flatMap((item): KairoChartMarker[] => {
+    ])).forEach((item) => {
       const time = normalizeChartTime(item.date);
-      if (time === null) return [];
+      if (time === null) return;
       const transactionSide = side(item.row);
       const color = transactionSide === "PURCHASE" ? kairoChartTheme.bullish : transactionSide === "SALE" ? kairoChartTheme.bearish : kairoChartTheme.textSecondary;
+      const position = transactionSide === "PURCHASE" ? "belowBar" : "aboveBar";
       const detail = `${item.label} ${item.row.politicianName} · ${item.row.transactionType.toLowerCase()} · ${item.row.amountRangeRaw ?? "amount not reported"} · ${item.phase} ${item.date}`;
       metadata.set(timeKey(time), [...(metadata.get(timeKey(time)) ?? []), detail]);
-      return [{ time, position: transactionSide === "PURCHASE" ? "belowBar" : "aboveBar", shape: transactionSide === "PURCHASE" ? "arrowUp" : "arrowDown", color, text: item.label }];
-    }).sort((left, right) => timeKey(left.time).localeCompare(timeKey(right.time)));
+      const key = `${timeKey(time)}:${position}`;
+      const current = markerGroups.get(key) ?? { time, position, shape: transactionSide === "PURCHASE" ? "arrowUp" : "arrowDown", color, labels: new Set<string>(), details: [] };
+      current.labels.add(item.label);
+      current.details.push(detail);
+      markerGroups.set(key, current);
+    });
+    const markers: KairoChartMarker[] = [...markerGroups.values()].map((group) => ({
+      time: group.time,
+      position: group.position,
+      shape: group.shape,
+      color: group.color,
+      text: `${[...group.labels].sort().join("/")}${group.details.length > 1 ? ` ×${group.details.length}` : ""}`,
+    })).sort((left, right) => timeKey(left.time).localeCompare(timeKey(right.time)));
     const points = adaptTimePoints(ordered.map((point) => ({ timestamp: point.timestamp, label: point.timestamp.slice(0, 10), value: point.close, metadata: metadata.get(timeKey(normalizeChartTime(point.timestamp.slice(0, 10)) ?? point.timestamp.slice(0, 10)))?.join(" | ") }))).data;
     const series: KairoChartSeriesDefinition[] = [{ id: "price", label: "Price", type: "area", data: points, color: kairoChartTheme.primary, format: "price", lineWidth: 3, markers }];
     return { series, first: points[0]?.label, last: points.at(-1)?.label };
