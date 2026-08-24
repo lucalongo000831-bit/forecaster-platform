@@ -103,7 +103,7 @@ export function PatternV2Chart({ analysis, showSingleEvents, selectedEventId }: 
     definitions.push(
       { id: "best", label: "Most correlated event", type: "line", data: patternPoints(rows, "best", minimumHorizon, analysis.mostCorrelated ? eventMetadata(analysis.mostCorrelated) : undefined), color: kairoChartTheme.bestMatch, format: "percent", lineWidth: 3 },
       { id: "average-long", label: "Average Long", type: "line", data: patternPoints(rows, "averageLong", minimumHorizon), color: kairoChartTheme.averageLong, format: "percent", lineWidth: 3 },
-      { id: "average-short", label: "Average Short", type: "line", data: patternPoints(rows, "averageShort", minimumHorizon), color: kairoChartTheme.averageShort, format: "percent", lineWidth: 3 },
+      { id: "average-short", label: "Average Short", type: "line", data: patternPoints(rows, "averageShort", minimumHorizon), color: kairoChartTheme.averageShort, format: "percent", lineWidth: 3, lineStyle: 2 },
     );
     if (selected && selected.rank !== 1) definitions.push({
       id: `selected_${selected.id}`,
@@ -117,7 +117,7 @@ export function PatternV2Chart({ analysis, showSingleEvents, selectedEventId }: 
     return definitions.filter((definition) => definition.data.length > 0);
   }, [analysis.matchedEvents, analysis.mostCorrelated, minimumHorizon, rows, selected, selectedEventId, showSingleEvents]);
 
-  return <div className="pattern-chart-shell" role="img" aria-label={summary} data-testid="pattern-main-chart">
+  return <div className="pattern-chart-shell" data-testid="pattern-main-chart">
     <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold">
       {showSingleEvents && <span className="muted">{analysis.matchedEvents.length} individual paths visible</span>}
       {selected && <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">Selected #{selected.rank} · {selected.matchEndDate}</span>}

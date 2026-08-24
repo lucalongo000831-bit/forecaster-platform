@@ -32,6 +32,12 @@ type TooltipState = {
   entries: Array<{ id: string; label: string; color: string; value: string; metadata?: string }>;
 } | null;
 
+function fitVolumePane(chart: IChartApi, chartHeight: number) {
+  const volumePane = chart.panes()[1];
+  if (!volumePane) return;
+  volumePane.setHeight(Math.max(76, Math.min(112, Math.round(chartHeight * 0.24))));
+}
+
 function seriesOptions(definition: KairoChartSeriesDefinition) {
   const maximum = Math.max(0, ...definition.data.map((point) => Math.abs(point.value)));
   const precision = maximum >= 10 ? 2 : maximum >= 1 ? 3 : maximum >= 0.01 ? 4 : 6;
@@ -112,6 +118,7 @@ export function KairoTimeSeriesChart({
 
   const allSeries = useMemo(() => volume ? [...series, volume] : series, [series, volume]);
   const hasVolume = Boolean(volume);
+  const usesIntradayScale = useMemo(() => allSeries.some((definition) => definition.data.some((point) => /(?:T|\s)\d{2}:\d{2}/.test(point.label))), [allSeries]);
   const hasData = allSeries.some((definition) => definition.data.length > 0);
   const labelsByTime = useMemo(() => {
     const result = new Map<string, string>();
@@ -147,8 +154,8 @@ export function KairoTimeSeriesChart({
         layout: { background: { type: library.ColorType.Solid, color: kairoChartTheme.background }, textColor: kairoChartTheme.textSecondary, attributionLogo: true, fontFamily: "var(--font-sans, Inter, ui-sans-serif, system-ui)" },
         grid: { vertLines: { color: kairoChartTheme.grid, style: library.LineStyle.Dotted }, horzLines: { color: kairoChartTheme.grid, style: library.LineStyle.Dotted } },
         crosshair: { mode: library.CrosshairMode.Normal, vertLine: { color: kairoChartTheme.crosshair, width: 1, style: library.LineStyle.Dashed, labelBackgroundColor: kairoChartTheme.secondary }, horzLine: { color: kairoChartTheme.crosshair, width: 1, style: library.LineStyle.Dashed, labelBackgroundColor: kairoChartTheme.secondary } },
-        rightPriceScale: { borderColor: kairoChartTheme.axis, scaleMargins: hasVolume ? { top: 0.08, bottom: 0.22 } : { top: 0.08, bottom: 0.08 } },
-        timeScale: { borderColor: kairoChartTheme.axis, rightOffset: 2, barSpacing: compact ? 7 : 9, minBarSpacing: 1.5, timeVisible: true, secondsVisible: false, tickMarkFormatter: (time: Time) => labelsRef.current.get(timeKey(time)) ?? timeKey(time) },
+        rightPriceScale: { borderColor: kairoChartTheme.axis, scaleMargins: { top: 0.08, bottom: 0.08 } },
+        timeScale: { borderColor: kairoChartTheme.axis, rightOffset: 2, barSpacing: compact ? 7 : 9, minBarSpacing: 1.5, timeVisible: usesIntradayScale, secondsVisible: false, tickMarkFormatter: (time: Time) => labelsRef.current.get(timeKey(time)) ?? timeKey(time) },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
         kineticScroll: { mouse: true, touch: true },
@@ -173,6 +180,7 @@ export function KairoTimeSeriesChart({
           entries.push({ id, label: record.definition.label, color: record.definition.color, value: formatKairoChartValue(value, record.definition.format, currency), metadata: metadataRef.current.get(`${id}:${timeKey(parameter.time)}`) });
         }
         if (!entries.length) { setTooltip(null); return; }
+        entries.sort((left, right) => Number(registry.get(left.id)?.definition.showInLegend === false) - Number(registry.get(right.id)?.definition.showInLegend === false));
         setTooltip({ x: parameter.point.x, y: parameter.point.y, time: labelsRef.current.get(timeKey(parameter.time)) ?? timeKey(parameter.time), entries });
       };
       localChart.subscribeCrosshairMove(crosshairHandler);
@@ -181,7 +189,9 @@ export function KairoTimeSeriesChart({
         const entry = entries[0];
         if (!entry || !localChart) return;
         const width = Math.max(1, Math.floor(entry.contentRect.width));
-        localChart.resize(width, Math.max(1, Math.floor(entry.contentRect.height || host.clientHeight || height)));
+        const nextHeight = Math.max(1, Math.floor(entry.contentRect.height || host.clientHeight || height));
+        localChart.resize(width, nextHeight);
+        if (hasVolume) fitVolumePane(localChart, nextHeight);
         setChartWidth(width);
         updateReference();
       });
@@ -199,7 +209,7 @@ export function KairoTimeSeriesChart({
       if (chartRef.current === localChart) chartRef.current = null;
       libraryRef.current = null;
     };
-  }, [compact, currency, hasData, hasVolume, height]);
+  }, [compact, currency, hasData, hasVolume, height, usesIntradayScale]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -234,6 +244,7 @@ export function KairoTimeSeriesChart({
         else record.markers.setMarkers(definition.markers);
       } else if (record.markers) record.markers.setMarkers([]);
     });
+    if (hasVolume) fitVolumePane(chart, hostRef.current?.clientHeight || height);
 
     const primary = definitions.find((definition) => definition.id !== "__volume");
     const primaryRecord = primary ? registryRef.current.get(primary.id) : null;
@@ -248,7 +259,7 @@ export function KairoTimeSeriesChart({
       const current = referenceTimeRef.current;
       setReferenceX(current === undefined ? null : chart.timeScale().timeToCoordinate(current));
     }
-  }, [chartKey, hiddenIds, horizontalLines, ready, series, volume]);
+  }, [chartKey, hasVolume, height, hiddenIds, horizontalLines, ready, series, volume]);
 
   const summary = useMemo(() => {
     const values = series.flatMap((definition) => definition.data.map((point) => point.value)).filter(Number.isFinite);
@@ -269,7 +280,7 @@ export function KairoTimeSeriesChart({
     <div className="kairo-chart-stage" style={{ "--kairo-chart-height": `${height}px` } as CSSProperties}>
       <div ref={hostRef} className="kairo-chart-canvas"/>
       {referenceX !== null && <div className="kairo-reference-marker" style={{ left: referenceX }} aria-hidden="true"><span>{referenceLabel}</span></div>}
-      {tooltip && <div className="kairo-chart-tooltip" style={{ left: Math.min(tooltip.x + 14, Math.max(8, chartWidth - 245)), top: Math.max(8, tooltip.y - 18) }} aria-hidden="true"><strong>{tooltip.time}</strong>{tooltip.entries.slice(0, 8).map((entry) => <div key={entry.id}><span><i style={{ background: entry.color }}/>{entry.label}</span><b>{entry.value}</b>{entry.metadata && <small>{entry.metadata}</small>}</div>)}</div>}
+      {tooltip && <div className="kairo-chart-tooltip" style={{ left: Math.min(tooltip.x + 14, Math.max(8, chartWidth - 245)), top: 8 }} aria-hidden="true"><strong>{tooltip.time}</strong>{tooltip.entries.slice(0, 8).map((entry) => <div key={entry.id}><span><i style={{ background: entry.color }}/>{entry.label}</span><b>{entry.value}</b>{entry.metadata && <small>{entry.metadata}</small>}</div>)}</div>}
     </div>
     <div className="kairo-chart-footer"><span>Scroll to zoom · drag to explore</span></div>
     <p className="sr-only">{summary} Use the visible series controls to inspect the same values without requiring pointer hover.</p>
