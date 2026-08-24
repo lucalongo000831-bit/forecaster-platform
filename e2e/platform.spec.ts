@@ -72,11 +72,22 @@ test("real search interaction returns encoded instrument navigation", async ({ p
 });
 
 test("instrument workspace changes chart period and exposes research tabs", async ({ page }) => {
+  let chartRequests = 0;
+  page.on("request", (request) => { if (request.url().includes("/api/market/chart?")) chartRequests += 1; });
   await page.route("**/api/market/chart?**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { symbol: "AAPL", currency: "USD", exchange: "NASDAQ", range: "1M", interval: "1d", previousClose: 210, isDelayed: true, asOf: "2026-08-06T20:00:00.000Z", points: [chartPoint(4, 211), chartPoint(5, 213), chartPoint(6, 214)] }, meta: { source: "yahoo" } }) }));
   await page.goto("/instrument/nasdaq/aapl/chart");
   await expect(page.getByText(/Interactive Price Chart/i)).toBeVisible();
+  const financialChart = page.locator('[data-chart-engine="lightweight-charts"]').first();
+  await expect(financialChart).toHaveAttribute("data-chart-ready", "true");
   await page.getByRole("button", { name: "1M", exact: true }).click();
   await expect(page.locator("main").getByText(/OHLCV history/i)).toContainText(/Yahoo Finance|delayed/i);
+  const afterRangeRequest = chartRequests;
+  await financialChart.getByRole("button", { name: "Price", exact: true }).click();
+  await financialChart.getByRole("button", { name: "Price", exact: true }).click();
+  await financialChart.getByRole("button", { name: "Reset chart view" }).click();
+  expect(chartRequests).toBe(afterRangeRequest);
+  const box = await financialChart.boundingBox();
+  expect(box?.width ?? 0).toBeLessThanOrEqual((page.viewportSize()?.width ?? 1440) + 1);
   for (const path of ["signal", "fundamentals/analysis", "seasonality", "targets", "forecast", "news"]) await expect(page.locator(`a[href$="/${path}"]`).first()).toBeAttached();
 });
 

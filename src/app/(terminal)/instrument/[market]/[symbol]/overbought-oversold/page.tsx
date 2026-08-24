@@ -1,4 +1,5 @@
-import { AdvancedDpoChart, MarketGauge, OscillatorChart } from "@/components/charts/market-charts";
+import { AdvancedDpoChart, OscillatorChart } from "@/components/charts/lightweight/lightweight-financial-charts";
+import { MarketGauge } from "@/components/charts/market-charts";
 import { Footer } from "@/components/shell/footer";
 import { RangeControls } from "@/components/ui/interactive-controls";
 import { financialDataService } from "@/services";

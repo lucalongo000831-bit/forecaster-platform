@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { ArrowRight, CalendarDays, CircleDollarSign, Globe2, Radar, Sparkles, Star, TrendingUp } from "lucide-react";
-import { MainPriceChart } from "@/components/charts/market-charts";
+import { MainPriceChart } from "@/components/charts/lightweight/lightweight-financial-charts";
 import { KairoLensButton } from "@/components/ai/kairo-lens-button";
 import { financialDataService } from "@/services";
 import { formatCurrency, formatPercent, instrumentPath } from "@/lib";

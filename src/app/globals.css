@@ -26,6 +26,18 @@
   --risk-orange-soft: #ffeadf;
   --risk-red-soft: #ffe5e8;
   --chart-blue: #6576ec;
+  --chart-background: #fff;
+  --chart-surface: #f8fafc;
+  --chart-grid: #e7ebf2;
+  --chart-text-primary: #172033;
+  --chart-text-secondary: #738096;
+  --chart-axis: #cfd7e3;
+  --chart-crosshair: #8190a8;
+  --chart-bullish: #18a879;
+  --chart-bearish: #e05e72;
+  --chart-primary: #5267e8;
+  --chart-comparison: #20a4a8;
+  --chart-volume: rgb(82 103 232 / 28%);
   --shadow: 0 18px 50px rgb(24 37 61 / 9%);
   --shadow-soft: 0 8px 26px rgb(24 37 61 / 6%);
 }
@@ -85,6 +97,27 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .chart-tall { height: 480px; }
 .chart-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; margin-bottom: 8px; color: var(--muted); }
 .legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.kairo-chart { width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--chart-grid); border-radius: 18px; background: var(--chart-background); box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%); }
+.kairo-chart-stage { position: relative; height: var(--kairo-chart-height, 420px); min-width: 0; overflow: hidden; touch-action: pan-y; }
+.kairo-chart-canvas { width: 100%; height: 100%; }
+.kairo-chart-legend { min-height: 46px; display: flex; align-items: center; flex-wrap: wrap; gap: 7px 14px; padding: 9px 12px; border-bottom: 1px solid var(--chart-grid); background: linear-gradient(180deg, #fff, #fbfcfe); }
+.kairo-chart-legend button { min-height: 28px; display: inline-flex; align-items: center; gap: 7px; padding: 3px 5px; border: 0; color: var(--chart-text-primary); background: transparent; font-size: 11px; font-weight: 750; }
+.kairo-chart-legend button:not(:disabled):hover { color: var(--chart-primary); }
+.kairo-chart-legend button:disabled { opacity: 1; cursor: default; }
+.kairo-chart-legend button.is-hidden { color: var(--chart-text-secondary); opacity: .52; text-decoration: line-through; }
+.kairo-chart-legend button i,.kairo-chart-tooltip i { width: 16px; height: 3px; display: inline-block; border-radius: 99px; }
+.kairo-chart-legend .kairo-chart-reset { min-height: 30px; margin-left: auto; padding: 0 10px; border: 1px solid var(--chart-grid); border-radius: 9px; color: var(--chart-text-secondary); background: #fff; text-decoration: none; opacity: 1; }
+.kairo-chart-tooltip { position: absolute; z-index: 8; width: 230px; max-width: calc(100% - 16px); display: grid; gap: 7px; padding: 11px 12px; pointer-events: none; border: 1px solid var(--chart-grid); border-radius: 13px; color: var(--chart-text-primary); background: rgb(255 255 255 / 96%); box-shadow: 0 18px 42px rgb(23 32 51 / 14%); backdrop-filter: blur(10px); font-size: 11px; }
+.kairo-chart-tooltip > strong { padding-bottom: 6px; border-bottom: 1px solid var(--chart-grid); font-size: 12px; }
+.kairo-chart-tooltip > div { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 4px 10px; }
+.kairo-chart-tooltip span { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.kairo-chart-tooltip b { font-variant-numeric: tabular-nums; }
+.kairo-chart-tooltip small { grid-column: 1 / -1; color: var(--chart-text-secondary); line-height: 1.4; }
+.kairo-reference-marker { position: absolute; z-index: 6; top: 0; bottom: 22px; width: 0; pointer-events: none; border-left: 1px dashed var(--chart-text-primary); opacity: .8; }
+.kairo-reference-marker span { position: absolute; top: 8px; left: 6px; padding: 4px 7px; border-radius: 7px; color: #fff; background: var(--chart-text-primary); font-size: 9px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.kairo-chart-footer { min-height: 31px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 12px; border-top: 1px solid var(--chart-grid); color: var(--chart-text-secondary); font-size: 9px; }
+.kairo-chart-empty { min-height: 220px; display: grid; place-content: center; gap: 5px; padding: 24px; border: 1px dashed var(--chart-axis); border-radius: 18px; color: var(--chart-text-secondary); background: var(--chart-surface); text-align: center; }
+.kairo-chart-empty strong { color: var(--chart-text-primary); }
 .table-shell { border: 1px solid var(--border); border-radius: 18px; overflow: auto; background: #fff; box-shadow: var(--shadow-soft); }
 .data-table { width: 100%; border-collapse: collapse; min-width: 880px; }
 .data-table th { background: #f7f8fb; color: #69758a; padding: 15px 16px; text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--border); }
@@ -495,6 +528,11 @@ kbd { display: inline-flex; align-items: center; gap: 2px; padding: 4px 7px; bor
   .event-strip button { display: none; }
   .chart-wrap { height: 310px; }
   .chart-tall { height: 390px; }
+  .kairo-chart-legend { gap: 5px 9px; padding: 8px 9px; }
+  .kairo-chart-stage { height: min(var(--kairo-chart-height, 370px), 370px); }
+  .kairo-chart-legend button { font-size: 10px; }
+  .kairo-chart-legend .kairo-chart-reset { width: 100%; margin-left: 0; }
+  .kairo-chart-footer { display: none; }
   .chat { width: 48px; height: 48px; min-height: 0; padding: 0; justify-content: center; border-radius: 15px; }
   .chat span { display: none; }
   .calendar-grid { overflow-x: auto; min-width: 0; }

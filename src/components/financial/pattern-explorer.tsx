@@ -220,6 +220,19 @@ function PatternSkeleton() {
 
 async function exportResearchPng(node: HTMLElement, symbol: string) {
   const clone = node.cloneNode(true) as HTMLElement;
+  const sourceCanvases = [...node.querySelectorAll("canvas")];
+  const clonedCanvases = [...clone.querySelectorAll("canvas")];
+  clonedCanvases.forEach((clonedCanvas, index) => {
+    const sourceCanvas = sourceCanvases[index];
+    if (!sourceCanvas) return;
+    const snapshot = document.createElement("img");
+    snapshot.src = sourceCanvas.toDataURL("image/png");
+    snapshot.alt = "Pattern chart snapshot";
+    snapshot.width = sourceCanvas.width;
+    snapshot.height = sourceCanvas.height;
+    snapshot.style.cssText = `display:block;width:${sourceCanvas.clientWidth}px;height:${sourceCanvas.clientHeight}px`;
+    clonedCanvas.replaceWith(snapshot);
+  });
   clone.querySelectorAll("button, select").forEach((element) => element.remove());
   const width = Math.min(1600, Math.max(960, node.scrollWidth));
   const height = Math.min(2400, Math.max(700, node.scrollHeight));

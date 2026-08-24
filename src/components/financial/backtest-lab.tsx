@@ -4,7 +4,7 @@ import { useState } from "react";
 import { FlaskConical, Play, ShieldCheck } from "lucide-react";
 import type { BacktestConfiguration, BacktestResult } from "@/engines/backtest";
 import { formatCurrency, formatPercent } from "@/lib";
-import { BacktestEquityChart } from "@/components/charts/market-charts";
+import { BacktestEquityChart } from "@/components/charts/lightweight/lightweight-financial-charts";
 import { DataError } from "./data-state";
 
 export function BacktestLab({ defaultFrom, defaultTo }: { defaultFrom: string; defaultTo: string }) {
