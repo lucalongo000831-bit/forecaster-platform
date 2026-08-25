@@ -38,8 +38,8 @@ No candle is synthesized from close-only data. A missing or incomplete source pr
 - RSI(n): Wilder smoothed average gains and losses; V1 defaults to 14.
 - MACD(12,26,9): EMA(12) minus EMA(26), with a 9-period EMA signal and MACD-minus-signal histogram.
 - ATR(n): Wilder smoothing of true range; true range is the maximum of high-low, absolute high-previous-close and absolute low-previous-close.
-- VWAP: cumulative typical-price times volume divided by cumulative volume. It is only emitted when positive volume exists.
-- Compare: `(close / first valid close - 1) × 100`; every comparison begins at 0%.
+- VWAP: cumulative typical-price times volume divided by cumulative volume, reset on each UTC calendar day. This matches the canonical crypto session and prevents equity observations from leaking into a later session. V1 exposes VWAP only on intraday timeframes with positive volume; exchange-specific anchored VWAP remains future scope.
+- Compare: `(close / first valid close at or after the shared start - 1) × 100`. The primary instrument and every comparison omit earlier points, then each begins at 0% on its first valid observation at or after the common boundary.
 
 Warm-up periods are `null`, never zero. Non-finite outputs are never rendered. All algorithms are causal: a prefix produces the same results as the corresponding prefix of a longer input.
 
@@ -78,7 +78,7 @@ Golden tests cover adjustment, invalid data, complete 4h aggregation, Bollinger,
 - Lightweight Charts does not provide the complete TradingView drawing toolbox. V1 deliberately implements only horizontal levels and two-point trend lines.
 - Upstream intraday retention differs by provider and venue. A timeframe can therefore be unavailable for an otherwise valid symbol.
 - Comparison lines use their own available timestamps and a normalized percentage scale; V1 does not interpolate missing market sessions.
-- VWAP is cumulative over the requested dataset, not an anchored or session-selectable VWAP.
+- VWAP uses a UTC-day reset and is not user-anchored or exchange-timezone selectable in V1.
 - Drawings are stored in the current browser only and do not sync to the user account.
 
 ## Future V2 roadmap

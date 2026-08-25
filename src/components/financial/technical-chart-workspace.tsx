@@ -26,6 +26,15 @@ const memoryCache = new Map<string, TechnicalChartResponse>();
 
 function storageKey(symbol: string) { return `kairo:technical-chart:v1:${symbol.toUpperCase()}`; }
 function indicatorNeedsPeriod(kind: TechnicalIndicatorKind) { return ["SMA", "EMA", "BOLLINGER", "RSI", "ATR"].includes(kind); }
+function validIndicatorPeriod(value: number) { return Number.isInteger(value) && value >= 2 && value <= 250; }
+function indicatorAvailable(kind: TechnicalIndicatorKind, timeframe: TechnicalTimeframe) { return kind !== "VWAP" || !["1D", "1W"].includes(timeframe); }
+function validDrawing(value: unknown): value is TechnicalDrawing {
+  if (!value || typeof value !== "object") return false;
+  const drawing = value as Partial<TechnicalDrawing>;
+  return typeof drawing.id === "string" && ["horizontal", "trend"].includes(drawing.type ?? "") && Array.isArray(drawing.points)
+    && drawing.points.length === (drawing.type === "horizontal" ? 1 : 2)
+    && drawing.points.every((point) => point && typeof point.timestamp === "string" && Number.isFinite(Date.parse(point.timestamp)) && typeof point.price === "number" && Number.isFinite(point.price) && point.price > 0);
+}
 
 async function requestDataset(symbol: string, timeframe: TechnicalTimeframe, force = false): Promise<TechnicalChartResponse> {
   const key = `${symbol.toUpperCase()}:${timeframe}`;
@@ -79,19 +88,31 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const [drawingTool, setDrawingTool] = useState<DrawingTool>("cursor");
   const [indicatorKind, setIndicatorKind] = useState<TechnicalIndicatorKind>("SMA");
   const [indicatorPeriod, setIndicatorPeriod] = useState(20);
+  const [indicatorError, setIndicatorError] = useState("");
+  const [fullscreenError, setFullscreenError] = useState("");
+  const [resetArmed, setResetArmed] = useState(false);
   const [preferencesReady, setPreferencesReady] = useState(false);
 
   useEffect(() => {
     queueMicrotask(() => {
       try {
         const raw = localStorage.getItem(storageKey(normalized));
-        const parsed = raw ? JSON.parse(raw) as StoredPreferences : null;
+        const parsed = raw ? JSON.parse(raw) as Partial<StoredPreferences> : null;
         if (parsed?.version === 1) {
-          setChartType(parsed.chartType);
-          setTimeframe(parsed.timeframe);
-          setIndicators(parsed.indicators.length ? parsed.indicators : DEFAULT_INDICATORS);
-          setComparisons(parsed.comparisons.slice(0, 3));
-          setDrawings(parsed.drawings ?? {});
+          if (["candlestick", "line", "area"].includes(parsed.chartType ?? "")) setChartType(parsed.chartType as TechnicalChartType);
+          if (TECHNICAL_TIMEFRAMES.includes(parsed.timeframe as TechnicalTimeframe)) setTimeframe(parsed.timeframe as TechnicalTimeframe);
+          const restoredIndicators = Array.isArray(parsed.indicators) ? parsed.indicators.filter((indicator): indicator is TechnicalIndicatorConfig => Boolean(indicator)
+            && typeof indicator.id === "string" && ["SMA", "EMA", "BOLLINGER", "RSI", "MACD", "ATR", "VWAP", "VOLUME"].includes(indicator.kind)
+            && typeof indicator.enabled === "boolean" && typeof indicator.color === "string"
+            && (!indicatorNeedsPeriod(indicator.kind) || validIndicatorPeriod(indicator.period ?? Number.NaN))).slice(0, 12) : [];
+          setIndicators(restoredIndicators.length ? restoredIndicators : DEFAULT_INDICATORS);
+          setComparisons(Array.isArray(parsed.comparisons) ? parsed.comparisons.filter((value): value is string => typeof value === "string" && /^(?:\^[A-Z0-9][A-Z0-9.-]{0,29}|[A-Z0-9][A-Z0-9.^=-]{0,30})$/.test(value)).slice(0, 3) : []);
+          const restoredDrawings: Partial<Record<TechnicalTimeframe, TechnicalDrawing[]>> = {};
+          if (parsed.drawings && typeof parsed.drawings === "object") for (const value of TECHNICAL_TIMEFRAMES) {
+            const candidates = parsed.drawings[value];
+            if (Array.isArray(candidates)) restoredDrawings[value] = candidates.filter(validDrawing).slice(0, 100);
+          }
+          setDrawings(restoredDrawings);
         }
       } catch { /* Corrupt preferences are ignored safely. */ }
       setPreferencesReady(true);
@@ -121,9 +142,21 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   }, [load, preferencesReady]);
 
   const addIndicator = () => {
-    const period = indicatorNeedsPeriod(indicatorKind) ? Math.max(2, Math.min(250, Math.round(indicatorPeriod))) : undefined;
-    if (indicators.length >= 12) return;
+    setIndicatorError("");
+    if (indicatorNeedsPeriod(indicatorKind) && !validIndicatorPeriod(indicatorPeriod)) { setIndicatorError("Period must be a whole number from 2 to 250."); return; }
+    if (!indicatorAvailable(indicatorKind, timeframe)) { setIndicatorError("VWAP is available only on verified intraday data."); return; }
+    const period = indicatorNeedsPeriod(indicatorKind) ? indicatorPeriod : undefined;
+    if (indicators.length >= 12) { setIndicatorError("Maximum 12 active studies."); return; }
+    if (indicators.some((indicator) => indicator.kind === indicatorKind && indicator.period === period)) { setIndicatorError("This indicator configuration is already active."); return; }
     setIndicators((current) => [...current, { id: `${indicatorKind.toLowerCase()}-${period ?? "default"}-${Date.now()}`, kind: indicatorKind, period, color: INDICATOR_COLORS[current.length % INDICATOR_COLORS.length], enabled: true }]);
+  };
+  const updateIndicatorPeriod = (id: string, value: number) => {
+    setIndicatorError("");
+    if (!validIndicatorPeriod(value)) { setIndicatorError("Period must be a whole number from 2 to 250."); return; }
+    const target = indicators.find((indicator) => indicator.id === id);
+    if (!target) return;
+    if (indicators.some((indicator) => indicator.id !== id && indicator.kind === target.kind && indicator.period === value)) { setIndicatorError("This indicator configuration is already active."); return; }
+    setIndicators((current) => current.map((indicator) => indicator.id === id ? { ...indicator, period: value } : indicator));
   };
   const addComparison = () => {
     const next = compareInput.trim().toUpperCase();
@@ -133,6 +166,14 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const resetPreferences = () => {
     setChartType("candlestick"); setTimeframe("1D"); setIndicators(DEFAULT_INDICATORS); setComparisons([]); setDrawings({}); setDrawingTool("cursor");
     localStorage.removeItem(storageKey(normalized));
+    setResetArmed(false);
+  };
+  const requestFullscreen = async () => {
+    setFullscreenError("");
+    try {
+      if (!shellRef.current?.requestFullscreen) throw new Error("UNSUPPORTED");
+      await shellRef.current.requestFullscreen();
+    } catch { setFullscreenError("Fullscreen is unavailable in this browser context."); }
   };
   const activeDrawings = drawings[timeframe] ?? [];
   const summary = dataset ? describeTechnical(dataset.data, indicators) : null;
@@ -158,9 +199,10 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
       </div>
       <div className="technical-toolbar-actions">
         <button onClick={() => resetViewRef.current()}><RotateCcw size={16}/>View</button>
-        <button onClick={() => void shellRef.current?.requestFullscreen()}><Expand size={16}/>Full screen</button>
+        <button onClick={() => void requestFullscreen()}><Expand size={16}/>Full screen</button>
       </div>
     </section>
+    {fullscreenError && <div className="technical-control-message" role="status">{fullscreenError}</div>}
 
     <div className="technical-layout">
       <section className="technical-chart-card">
@@ -174,8 +216,9 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
 
       <aside className="technical-sidebar">
         <section><header><div><span>INDICATORS</span><strong>Active studies</strong></div><ChevronDown size={16}/></header>
-          <div className="technical-indicator-builder"><select aria-label="Indicator type" value={indicatorKind} onChange={(event) => setIndicatorKind(event.target.value as TechnicalIndicatorKind)}>{(["SMA","EMA","BOLLINGER","RSI","MACD","ATR","VWAP","VOLUME"] as TechnicalIndicatorKind[]).map((kind) => <option key={kind}>{kind}</option>)}</select>{indicatorNeedsPeriod(indicatorKind) && <input aria-label="Indicator period" type="number" min="2" max="250" value={indicatorPeriod} onChange={(event) => setIndicatorPeriod(Number(event.target.value))}/>}<button onClick={addIndicator} aria-label="Add indicator"><Plus size={16}/></button></div>
-          <div className="technical-study-list">{indicators.map((indicator) => <div key={indicator.id}><button className="technical-study-toggle" aria-pressed={indicator.enabled} onClick={() => setIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, enabled: !item.enabled } : item))}><i style={{ background: indicator.color }}/><span>{indicator.kind}{indicator.period ? ` ${indicator.period}` : ""}</span><b>{indicator.enabled ? "ON" : "OFF"}</b></button><button aria-label={`Remove ${indicator.kind} ${indicator.period ?? ""}`} onClick={() => setIndicators((current) => current.filter((item) => item.id !== indicator.id))}><Trash2 size={14}/></button></div>)}</div>
+          <div className="technical-indicator-builder"><select aria-label="Indicator type" value={indicatorKind} onChange={(event) => { setIndicatorKind(event.target.value as TechnicalIndicatorKind); setIndicatorError(""); }}>{(["SMA","EMA","BOLLINGER","RSI","MACD","ATR","VWAP","VOLUME"] as TechnicalIndicatorKind[]).map((kind) => <option key={kind}>{kind}</option>)}</select>{indicatorNeedsPeriod(indicatorKind) && <input aria-label="Indicator period" type="number" min="2" max="250" value={Number.isFinite(indicatorPeriod) ? indicatorPeriod : ""} onChange={(event) => setIndicatorPeriod(event.target.value === "" ? Number.NaN : Number(event.target.value))}/>}<button onClick={addIndicator} aria-label="Add indicator"><Plus size={16}/></button></div>
+          {indicatorError && <p className="technical-indicator-error" role="alert">{indicatorError}</p>}
+          <div className="technical-study-list">{indicators.map((indicator) => <div key={indicator.id}><button className="technical-study-toggle" aria-pressed={indicator.enabled} onClick={() => setIndicators((current) => current.map((item) => item.id === indicator.id ? { ...item, enabled: !item.enabled } : item))}><i style={{ background: indicator.color }}/><span>{indicator.kind}{indicator.period ? ` ${indicator.period}` : ""}</span><b>{indicatorAvailable(indicator.kind, timeframe) ? indicator.enabled ? "ON" : "OFF" : "N/A"}</b></button>{indicatorNeedsPeriod(indicator.kind) && <input className="technical-study-period" aria-label={`${indicator.kind} ${indicator.period} period`} type="number" min="2" max="250" value={indicator.period} onChange={(event) => updateIndicatorPeriod(indicator.id, Number(event.target.value))}/>}<button aria-label={`Remove ${indicator.kind} ${indicator.period ?? ""}`} onClick={() => setIndicators((current) => current.filter((item) => item.id !== indicator.id))}><Trash2 size={14}/></button></div>)}</div>
         </section>
         <section><header><div><span>COMPARE</span><strong>Rebased performance</strong></div><small>{comparisons.length}/3</small></header><div className="technical-compare"><input aria-label="Compare symbol" placeholder="SPY" value={compareInput} onChange={(event) => setCompareInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addComparison(); }}/><button onClick={addComparison} disabled={comparisons.length >= 3}><Plus size={16}/></button></div><div className="technical-chips">{comparisons.map((comparison) => <button key={comparison} onClick={() => setComparisons((current) => current.filter((item) => item !== comparison))}>{comparison} ×</button>)}</div><p>Each comparison starts at 0%. Adding or changing a comparison requests its canonical dataset.</p></section>
         <section><header><div><span>DRAWINGS</span><strong>Local research marks</strong></div><small>{activeDrawings.length}</small></header>{activeDrawings.length ? <div className="technical-drawing-list">{activeDrawings.map((drawing, index) => <div key={drawing.id}><span>{drawing.type === "horizontal" ? `Level ${drawing.points[0].price.toFixed(2)}` : `Trend ${index + 1}`}</span><button aria-label={`Delete drawing ${index + 1}`} onClick={() => setDrawings((current) => ({ ...current, [timeframe]: activeDrawings.filter((item) => item.id !== drawing.id) }))}><Trash2 size={14}/></button></div>)}</div> : <p>No drawings saved for {timeframe}.</p>}<button className="technical-clear" disabled={!activeDrawings.length} onClick={() => setDrawings((current) => ({ ...current, [timeframe]: [] }))}><Eraser size={15}/>Clear timeframe</button></section>
@@ -183,6 +226,6 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
     </div>
 
     {summary && <section className="technical-summary" aria-label="Technical summary"><article><span>TREND</span><strong>{summary.trend}</strong><p>Derived from price versus EMA 20 and EMA 50.</p></article><article><span>MOMENTUM</span><strong>{summary.momentum}</strong><p>Wilder RSI; a descriptive state, never a trade instruction.</p></article><article><span>VOLATILITY</span><strong>{summary.volatility}</strong><p>Wilder ATR normalized against the latest verified close.</p></article><article><span>DATA POLICY</span><strong>{dataset?.data.pricePolicy === "ADJUSTED_OHLC" ? "Adjusted daily history" : "Raw market history"}</strong><p>Incomplete, invalid and null bars are excluded rather than estimated.</p></article></section>}
-    <footer className="technical-disclosure"><span>technical-v1.0.0 · deterministic formulas · no lookahead</span><button onClick={resetPreferences}><RotateCcw size={14}/>Reset local workspace</button><p>Technical indicators summarize historical market data and do not predict future returns. Data may be delayed or unavailable.</p></footer>
+    <footer className="technical-disclosure"><span>technical-v1.0.0 · deterministic formulas · no lookahead</span><button onClick={() => resetArmed ? resetPreferences() : setResetArmed(true)} aria-label={resetArmed ? "Confirm reset local workspace" : "Reset local workspace"}><RotateCcw size={14}/>{resetArmed ? "Confirm reset" : "Reset local workspace"}</button><p>Technical indicators summarize historical market data and do not predict future returns. Data may be delayed or unavailable.</p></footer>
   </div>;
 }

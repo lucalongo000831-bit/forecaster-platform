@@ -29,8 +29,17 @@ test("technical workspace is responsive, persistent and indicator changes never 
   await page.getByLabel("Indicator period").fill("14");
   await page.getByRole("button", { name: "Add indicator" }).click();
   await expect(page.getByText("RSI 14", { exact: true })).toBeVisible();
+  await page.getByLabel("EMA 20 period").fill("34");
+  await expect(page.getByText("EMA 34", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Line", exact: true }).click();
-  await page.getByRole("button", { name: "EMA 20", exact: false }).first().click();
+  await page.getByRole("button", { name: "EMA 34", exact: false }).first().click();
+  await page.getByLabel("Indicator type").selectOption("SMA");
+  await page.getByLabel("Indicator period").fill("0");
+  await page.getByRole("button", { name: "Add indicator" }).click();
+  await expect(page.locator(".technical-indicator-error")).toContainText("whole number from 2 to 250");
+  await page.getByLabel("Indicator type").selectOption("VWAP");
+  await page.getByRole("button", { name: "Add indicator" }).click();
+  await expect(page.locator(".technical-indicator-error")).toContainText("only on verified intraday data");
   expect(technicalRequests).toBe(initialRequests);
 
   await chart.hover();
@@ -68,10 +77,28 @@ test("technical workspace is responsive, persistent and indicator changes never 
   await expect(page.getByTestId("technical-terminal-chart")).toHaveAttribute("data-chart-ready", "true", { timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Line", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText("RSI 14", { exact: true })).toBeVisible();
+  await expect(page.getByText("EMA 34", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "SPY ×" })).toBeVisible();
   await expect(page.getByText(/^Level \d/)).toBeVisible();
+  const afterReload = technicalRequests;
+  await page.getByRole("button", { name: "Delete drawing 1" }).click();
+  await page.getByRole("button", { name: "Clear timeframe" }).click();
+  await expect(page.getByText("No drawings saved for 1D.")).toBeVisible();
+  expect(technicalRequests).toBe(afterReload);
   const workspace = await page.getByTestId("technical-chart-workspace").boundingBox();
   expect(workspace?.width ?? 0).toBeLessThanOrEqual((page.viewportSize()?.width ?? 1440) + 1);
+});
+
+test("technical preferences reject corrupt state and reset only after confirmation", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("kairo:technical-chart:v1:NVDA", "{not-json"));
+  await page.goto("/instrument/nasdaqgs/nvda/technical", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("technical-terminal-chart")).toHaveAttribute("data-chart-ready", "true", { timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Candles", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Reset local workspace" }).click();
+  await expect(page.getByRole("button", { name: "Confirm reset local workspace" })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm reset local workspace" }).click();
+  await expect(page.getByText("EMA 20", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("kairo:technical-chart:v1:NVDA"))).not.toBe("{not-json");
 });
 
 test("technical endpoint rejects invalid symbols and timeframes", async ({ request }) => {

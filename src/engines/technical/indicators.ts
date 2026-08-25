@@ -1,9 +1,15 @@
 import type { MarketChartPoint } from "@/types";
 import { clamp, mean, sampleStandardDeviation } from "../shared/statistics";
 
+const MAX_SAFE_PERIOD = 10_000;
+
+function validPeriod(period: number) {
+  return Number.isInteger(period) && period > 0 && period <= MAX_SAFE_PERIOD;
+}
+
 export function simpleMovingAverage(values: number[], period: number): Array<number | null> {
   const result = Array<number | null>(values.length).fill(null);
-  if (period <= 0) return result;
+  if (!validPeriod(period)) return result;
   let sum = 0;
   for (let index = 0; index < values.length; index += 1) {
     sum += values[index];
@@ -15,7 +21,7 @@ export function simpleMovingAverage(values: number[], period: number): Array<num
 
 export function exponentialMovingAverage(values: number[], period: number): Array<number | null> {
   const result = Array<number | null>(values.length).fill(null);
-  if (period <= 0 || values.length < period) return result;
+  if (!validPeriod(period) || values.length < period) return result;
   const seed = mean(values.slice(0, period));
   if (seed === null) return result;
   const alpha = 2 / (period + 1);
@@ -26,19 +32,19 @@ export function exponentialMovingAverage(values: number[], period: number): Arra
 
 export function relativeStrengthIndex(values: number[], period = 14): Array<number | null> {
   const result = Array<number | null>(values.length).fill(null);
-  if (values.length <= period) return result;
+  if (!validPeriod(period) || values.length <= period) return result;
   let gains = 0; let losses = 0;
   for (let index = 1; index <= period; index += 1) {
     const change = values[index] - values[index - 1];
     gains += Math.max(change, 0); losses += Math.max(-change, 0);
   }
   let averageGain = gains / period; let averageLoss = losses / period;
-  result[period] = averageLoss === 0 ? 100 : 100 - 100 / (1 + averageGain / averageLoss);
+  result[period] = averageLoss === 0 ? averageGain === 0 ? 50 : 100 : 100 - 100 / (1 + averageGain / averageLoss);
   for (let index = period + 1; index < values.length; index += 1) {
     const change = values[index] - values[index - 1];
     averageGain = (averageGain * (period - 1) + Math.max(change, 0)) / period;
     averageLoss = (averageLoss * (period - 1) + Math.max(-change, 0)) / period;
-    result[index] = averageLoss === 0 ? 100 : 100 - 100 / (1 + averageGain / averageLoss);
+    result[index] = averageLoss === 0 ? averageGain === 0 ? 50 : 100 : 100 - 100 / (1 + averageGain / averageLoss);
   }
   return result;
 }
@@ -52,7 +58,7 @@ export function trueRange(bars: MarketChartPoint[]): number[] {
 export function averageTrueRange(bars: MarketChartPoint[], period = 14): Array<number | null> {
   const ranges = trueRange(bars);
   const result = Array<number | null>(ranges.length).fill(null);
-  if (ranges.length < period) return result;
+  if (!validPeriod(period) || ranges.length < period) return result;
   const seed = mean(ranges.slice(0, period));
   if (seed === null) return result;
   result[period - 1] = seed;

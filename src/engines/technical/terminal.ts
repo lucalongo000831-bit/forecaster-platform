@@ -20,7 +20,7 @@ export function sanitizeTechnicalBars(input: MarketChartPoint[]): MarketChartPoi
 export function applyCanonicalPricePolicy(input: MarketChartPoint[], assetClass: string): { bars: MarketChartPoint[]; policy: TechnicalPricePolicy } {
   const clean = sanitizeTechnicalBars(input);
   if (assetClass === "CRYPTO") return { bars: clean.map((bar) => ({ timestamp: bar.timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume })), policy: "RAW_OHLC" };
-  const hasAdjustment = clean.some((bar) => typeof bar.adjustedClose === "number" && finite(bar.adjustedClose) && bar.adjustedClose > 0);
+  const hasAdjustment = clean.length > 0 && clean.every((bar) => typeof bar.adjustedClose === "number" && finite(bar.adjustedClose) && bar.adjustedClose > 0);
   if (!hasAdjustment) return { bars: clean, policy: "RAW_OHLC" };
   return {
     policy: "ADJUSTED_OHLC",
@@ -44,7 +44,9 @@ export function resampleFourHourBars(input: MarketChartPoint[]): MarketChartPoin
   }
   return [...groups.entries()].flatMap(([timestamp, bars]) => {
     const distinctHours = new Set(bars.map((bar) => Math.floor(Date.parse(bar.timestamp) / HOUR_MS)));
-    if (distinctHours.size !== 4) return [];
+    const times = bars.map((bar) => Date.parse(bar.timestamp));
+    const contiguous = times.every((time, index) => index === 0 || time - times[index - 1] === HOUR_MS);
+    if (bars.length !== 4 || distinctHours.size !== 4 || !contiguous) return [];
     return [{
       timestamp: new Date(timestamp).toISOString(),
       open: bars[0].open,
@@ -66,6 +68,7 @@ export function bollingerBands(values: number[], period = 20, deviations = 2): B
   const middle = simpleMovingAverage(values, period);
   const upper = Array<number | null>(values.length).fill(null);
   const lower = Array<number | null>(values.length).fill(null);
+  if (!Number.isInteger(period) || period <= 0 || period > 10_000 || !finite(deviations) || deviations <= 0) return { middle, upper, lower };
   for (let index = period - 1; index < values.length; index += 1) {
     const deviation = populationDeviation(values.slice(index - period + 1, index + 1));
     upper[index] = (middle[index] as number) + deviations * deviation;
@@ -85,6 +88,10 @@ function emaNullable(values: Array<number | null>, period: number) {
 }
 
 export function movingAverageConvergenceDivergence(values: number[], fast = 12, slow = 26, signalPeriod = 9): MacdSeries {
+  if (![fast, slow, signalPeriod].every((period) => Number.isInteger(period) && period > 0 && period <= 10_000) || fast >= slow) {
+    const empty = () => Array<number | null>(values.length).fill(null);
+    return { macd: empty(), signal: empty(), histogram: empty() };
+  }
   const fastSeries = exponentialMovingAverage(values, fast);
   const slowSeries = exponentialMovingAverage(values, slow);
   const macd = values.map((_, index) => fastSeries[index] === null || slowSeries[index] === null ? null : (fastSeries[index] as number) - (slowSeries[index] as number));
@@ -93,10 +100,17 @@ export function movingAverageConvergenceDivergence(values: number[], fast = 12, 
   return { macd, signal, histogram };
 }
 
-export function volumeWeightedAveragePrice(bars: MarketChartPoint[]): Array<number | null> {
+export function volumeWeightedAveragePrice(bars: MarketChartPoint[], reset: "UTC_DAY" | "CONTINUOUS" = "UTC_DAY"): Array<number | null> {
   let cumulativePriceVolume = 0;
   let cumulativeVolume = 0;
+  let session = "";
   return bars.map((bar) => {
+    const nextSession = bar.timestamp.slice(0, 10);
+    if (reset === "UTC_DAY" && nextSession !== session) {
+      cumulativePriceVolume = 0;
+      cumulativeVolume = 0;
+      session = nextSession;
+    }
     if (bar.volume <= 0) return null;
     cumulativePriceVolume += ((bar.high + bar.low + bar.close) / 3) * bar.volume;
     cumulativeVolume += bar.volume;
@@ -107,6 +121,17 @@ export function volumeWeightedAveragePrice(bars: MarketChartPoint[]): Array<numb
 export function normalizedComparison(values: number[]) {
   const base = values.find((value) => finite(value) && value > 0);
   return base ? values.map((value) => (value / base - 1) * 100) : values.map(() => null);
+}
+
+export function normalizeSeriesAtCommonStart(series: Array<Array<{ timestamp: string; value: number }>>): Array<Array<number | null>> {
+  if (!series.length || series.some((rows) => rows.length === 0)) return series.map((rows) => rows.map(() => null));
+  const commonStart = Math.max(...series.map((rows) => Date.parse(rows[0].timestamp)));
+  return series.map((rows) => {
+    const baseIndex = rows.findIndex((row) => Date.parse(row.timestamp) >= commonStart && finite(row.value) && row.value > 0);
+    if (baseIndex < 0) return rows.map(() => null);
+    const base = rows[baseIndex].value;
+    return rows.map((row, index) => index < baseIndex || !finite(row.value) ? null : (row.value / base - 1) * 100);
+  });
 }
 
 export function calculateIndicatorSeries(bars: MarketChartPoint[]) {
