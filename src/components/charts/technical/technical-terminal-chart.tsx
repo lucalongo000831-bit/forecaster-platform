@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, MouseEventParams, SeriesType, Time } from "lightweight-charts";
-import { calculateIndicatorSeries, normalizedComparison } from "@/engines/technical";
+import { calculateIndicatorSeries, normalizeSeriesAtCommonStart } from "@/engines/technical";
 import type { TechnicalChartDataset, TechnicalChartType, TechnicalIndicatorConfig } from "@/types";
 import { kairoChartTheme } from "../chart-theme";
 
@@ -42,7 +42,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const drawingToolRef = useRef(drawingTool);
   const [ready, setReady] = useState(false);
   const [trendAnchor, setTrendAnchor] = useState<{ timestamp: string; price: number } | null>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; label: string; values: string[] } | null>(null);
+  const [tooltip, setTooltip] = useState<{ left: number; label: string; values: string[] } | null>(null);
   const calculated = useMemo(() => calculateIndicatorSeries(dataset.bars), [dataset.bars]);
 
   useEffect(() => { createDrawingRef.current = onCreateDrawing; }, [onCreateDrawing]);
@@ -100,7 +100,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       for (const indicator of enabled) {
         if (indicator.kind === "SMA") addLine(`SMA ${indicator.period}`, calculated.sma(indicator.period ?? 20), indicator.color);
         if (indicator.kind === "EMA") addLine(`EMA ${indicator.period}`, calculated.ema(indicator.period ?? 20), indicator.color);
-        if (indicator.kind === "VWAP") addLine("VWAP", calculated.vwap(), indicator.color);
+        if (indicator.kind === "VWAP" && !["1D", "1W"].includes(dataset.timeframe)) addLine("VWAP", calculated.vwap(), indicator.color);
         if (indicator.kind === "BOLLINGER") {
           const bands = calculated.bollinger(indicator.period ?? 20);
           addLine("BB upper", bands.upper, indicator.color, 0, { lineWidth: 1 });
@@ -120,6 +120,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         if (indicator.kind === "RSI") {
           const rsi = addLine(`RSI ${indicator.period ?? 14}`, calculated.rsi(indicator.period ?? 14), indicator.color, pane, { priceFormat: { type: "price", precision: 1, minMove: .1 } });
           rsi.createPriceLine({ price: 70, color: kairoChartTheme.bearish, lineWidth: 1, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title: "70" });
+          rsi.createPriceLine({ price: 50, color: kairoChartTheme.axis, lineWidth: 1, lineStyle: library.LineStyle.Dotted, axisLabelVisible: false, title: "50" });
           rsi.createPriceLine({ price: 30, color: kairoChartTheme.bullish, lineWidth: 1, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title: "30" });
           pane += 1;
         }
@@ -136,8 +137,17 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       }
 
       const compareColors = [kairoChartTheme.comparison, "#f4a525", "#9333ea"];
+      const normalized = normalizeSeriesAtCommonStart([
+        dataset.bars.map((bar) => ({ timestamp: bar.timestamp, value: bar.close })),
+        ...comparisons.slice(0, 3).map((comparison) => comparison.bars.map((bar) => ({ timestamp: bar.timestamp, value: bar.close }))),
+      ]);
+      if (comparisons.length > 0) {
+        const primaryPerformance = chart.addSeries(library.LineSeries, { color: kairoChartTheme.primary, lineWidth: 2, priceScaleId: "compare", priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: (value: number) => `${value.toFixed(1)}%`, minMove: .01 } }) as AnySeries;
+        primaryPerformance.setData(normalized[0].flatMap((value, pointIndex) => value === null ? [] : [{ time: time(dataset.bars[pointIndex].timestamp), value }]) as never[]);
+        registry.push({ label: `${dataset.symbol} performance`, series: primaryPerformance, suffix: "%" });
+      }
       comparisons.slice(0, 3).forEach((comparison, index) => {
-        const values = normalizedComparison(comparison.bars.map((bar) => bar.close));
+        const values = normalized[index + 1] ?? [];
         const series = chart!.addSeries(library.LineSeries, { color: compareColors[index], lineWidth: 2, priceScaleId: "compare", priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: (value: number) => `${value.toFixed(1)}%`, minMove: .01 } }) as AnySeries;
         series.setData(values.flatMap((value, pointIndex) => value === null ? [] : [{ time: time(comparison.bars[pointIndex].timestamp), value }]) as never[]);
         registry.push({ label: `${comparison.symbol} rebased`, series, suffix: "%" });
@@ -163,7 +173,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
           const value = row && "value" in row ? row.value : row && "close" in row ? row.close : null;
           return typeof value === "number" ? [`${record.label} ${value.toLocaleString(undefined, { maximumFractionDigits: 3 })}${record.suffix ?? ""}`] : [];
         });
-        setTooltip({ x: parameter.point.x, label: typeof parameter.time === "number" ? new Date(parameter.time * 1000).toLocaleString() : String(parameter.time), values });
+        const hostWidth = hostRef.current?.clientWidth ?? 560;
+        setTooltip({ left: Math.max(8, Math.min(parameter.point.x + 12, hostWidth - 217)), label: typeof parameter.time === "number" ? new Date(parameter.time * 1000).toLocaleString() : String(parameter.time), values });
       };
       chart.subscribeCrosshairMove(crosshairHandler);
       chart.timeScale().fitContent();
@@ -206,8 +217,10 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     for (const drawing of drawings) {
       if (drawing.type === "horizontal" && drawing.points[0]) drawingLinesRef.current.push(primary.createPriceLine({ price: drawing.points[0].price, color: "#f4a525", lineWidth: 2, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title: "Drawing" }));
       if (drawing.type === "trend" && drawing.points.length === 2) {
+        const points = [...drawing.points].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+        if (points[0].timestamp === points[1].timestamp) continue;
         const series = chart.addSeries(library.LineSeries, { color: "#f4a525", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }) as AnySeries;
-        series.setData(drawing.points.map((point) => ({ time: time(point.timestamp), value: point.price })) as never[]);
+        series.setData(points.map((point) => ({ time: time(point.timestamp), value: point.price })) as never[]);
         drawingSeriesRef.current.push(series);
       }
     }
@@ -217,6 +230,6 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     <div ref={hostRef} className="technical-chart-canvas"/>
     {!ready && <div className="technical-chart-loading" role="status">Preparing chart engine…</div>}
     {drawingTool === "trend" && trendAnchor && <div className="technical-drawing-status" role="status">Start selected · choose the end point</div>}
-    {tooltip && <div className="technical-crosshair-tooltip" style={{ left: Math.min(tooltip.x + 12, 520) }} aria-hidden="true"><strong>{tooltip.label}</strong>{tooltip.values.slice(0, 9).map((value) => <span key={value}>{value}</span>)}</div>}
+    {tooltip && <div className="technical-crosshair-tooltip" style={{ left: tooltip.left }} aria-hidden="true"><strong>{tooltip.label}</strong>{tooltip.values.slice(0, 9).map((value) => <span key={value}>{value}</span>)}</div>}
   </div>;
 }
