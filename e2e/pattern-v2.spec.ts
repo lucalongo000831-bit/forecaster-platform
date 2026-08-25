@@ -70,6 +70,10 @@ test("Pattern V2 latest research experience works for equities, ETF and crypto",
     await page.goto(path, { waitUntil: "domcontentloaded", timeout: 120_000 });
     await expect(page.getByRole("heading", { name: "Pattern Intelligence" })).toBeVisible({ timeout: 80_000 });
     await expect(page.getByTestId("pattern-main-chart")).toBeVisible();
+    const chart = page.getByTestId("pattern-main-chart").locator('[data-chart-engine="lightweight-charts"]');
+    await expect(chart).toHaveAttribute("data-chart-ready", "true");
+    const box = await chart.boundingBox();
+    expect(box?.width ?? 0).toBeLessThanOrEqual((page.viewportSize()?.width ?? 1440) + 1);
     await expect(page.getByTestId("pattern-probability-card")).toContainText("Robustness");
     await expect(page.getByTestId("most-correlated-card")).toContainText("Max Rise");
     await expect(page.getByRole("heading", { name: "Correlated Past Events" })).toBeVisible();
@@ -85,6 +89,8 @@ test("Pattern V2 recalculates historical as-of and lookback while Single Events 
   page.on("request", (request) => { if (request.url().includes("/api/analysis/pattern?")) patternRequests += 1; });
   await page.goto("/instrument/nasdaqgs/nvda/pattern", { waitUntil: "domcontentloaded", timeout: 120_000 });
   await expect(page.getByRole("heading", { name: "Pattern Intelligence" })).toBeVisible({ timeout: 80_000 });
+  const chart = page.getByTestId("pattern-main-chart").locator('[data-chart-engine="lightweight-charts"]');
+  await expect(chart).toHaveAttribute("data-chart-ready", "true");
   const baseline = patternRequests;
   const singles = page.getByRole("switch", { name: "Single Events" });
   await singles.click();
@@ -92,6 +98,8 @@ test("Pattern V2 recalculates historical as-of and lookback while Single Events 
   await expect(page.getByText(/individual paths visible/)).toBeVisible();
   expect(patternRequests).toBe(baseline);
   await singles.click();
+  expect(patternRequests).toBe(baseline);
+  await chart.getByRole("button", { name: "Reset chart view" }).click();
   expect(patternRequests).toBe(baseline);
 
   await page.getByRole("combobox", { name: "Lookback" }).selectOption("3M");

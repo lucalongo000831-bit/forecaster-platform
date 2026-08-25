@@ -1,4 +1,5 @@
-import { AnnualPerformanceChart, DividendChart, DrawdownChart, MainPriceChart } from "@/components/charts/market-charts";
+import { DividendChart, DrawdownChart, MainPriceChart } from "@/components/charts/lightweight/lightweight-financial-charts";
+import { AnnualPerformanceChart } from "@/components/charts/market-charts";
 import { InsiderTable } from "@/components/financial/financial-tables";
 import { Footer } from "@/components/shell/footer";
 import { RangeControls } from "@/components/ui/interactive-controls";
@@ -13,7 +14,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ marke
     <div className="container-shell page-stack"><DataSourceNotice source={data.source}/>
       <section>
         <div className="section-row"><span className="section-pill">Price &amp; financial trend</span><RangeControls ranges={["Sales","Net Income","Free Cash Flow","P/E (ttm)","Dividends"]} initial="Net Income"/></div>
-        <MainPriceChart data={data.priceSeries} referenceValue={instrument.quote.price}/>
+        <MainPriceChart data={data.priceSeries} referenceValue={instrument.quote.price} currency={instrument.currency}/>
       </section>
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {data.returns.map(({ label, value }, index) => <div key={label} className={`card p-5 text-center ${index === 5 ? "!bg-[var(--navy)] text-white" : ""}`}><strong>{label}</strong><span className="positive mt-2 block text-2xl">{formatPercent(value, true)}</span></div>)}

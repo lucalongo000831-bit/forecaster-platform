@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MainPriceChart } from "@/components/charts/market-charts";
+import { MainPriceChart } from "@/components/charts/lightweight/lightweight-financial-charts";
 import { RangeControls } from "@/components/ui/interactive-controls";
 import type { ChartRange, ChartResponse, TimePoint } from "@/types";
 import { DataError, DataUnavailable } from "./data-state";

@@ -1,20 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-  type TooltipContentProps,
-} from "recharts";
 import type { PatternAnalysis, PatternMatchedEvent } from "@/engines/pattern";
-import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
+import { kairoChartTheme } from "./chart-theme";
+import { adaptTimePoints, patternHorizonTime } from "./lightweight/chart-data-adapter";
+import type { KairoChartSeriesDefinition } from "./lightweight/chart-types";
+import { KairoTimeSeriesChart } from "./lightweight/kairo-time-series-chart";
 
 type PatternChartRow = {
   horizon: number;
@@ -28,38 +19,27 @@ type PatternChartRow = {
   [key: `event_${string}`]: number | undefined;
 };
 
-const eventColors = ["#8b9cf6", "#7dc8d6", "#b393e8", "#f0a0b2", "#79bca5", "#d7a25a"];
+const eventColors = [
+  "rgba(139,156,246,.34)",
+  "rgba(125,200,214,.34)",
+  "rgba(179,147,232,.34)",
+  "rgba(240,160,178,.34)",
+  "rgba(121,188,165,.34)",
+  "rgba(215,162,90,.34)",
+];
 
-function pct(value: number) {
-  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}%`;
+function eventMetadata(event: PatternMatchedEvent) {
+  const sign = event.performance >= 0 ? "+" : "";
+  return `${event.matchEndDate} · ${event.direction.toLowerCase()} · similarity ${event.similarity.toFixed(1)}% · outcome ${sign}${(event.performance * 100).toFixed(2)}%`;
 }
 
-function quality(similarity: number) {
-  if (similarity >= 80) return "High";
-  if (similarity >= 65) return "Medium";
-  return "Low";
-}
-
-function PatternTooltip({ active, payload, label, events }: TooltipContentProps<ValueType, NameType> & { events: Map<string, PatternMatchedEvent> }) {
-  if (!active || !payload?.length) return null;
-  const row = payload[0]?.payload as PatternChartRow | undefined;
-  const visible = payload.filter((entry) => typeof entry.value === "number").slice(0, 7);
-  return <div className="max-w-80 rounded-2xl border border-slate-200 bg-white/95 p-4 text-xs shadow-xl backdrop-blur">
-    <div className="mb-3 flex items-center justify-between gap-4">
-      <strong>{row?.date ?? (Number(label) > 0 ? `Forward T+${label}` : `Reference ${label}`)}</strong>
-      <span className="muted">{Number(label) > 0 ? `T+${label}` : Number(label) === 0 ? "T0" : `T${label}`}</span>
-    </div>
-    <div className="grid gap-2">
-      {visible.map((entry) => {
-        const key = String(entry.dataKey ?? "");
-        const event = key.startsWith("event_") ? events.get(key.slice(6)) : key === "best" ? [...events.values()].find((item) => item.rank === 1) : key === "selected" ? [...events.values()].find((item) => `event_${item.id}` === entry.name) : undefined;
-        return <div className="border-t border-slate-100 pt-2" key={`${key}-${entry.name}`}>
-          <div className="flex justify-between gap-4"><span style={{ color: entry.color }}>{String(entry.name)}</span><strong>{pct(Number(entry.value))}</strong></div>
-          {event && <div className="muted mt-1">{event.matchEndDate} · {event.direction.toLowerCase()} · similarity {event.similarity.toFixed(1)}% · outcome {pct(event.performance)} · {quality(event.similarity)} quality</div>}
-        </div>;
-      })}
-    </div>
-  </div>;
+function patternPoints(rows: PatternChartRow[], key: keyof PatternChartRow | `event_${string}`, minimumHorizon: number, metadata?: string) {
+  return adaptTimePoints(rows.map((row) => ({
+    time: patternHorizonTime(row.horizon, minimumHorizon),
+    label: row.date ?? (row.horizon > 0 ? `T+${row.horizon}` : row.horizon === 0 ? "Reference" : `T${row.horizon}`),
+    value: typeof row[key] === "number" ? Number(row[key]) * 100 : null,
+    metadata,
+  }))).data;
 }
 
 export function buildPatternChartRows(analysis: PatternAnalysis): PatternChartRow[] {
@@ -92,38 +72,63 @@ export function PatternV2Chart({ analysis, showSingleEvents, selectedEventId }: 
   const rows = useMemo(() => buildPatternChartRows(analysis), [analysis]);
   const eventMap = useMemo(() => new Map(analysis.matchedEvents.map((event) => [event.id, event])), [analysis.matchedEvents]);
   const selected = selectedEventId ? eventMap.get(selectedEventId) : null;
-  const selectedKey = selected && selected.rank !== 1 ? `event_${selected.id}` : null;
   const values = rows.flatMap((row) => Object.entries(row).filter(([key, value]) => key !== "horizon" && key !== "label" && key !== "date" && typeof value === "number").map(([, value]) => Number(value)));
   const summary = values.length ? `Pattern analogue chart with ${analysis.matchedEvents.length} historical matches, from ${(Math.min(...values) * 100).toFixed(1)}% to ${(Math.max(...values) * 100).toFixed(1)}%.` : "Pattern analogue chart. Data unavailable.";
+  const minimumHorizon = rows[0]?.horizon ?? 0;
+  const chartSeries = useMemo<KairoChartSeriesDefinition[]>(() => {
+    const definitions: KairoChartSeriesDefinition[] = [{
+      id: "observed",
+      label: "Observed path",
+      type: "area",
+      data: patternPoints(rows, "observed", minimumHorizon),
+      color: kairoChartTheme.secondary,
+      topColor: "rgba(82,103,232,.20)",
+      bottomColor: "rgba(82,103,232,.02)",
+      format: "percent",
+      lineWidth: 3,
+    }];
+    if (showSingleEvents) {
+      analysis.matchedEvents.filter((event) => event.rank !== 1 && event.id !== selectedEventId).forEach((event, index) => definitions.push({
+        id: `event_${event.id}`,
+        label: `Event #${event.rank}`,
+        type: "line",
+        data: patternPoints(rows, `event_${event.id}`, minimumHorizon, eventMetadata(event)),
+        color: eventColors[index % eventColors.length],
+        format: "percent",
+        lineWidth: 1,
+        lastValueVisible: false,
+        showInLegend: false,
+      }));
+    }
+    definitions.push(
+      { id: "best", label: "Most correlated event", type: "line", data: patternPoints(rows, "best", minimumHorizon, analysis.mostCorrelated ? eventMetadata(analysis.mostCorrelated) : undefined), color: kairoChartTheme.bestMatch, format: "percent", lineWidth: 3 },
+      { id: "average-long", label: "Average Long", type: "line", data: patternPoints(rows, "averageLong", minimumHorizon), color: kairoChartTheme.averageLong, format: "percent", lineWidth: 3 },
+      { id: "average-short", label: "Average Short", type: "line", data: patternPoints(rows, "averageShort", minimumHorizon), color: kairoChartTheme.averageShort, format: "percent", lineWidth: 3, lineStyle: 2 },
+    );
+    if (selected && selected.rank !== 1) definitions.push({
+      id: `selected_${selected.id}`,
+      label: `Selected #${selected.rank}`,
+      type: "line",
+      data: patternPoints(rows, `event_${selected.id}`, minimumHorizon, eventMetadata(selected)),
+      color: kairoChartTheme.selectedEvent,
+      format: "percent",
+      lineWidth: 3,
+    });
+    return definitions.filter((definition) => definition.data.length > 0);
+  }, [analysis.matchedEvents, analysis.mostCorrelated, minimumHorizon, rows, selected, selectedEventId, showSingleEvents]);
 
-  return <div className="pattern-chart-shell" role="img" aria-label={summary} data-testid="pattern-main-chart">
-    <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-semibold">
-      <span><i className="mr-2 inline-block h-0.5 w-6 bg-[#273a5b] align-middle"/>Observed path</span>
-      <span><i className="mr-2 inline-block h-0.5 w-6 bg-[#626ee8] align-middle"/>Most correlated event</span>
-      <span><i className="mr-2 inline-block h-0.5 w-6 bg-[#18a879] align-middle"/>Average Long</span>
-      <span><i className="mr-2 inline-block h-0.5 w-6 bg-[#e05e72] align-middle"/>Average Short</span>
+  return <div className="pattern-chart-shell" data-testid="pattern-main-chart">
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold">
       {showSingleEvents && <span className="muted">{analysis.matchedEvents.length} individual paths visible</span>}
       {selected && <span className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">Selected #{selected.rank} · {selected.matchEndDate}</span>}
     </div>
-    <div className="h-[430px] min-h-[320px] w-full sm:h-[500px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 16, right: 18, bottom: 8, left: 4 }}>
-          <defs>
-            <linearGradient id="patternObservedFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6576ed" stopOpacity={.28}/><stop offset="100%" stopColor="#6576ed" stopOpacity={.025}/></linearGradient>
-          </defs>
-          <CartesianGrid stroke="#e5eaf1" strokeDasharray="2 3" vertical={false}/>
-          <XAxis dataKey="horizon" tick={{ fontSize: 11, fill: "#75829a" }} tickFormatter={(value) => Number(value) === 0 ? "REF" : Number(value) > 0 ? `+${value}` : String(value)} minTickGap={28}/>
-          <YAxis tick={{ fontSize: 11, fill: "#75829a" }} tickFormatter={(value) => `${(Number(value) * 100).toFixed(0)}%`} width={48} domain={["auto", "auto"]}/>
-          <Tooltip content={(props) => <PatternTooltip {...props} events={eventMap}/>}/>
-          <ReferenceLine x={0} stroke="#172033" strokeDasharray="5 4" strokeWidth={1.5} label={{ value: "Reference", position: "insideTopRight", fill: "#526078", fontSize: 11 }}/>
-          <Area type="monotone" dataKey="observed" stroke="#273a5b" fill="url(#patternObservedFill)" strokeWidth={2.5} connectNulls={false} name="Observed path" isAnimationActive={false}/>
-          {showSingleEvents && analysis.matchedEvents.filter((event) => event.rank !== 1 && event.id !== selectedEventId).map((event, index) => <Line key={event.id} type="monotone" dataKey={`event_${event.id}`} stroke={eventColors[index % eventColors.length]} strokeOpacity={.28} strokeWidth={1} dot={false} isAnimationActive={false} name={`Event #${event.rank}`}/>) }
-          <Line type="monotone" dataKey="best" stroke="#626ee8" strokeWidth={3.25} dot={false} connectNulls isAnimationActive={false} name="Most correlated event"/>
-          <Line type="monotone" dataKey="averageLong" stroke="#18a879" strokeWidth={2.75} dot={false} connectNulls isAnimationActive={false} name="Average Long"/>
-          <Line type="monotone" dataKey="averageShort" stroke="#e05e72" strokeWidth={2.75} dot={false} connectNulls isAnimationActive={false} name="Average Short"/>
-          {selectedKey && <Line type="monotone" dataKey={selectedKey} stroke="#f4a525" strokeWidth={3} dot={false} connectNulls isAnimationActive={false} name={`Selected #${selected?.rank}`}/>}
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
+    <KairoTimeSeriesChart
+      ariaLabel={summary}
+      chartKey={`pattern:${analysis.symbol}:${analysis.lookback}:${analysis.reference.resolvedDate}`}
+      height={500}
+      referenceTime={patternHorizonTime(0, minimumHorizon)}
+      referenceLabel="Reference"
+      series={chartSeries}
+    />
   </div>;
 }

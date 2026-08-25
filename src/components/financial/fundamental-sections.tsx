@@ -4,8 +4,8 @@ import {
   GroupedFinancialChart,
   RevenueMixCharts,
   ScoreChart,
-  SharesChart,
 } from "@/components/charts/market-charts";
+import { SharesChart } from "@/components/charts/lightweight/lightweight-financial-charts";
 import { PeriodToggle } from "@/components/ui/interactive-controls";
 import { formatNumber } from "@/lib";
 import type { FundamentalsData, SummaryMetric } from "@/types";

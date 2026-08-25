@@ -16,6 +16,7 @@ import {
   type TooltipContentProps,
 } from "recharts";
 import type { SeasonalityCurve, SeasonalityDirectionalSeries } from "@/engines/seasonality";
+import { kairoChartTheme, kairoRechartsTheme } from "./chart-theme";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const COLORS = ["#6576ed", "#e95f75", "#f2b84b", "#20a4a8", "#9c5dd5", "#dc6a2e", "#168665", "#c94150", "#31405a", "#8b96a8", "#087e61", "#b15c93", "#2f72c4"];
@@ -23,7 +24,7 @@ const SERIES_COLORS: Record<string, string> = {
   CURRENT: "#e95f75", "1Y": "#6576ed", "3Y": "#e95f75", "5Y": "#6576ed", "7Y": "#20a4a8", "10Y": "#c94150", "15Y": "#dc6a2e", "20Y": "#f2b84b", "25Y": "#9c5dd5", MAX: "#168665",
   CYCLE_POST_ELECTION: "#40d7a5", CYCLE_MIDTERM: "#6576ed", CYCLE_PRE_ELECTION: "#e95f75", CYCLE_ELECTION: "#f2b84b",
 };
-const axis = { fontSize: 11, fill: "#738096" };
+const axis = kairoRechartsTheme.axis;
 const REFERENCE_YEAR = 2024;
 const DAY_MS = 86_400_000;
 
@@ -84,14 +85,14 @@ export function SeasonalityCurvesChart({ curves, rangeStart, rangeEnd, onRangeCh
       onMouseDown={(state) => { const value = Number(state.activeLabel); if (Number.isFinite(value)) { setDragStart(value); setDragEnd(value); } }}
       onMouseMove={(state) => { const value = Number(state.activeLabel); if (dragStart !== null && Number.isFinite(value)) setDragEnd(value); }}
       onMouseUp={() => { if (dragStart !== null && dragEnd !== null && onRangeChange) onRangeChange(progressToMmdd(dragStart), progressToMmdd(dragEnd)); setDragStart(null); setDragEnd(null); }}>
-      <CartesianGrid stroke="#e2e7ef" strokeDasharray="2 2"/>
+      <CartesianGrid stroke={kairoRechartsTheme.grid} strokeDasharray="2 2"/>
       <XAxis dataKey="progress" type="number" domain={[0, 1]} ticks={Array.from({ length: 12 }, (_, index) => index / 12)} tickFormatter={(value) => MONTHS[Math.min(11, Math.floor(Number(value) * 12))]} tick={axis}/>
       <YAxis tick={axis} tickFormatter={(value) => `${Number(value).toFixed(0)}%`} width={48}/>
-      <Tooltip labelFormatter={(value) => progressLabel(typeof value === "string" || typeof value === "number" ? value : "")} formatter={(value, name) => {
+      <Tooltip contentStyle={kairoRechartsTheme.tooltip} cursor={{ stroke: kairoChartTheme.crosshair }} labelFormatter={(value) => progressLabel(typeof value === "string" || typeof value === "number" ? value : "")} formatter={(value, name) => {
         const curve = available.find((item) => item.id === name);
         return [`${Number(value).toFixed(2)}%`, `${curve?.label ?? String(name)} · n=${curve?.sampleYears.length ?? 0} · ${curve?.quality ?? "N/A"}`];
       }}/>
-      <ReferenceLine y={0} stroke="#9aa5b7" strokeDasharray="4 4"/>
+      <ReferenceLine y={0} stroke={kairoChartTheme.axis} strokeDasharray="4 4"/>
       {selectedStart !== null && selectedEnd !== null && !(rangeStart === "01-01" && rangeEnd === "12-31" && dragStart === null) ? <RangeAreas start={selectedStart} end={selectedEnd}/> : null}
       {today !== null ? <ReferenceLine x={today} stroke="#e95f75" strokeWidth={1.5} strokeDasharray="4 3" label={{ value: "TODAY", position: "insideTopRight", fill: "#c94150", fontSize: 10, fontWeight: 800 }}/> : null}
       {available.map((curve, index) => <Line key={curve.id} type="monotone" dataKey={curve.id} name={curve.id} stroke={seasonalityColorFor(curve.id, index)} strokeWidth={curve.id === "CURRENT" ? 3.2 : 2} strokeDasharray={curve.type === "PRESIDENTIAL_CYCLE" ? "6 4" : undefined} dot={false} connectNulls={false} isAnimationActive={false}/>) }
@@ -125,9 +126,9 @@ export function SeasonalityDirectionalChart({ series, visibleIds }: { series: Se
   if (!rows.length) return <div className="grid min-h-64 place-items-center rounded-2xl border border-dashed border-[var(--border)] px-5 text-center text-sm text-[var(--muted)]">Directional score is unavailable for the selected series.</div>;
   return <div className="chart-wrap chart-short" role="img" aria-label="Grouped bars showing signed historical directional scores from minus 100 to plus 100">
     <ResponsiveContainer width="100%" height="100%"><BarChart data={rows} margin={{ top: 12, right: 16, bottom: 8, left: 0 }} barGap={1}>
-      <CartesianGrid stroke="#e2e7ef" strokeDasharray="2 2"/><XAxis dataKey="label" tick={axis} minTickGap={12}/><YAxis domain={[-100, 100]} tick={axis} width={44}/>
+      <CartesianGrid stroke={kairoRechartsTheme.grid} strokeDasharray="2 2"/><XAxis dataKey="label" tick={axis} minTickGap={12}/><YAxis domain={[-100, 100]} tick={axis} width={44}/>
       <Tooltip content={(props) => <DirectionalTooltip {...props} series={available}/>}/>
-      <ReferenceLine y={0} stroke="#172033"/>
+      <ReferenceLine y={0} stroke={kairoChartTheme.textPrimary}/>
       {available.map((item, index) => <Bar key={item.seriesId} dataKey={item.seriesId} name={item.label} fill={seasonalityColorFor(item.seriesId, index)} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false}/>) }
     </BarChart></ResponsiveContainer>
   </div>;
