@@ -209,7 +209,18 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
         <div className="technical-chart-title"><div><strong>{normalized} · {timeframe}</strong><span>{dataset?.data.bars.length ?? 0} verified bars · {chartType}</span></div><span>{drawingTool === "horizontal" ? "Click the chart to place a level" : drawingTool === "trend" ? "Click two points to draw a trend line" : "Scroll to zoom · drag to explore"}</span></div>
         {loading && !dataset && <div className="technical-empty" role="status" aria-busy="true"><BarChart3/><strong>Loading verified OHLCV…</strong><span>Connecting to the Kairo server data layer.</span></div>}
         {error && !dataset && <div className="technical-empty" role="alert"><strong>Technical chart unavailable</strong><span>{error}</span><button className="button-solid" onClick={() => void load(true)}>Retry</button></div>}
-        {dataset && <TechnicalTerminalChart dataset={dataset.data} comparisons={comparisonData} chartType={chartType} indicators={indicators} drawings={activeDrawings} drawingTool={drawingTool} onCreateDrawing={(drawing) => setDrawings((current) => ({ ...current, [timeframe]: [...(current[timeframe] ?? []), drawing] }))} onResetView={(reset) => { resetViewRef.current = reset; }}/>} 
+        {dataset && (
+          <TechnicalTerminalChart
+            dataset={dataset.data}
+            comparisons={comparisonData}
+            chartType={chartType}
+            indicators={indicators}
+            drawings={activeDrawings}
+            drawingTool={drawingTool}
+            onCreateDrawing={(drawing) => setDrawings((current) => ({ ...current, [timeframe]: [...(current[timeframe] ?? []), drawing] }))}
+            onResetView={(reset) => { resetViewRef.current = reset; }}
+          />
+        )}
         {loading && dataset && <div className="technical-refreshing" role="status">Refreshing {timeframe}…</div>}
         {error && dataset && <div className="technical-inline-warning" role="status">Latest refresh failed. The last verified snapshot remains visible. <button onClick={() => void load(true)}>Retry</button></div>}
       </section>
