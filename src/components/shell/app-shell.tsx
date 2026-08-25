@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity, BarChart3, Bell, BookOpen, CalendarDays, ChevronLeft,
+  Activity, BarChart3, Bell, BookOpen, CalendarDays, CandlestickChart, ChevronLeft,
   CircleDollarSign, Command, Gauge, Globe2, Grid3X3, Landmark, LayoutDashboard, Menu,
   FlaskConical, MessageCircle, Newspaper, PieChart, Search, Settings, Sparkles, Star,
   TrendingUp, UserRound,
@@ -64,6 +64,7 @@ export function AppShell({ children, data }: { children: React.ReactNode; data: 
     ["/watchlists", "Watchlists", Star], ["/calendar", "Calendar", CalendarDays],
     ["/global-markets", "Global markets", Globe2],
     ["/political-intelligence", "Political intelligence", Landmark],
+    [instrumentPath(data.primaryInstrument, "technical"), "Technical chart", CandlestickChart],
     [instrumentPath(data.primaryInstrument, "signal"), "Signals", Sparkles],
     [instrumentPath(data.primaryInstrument, "forecast"), "Forecast", TrendingUp],
     [instrumentPath(data.primaryInstrument, "targets"), "Targets & risk", CircleDollarSign],

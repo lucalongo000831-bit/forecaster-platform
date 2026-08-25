@@ -9,7 +9,7 @@ import type { InstrumentProfile, InstrumentRef, QuoteResponse } from "@/types";
 import { useKairoChat } from "@/components/ai/kairo-chat-provider";
 
 const tabs = [
-  ["overview", "Overview"], ["analysis", "Analisi completa"], ["signal", "Signals"], ["forecast", "Forecast"], ["targets", "Targets"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
+  ["overview", "Overview"], ["technical", "Technical"], ["analysis", "Analisi completa"], ["signal", "Signals"], ["forecast", "Forecast"], ["targets", "Targets"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
   ["overbought-oversold", "Momentum"], ["fundamentals/analysis", "Fundamentals"],
   ["political", "Political"], ["news", "Newsroom"],
 ] as const;
