@@ -13,6 +13,7 @@ import {
 } from ".";
 
 const DAY_MS = 86_400_000;
+const GOLDEN_IDENTITY_OBSERVATIONS = 840;
 
 function fixtureHistory({ observations = 4_200, crypto = false, adjusted = true }: { observations?: number; crypto?: boolean; adjusted?: boolean } = {}) {
   const points: MarketChartPoint[] = [];
@@ -318,9 +319,12 @@ describe("Pattern V2 final independent quantitative audit", () => {
       ["NVDA", "EQUITY"], ["AAPL", "EQUITY"], ["MSFT", "EQUITY"], ["STLAM.MI", "EQUITY"],
       ["SPY", "ETF"], ["QQQ", "ETF"], ["BTC-USD", "CRYPTO"], ["ETH-USD", "CRYPTO"],
     ] as const;
+    const equityFixture = fixtureHistory({ observations: GOLDEN_IDENTITY_OBSERVATIONS });
+    const cryptoFixture = fixtureHistory({ observations: GOLDEN_IDENTITY_OBSERVATIONS, crypto: true, adjusted: false });
     const identities = new Set<string>();
     for (const [symbol, assetClass] of golden) {
-      const points = fixtureHistory({ crypto: assetClass === "CRYPTO", adjusted: assetClass !== "CRYPTO" }).map((point, index) => ({ ...point, close: point.close * (1 + golden.findIndex(([item]) => item === symbol) * 0.01), volume: (point.volume ?? 0) + index }));
+      const baseFixture = assetClass === "CRYPTO" ? cryptoFixture : equityFixture;
+      const points = baseFixture.map((point, index) => ({ ...point, close: point.close * (1 + golden.findIndex(([item]) => item === symbol) * 0.01), volume: (point.volume ?? 0) + index }));
       const first = analyzePattern(symbol, points, { assetClass, lookback: "3M", minimumSimilarity: 0 });
       const second = analyzePattern(symbol, points.map((point) => ({ ...point })), { assetClass, lookback: "3M", minimumSimilarity: 0 });
       expect(second).toEqual(first);

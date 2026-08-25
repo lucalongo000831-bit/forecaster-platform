@@ -29,6 +29,8 @@ export const earningsRequestSchema = z.object({
 }).refine((value) => value.from <= value.to, { message: "Intervallo date non valido" });
 export const analysisHorizonSchema = z.enum(["intraday", "1d", "1w", "1m", "3m", "6m", "12m", "long"]);
 export const technicalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m"), benchmark: symbolSchema.default("^GSPC") });
+export const technicalTimeframeSchema = z.enum(["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"]);
+export const technicalChartRequestSchema = z.object({ symbol: symbolSchema, timeframe: technicalTimeframeSchema.default("1D") });
 export const seasonalityWindowSchema = z.enum(["1Y", "3Y", "5Y", "7Y", "10Y", "15Y", "20Y", "25Y", "MAX"]);
 const seasonalityBooleanSchema = z.preprocess((value) => value === "true" ? true : value === "false" ? false : value, z.boolean()).default(true);
 const seasonalityDatePartSchema = z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/).refine((value) => new Date(`2024-${value}T00:00:00Z`).toISOString().slice(5, 10) === value, "Data MM-DD non valida");
