@@ -22,6 +22,17 @@ describe("deterministic E2E financial provider isolation", () => {
     expect([quote.meta.requestId, profile.meta.requestId, chart.meta.requestId]).toEqual(["deterministic-e2e-provider", "deterministic-e2e-provider", "deterministic-e2e-provider"]);
   });
 
+  it("provides complete contiguous hourly bars for deterministic 4h resampling", async () => {
+    const provider = new DeterministicE2EProvider();
+    const chart = await provider.chart("NVDA", "1M", "1h");
+    expect(chart.data.points.length).toBeGreaterThan(100);
+    expect(chart.data.points.slice(1).every((point, index) => {
+      const previous = chart.data.points[index];
+      const difference = Date.parse(point.timestamp) - Date.parse(previous.timestamp);
+      return difference === 3_600_000 || difference >= 17 * 3_600_000;
+    })).toBe(true);
+  });
+
   it("preserves equity, ETF and 24/7 crypto semantics including ETH-USD", async () => {
     const provider = new DeterministicE2EProvider();
     expect(provider.resolveInstrument("AAPL").kind).toBe("EQUITY");

@@ -1,33 +1,41 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { IChartApi, IPriceLine, ISeriesApi, MouseEventParams, SeriesType, Time } from "lightweight-charts";
-import { calculateIndicatorSeries, normalizeSeriesAtCommonStart } from "@/engines/technical";
-import type { TechnicalChartDataset, TechnicalChartType, TechnicalIndicatorConfig } from "@/types";
+import type { IChartApi, IPriceLine, ISeriesApi, LogicalRange, MouseEventParams, SeriesType, Time } from "lightweight-charts";
+import { anchoredVwap, calculateIndicatorSeries, calculateVolumeProfile, drawingDefinition, fibonacciExtension, fibonacciRetracement, heikinAshi, normalizeSeriesAtCommonStart } from "@/engines/technical";
+import type { TechnicalChartDataset, TechnicalChartType, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel } from "@/types";
 import { kairoChartTheme } from "../chart-theme";
 
-export type TechnicalDrawing = {
-  id: string;
-  type: "horizontal" | "trend";
-  points: Array<{ timestamp: string; price: number }>;
-};
-
-type DrawingTool = "cursor" | "horizontal" | "trend";
+export type { TechnicalDrawing } from "@/types";
 type AnySeries = ISeriesApi<SeriesType>;
+type LinkedCrosshair = { sourcePanelId: string; timestamp: string | null };
 
 function time(timestamp: string) { return Math.floor(Date.parse(timestamp) / 1000) as Time; }
+function timestampFromTime(value: Time) {
+  if (typeof value === "number") return new Date(value * 1000).toISOString();
+  if (typeof value === "string") return new Date(`${value}T00:00:00.000Z`).toISOString();
+  return new Date(Date.UTC(value.year, value.month - 1, value.day)).toISOString();
+}
 function pricePrecision(bars: TechnicalChartDataset["bars"]) {
   const last = bars.at(-1)?.close ?? 1;
   return last >= 10 ? 2 : last >= 1 ? 3 : last >= 0.01 ? 4 : 6;
 }
+function priceLabel(value: number, precision: number) { return value.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision }); }
 
-export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, onCreateDrawing, onResetView }: {
+export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, panelId = "panel-1", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView }: {
   dataset: TechnicalChartDataset;
   comparisons: TechnicalChartDataset[];
   chartType: TechnicalChartType;
   indicators: TechnicalIndicatorConfig[];
   drawings: TechnicalDrawing[];
-  drawingTool: DrawingTool;
+  drawingTool: TechnicalDrawingTool;
+  drawingText?: string;
+  selectedDrawingId?: string | null;
+  autoLevels?: TechnicalLevel[];
+  showVolumeProfile?: boolean;
+  panelId?: string;
+  linkedCrosshair?: LinkedCrosshair | null;
+  onCrosshairTime?: (panelId: string, timestamp: string | null) => void;
   onCreateDrawing: (drawing: TechnicalDrawing) => void;
   onResetView?: (reset: () => void) => void;
 }) {
@@ -37,28 +45,67 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const primaryRef = useRef<AnySeries | null>(null);
   const drawingSeriesRef = useRef<AnySeries[]>([]);
   const drawingLinesRef = useRef<IPriceLine[]>([]);
-  const trendAnchorRef = useRef<{ timestamp: string; price: number } | null>(null);
+  const pendingAnchorsRef = useRef<TechnicalDrawingPoint[]>([]);
+  const visibleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyingLinkedCrosshairRef = useRef(false);
   const createDrawingRef = useRef(onCreateDrawing);
+  const crosshairCallbackRef = useRef(onCrosshairTime);
   const drawingToolRef = useRef(drawingTool);
+  const drawingTextRef = useRef(drawingText);
+  const resetViewCallbackRef = useRef(onResetView);
+  const comparisonsRef = useRef(comparisons);
+  const autoLevelsRef = useRef(autoLevels);
   const [ready, setReady] = useState(false);
-  const [trendAnchor, setTrendAnchor] = useState<{ timestamp: string; price: number } | null>(null);
+  const [anchorCount, setAnchorCount] = useState(0);
+  const [visibleRange, setVisibleRange] = useState({ from: 0, to: Math.max(0, dataset.bars.length - 1) });
   const [tooltip, setTooltip] = useState<{ left: number; label: string; values: string[] } | null>(null);
   const calculated = useMemo(() => calculateIndicatorSeries(dataset.bars), [dataset.bars]);
+  const displayBars = useMemo(() => chartType === "heikin-ashi" ? heikinAshi(dataset.bars) : dataset.bars, [chartType, dataset.bars]);
+  const profile = useMemo(() => showVolumeProfile ? calculateVolumeProfile(dataset.bars.slice(visibleRange.from, visibleRange.to + 1)) : null, [dataset.bars, showVolumeProfile, visibleRange]);
+  const comparisonSignature = comparisons.map((comparison) => `${comparison.symbol}:${comparison.timeframe}:${comparison.asOf ?? comparison.bars.length}`).join("|");
+  const autoLevelsSignature = autoLevels.map((level) => `${level.id}:${level.score}:${level.status}`).join("|");
 
   useEffect(() => { createDrawingRef.current = onCreateDrawing; }, [onCreateDrawing]);
+  useEffect(() => { crosshairCallbackRef.current = onCrosshairTime; }, [onCrosshairTime]);
+  useEffect(() => { drawingTextRef.current = drawingText; }, [drawingText]);
+  useEffect(() => { resetViewCallbackRef.current = onResetView; }, [onResetView]);
+  useEffect(() => { comparisonsRef.current = comparisons; }, [comparisons]);
+  useEffect(() => { autoLevelsRef.current = autoLevels; }, [autoLevels]);
   useLayoutEffect(() => { drawingToolRef.current = drawingTool; }, [drawingTool]);
-  useEffect(() => {
-    if (drawingTool !== "trend") queueMicrotask(() => { trendAnchorRef.current = null; setTrendAnchor(null); });
-  }, [drawingTool]);
+  useEffect(() => { pendingAnchorsRef.current = []; queueMicrotask(() => setAnchorCount(0)); }, [drawingTool]);
+
+  const placeDrawingAnchor = (clientX: number, clientY: number) => {
+    const tool = drawingToolRef.current;
+    const host = hostRef.current;
+    const chart = chartRef.current;
+    const primary = primaryRef.current;
+    if (tool === "cursor" || !host || !chart || !primary) return;
+    const bounds = host.getBoundingClientRect();
+    const resolvedTime = chart.timeScale().coordinateToTime(clientX - bounds.left);
+    const price = primary.coordinateToPrice(clientY - bounds.top);
+    if (resolvedTime === null || resolvedTime === undefined || typeof price !== "number" || !Number.isFinite(price)) return;
+    const definition = drawingDefinition(tool);
+    if (!definition) return;
+    const points = [...pendingAnchorsRef.current, { timestamp: timestampFromTime(resolvedTime), price }].slice(0, definition.anchors);
+    pendingAnchorsRef.current = points;
+    setAnchorCount(points.length);
+    if (points.length === definition.anchors) {
+      const text = tool === "text" ? drawingTextRef.current : undefined;
+      createDrawingRef.current({ id: crypto.randomUUID(), type: tool, points, visible: true, createdAt: new Date().toISOString(), ...(text ? { text } : {}) });
+      pendingAnchorsRef.current = [];
+      setAnchorCount(0);
+    }
+  };
 
   useEffect(() => {
     if (!hostRef.current || !dataset.bars.length) return;
     let disposed = false;
     let chart: IChartApi | null = null;
     let observer: ResizeObserver | null = null;
-    let clickHandler: ((parameter: MouseEventParams<Time>) => void) | null = null;
     let crosshairHandler: ((parameter: MouseEventParams<Time>) => void) | null = null;
+    let visibleHandler: ((range: LogicalRange | null) => void) | null = null;
     const registry: Array<{ label: string; series: AnySeries; suffix?: string }> = [];
+    const comparisonData = comparisonsRef.current;
     void import("lightweight-charts").then((library) => {
       if (disposed || !hostRef.current) return;
       const precision = pricePrecision(dataset.bars);
@@ -77,9 +124,9 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       libraryRef.current = library;
       const common = { priceFormat: { type: "price" as const, precision, minMove: 10 ** -precision }, priceLineVisible: false, lastValueVisible: true };
       let primary: AnySeries;
-      if (chartType === "candlestick") {
+      if (chartType === "candlestick" || chartType === "heikin-ashi") {
         primary = chart.addSeries(library.CandlestickSeries, { ...common, upColor: kairoChartTheme.bullish, downColor: kairoChartTheme.bearish, borderVisible: false, wickUpColor: kairoChartTheme.bullish, wickDownColor: kairoChartTheme.bearish });
-        primary.setData(dataset.bars.map((bar) => ({ time: time(bar.timestamp), open: bar.open, high: bar.high, low: bar.low, close: bar.close })) as never[]);
+        primary.setData(displayBars.map((bar) => ({ time: time(bar.timestamp), open: bar.open, high: bar.high, low: bar.low, close: bar.close })) as never[]);
       } else if (chartType === "area") {
         primary = chart.addSeries(library.AreaSeries, { ...common, lineColor: kairoChartTheme.primary, topColor: `${kairoChartTheme.primary}42`, bottomColor: `${kairoChartTheme.primary}05`, lineWidth: 2 });
         primary.setData(dataset.bars.map((bar) => ({ time: time(bar.timestamp), value: bar.close })));
@@ -88,12 +135,11 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         primary.setData(dataset.bars.map((bar) => ({ time: time(bar.timestamp), value: bar.close })));
       }
       primaryRef.current = primary;
-      registry.push({ label: dataset.symbol, series: primary });
-
-      const addLine = (label: string, values: Array<number | null>, color: string, pane = 0, options: Record<string, unknown> = {}) => {
-        const series = chart!.addSeries(library.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, ...options }, pane) as AnySeries;
+      registry.push({ label: chartType === "heikin-ashi" ? `${dataset.symbol} · Heikin Ashi derived` : dataset.symbol, series: primary });
+      const addLine = (label: string, values: Array<number | null>, color: string, targetPane = 0, options: Record<string, unknown> = {}) => {
+        const series = chart!.addSeries(library.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, ...options }, targetPane) as AnySeries;
         series.setData(values.flatMap((value, index) => value === null || !Number.isFinite(value) ? [] : [{ time: time(dataset.bars[index].timestamp), value }]) as never[]);
-        registry.push({ label, series, suffix: pane >= 2 ? "" : undefined });
+        registry.push({ label, series });
         return series;
       };
       const enabled = indicators.filter((indicator) => indicator.enabled);
@@ -108,7 +154,6 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
           addLine("BB lower", bands.lower, indicator.color, 0, { lineWidth: 1 });
         }
       }
-
       let pane = 1;
       if (enabled.some((item) => item.kind === "VOLUME")) {
         const volume = chart.addSeries(library.HistogramSeries, { priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false }, pane) as AnySeries;
@@ -135,62 +180,61 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         }
         if (indicator.kind === "ATR") { addLine(`ATR ${indicator.period ?? 14}`, calculated.atr(indicator.period ?? 14), indicator.color, pane); pane += 1; }
       }
-
       const compareColors = [kairoChartTheme.comparison, "#f4a525", "#9333ea"];
-      const normalized = normalizeSeriesAtCommonStart([
-        dataset.bars.map((bar) => ({ timestamp: bar.timestamp, value: bar.close })),
-        ...comparisons.slice(0, 3).map((comparison) => comparison.bars.map((bar) => ({ timestamp: bar.timestamp, value: bar.close }))),
-      ]);
-      if (comparisons.length > 0) {
+      const normalized = normalizeSeriesAtCommonStart([dataset.bars.map((bar) => ({ timestamp: bar.timestamp, value: bar.close })), ...comparisonData.slice(0, 3).map((comparison) => comparison.bars.map((bar) => ({ timestamp: bar.timestamp, value: bar.close })))]);
+      if (comparisonData.length > 0) {
         const primaryPerformance = chart.addSeries(library.LineSeries, { color: kairoChartTheme.primary, lineWidth: 2, priceScaleId: "compare", priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: (value: number) => `${value.toFixed(1)}%`, minMove: .01 } }) as AnySeries;
         primaryPerformance.setData(normalized[0].flatMap((value, pointIndex) => value === null ? [] : [{ time: time(dataset.bars[pointIndex].timestamp), value }]) as never[]);
         registry.push({ label: `${dataset.symbol} performance`, series: primaryPerformance, suffix: "%" });
       }
-      comparisons.slice(0, 3).forEach((comparison, index) => {
+      comparisonData.slice(0, 3).forEach((comparison, index) => {
         const values = normalized[index + 1] ?? [];
         const series = chart!.addSeries(library.LineSeries, { color: compareColors[index], lineWidth: 2, priceScaleId: "compare", priceLineVisible: false, lastValueVisible: true, priceFormat: { type: "custom", formatter: (value: number) => `${value.toFixed(1)}%`, minMove: .01 } }) as AnySeries;
         series.setData(values.flatMap((value, pointIndex) => value === null ? [] : [{ time: time(comparison.bars[pointIndex].timestamp), value }]) as never[]);
         registry.push({ label: `${comparison.symbol} rebased`, series, suffix: "%" });
       });
-
-      clickHandler = (parameter) => {
-        if (drawingToolRef.current === "cursor" || !parameter.point) return;
-        const resolvedTime = parameter.time ?? chart?.timeScale().coordinateToTime(parameter.point.x);
-        if (resolvedTime === null || resolvedTime === undefined) return;
-        const price = primary.coordinateToPrice(parameter.point.y);
-        if (typeof price !== "number" || !Number.isFinite(price)) return;
-        const timestamp = new Date((typeof resolvedTime === "number" ? resolvedTime : Date.parse(String(resolvedTime)) / 1000) * 1000).toISOString();
-        if (drawingToolRef.current === "horizontal") createDrawingRef.current({ id: crypto.randomUUID(), type: "horizontal", points: [{ timestamp, price }] });
-        else if (!trendAnchorRef.current) { trendAnchorRef.current = { timestamp, price }; setTrendAnchor(trendAnchorRef.current); }
-        else { const start = trendAnchorRef.current; trendAnchorRef.current = null; setTrendAnchor(null); createDrawingRef.current({ id: crypto.randomUUID(), type: "trend", points: [start, { timestamp, price }] }); }
-      };
-      chart.subscribeClick(clickHandler);
-
       crosshairHandler = (parameter) => {
-        if (!parameter.point || !parameter.time) { setTooltip(null); return; }
+        if (!parameter.point || !parameter.time) {
+          setTooltip(null);
+          if (!applyingLinkedCrosshairRef.current) crosshairCallbackRef.current?.(panelId, null);
+          return;
+        }
         const values = registry.flatMap((record) => {
           const row = parameter.seriesData.get(record.series);
           const value = row && "value" in row ? row.value : row && "close" in row ? row.close : null;
           return typeof value === "number" ? [`${record.label} ${value.toLocaleString(undefined, { maximumFractionDigits: 3 })}${record.suffix ?? ""}`] : [];
         });
         const hostWidth = hostRef.current?.clientWidth ?? 560;
-        setTooltip({ left: Math.max(8, Math.min(parameter.point.x + 12, hostWidth - 217)), label: typeof parameter.time === "number" ? new Date(parameter.time * 1000).toLocaleString() : String(parameter.time), values });
+        const timestamp = timestampFromTime(parameter.time);
+        setTooltip({ left: Math.max(8, Math.min(parameter.point.x + 12, hostWidth - 217)), label: new Date(timestamp).toLocaleString(), values });
+        if (!applyingLinkedCrosshairRef.current) crosshairCallbackRef.current?.(panelId, timestamp);
       };
       chart.subscribeCrosshairMove(crosshairHandler);
+      visibleHandler = (range) => {
+        if (!range) return;
+        if (visibleTimerRef.current) clearTimeout(visibleTimerRef.current);
+        visibleTimerRef.current = setTimeout(() => {
+          const from = Math.max(0, Math.floor(range.from));
+          const to = Math.min(dataset.bars.length - 1, Math.ceil(range.to));
+          if (to >= from) setVisibleRange((current) => current.from === from && current.to === to ? current : { from, to });
+        }, 120);
+      };
+      chart.timeScale().subscribeVisibleLogicalRangeChange(visibleHandler);
       chart.timeScale().fitContent();
-      onResetView?.(() => chart?.timeScale().fitContent());
+      resetViewCallbackRef.current?.(() => chart?.timeScale().fitContent());
       const panes = chart.panes();
       if (panes[1]) panes[1].setHeight(95);
       for (let index = 2; index < panes.length; index += 1) panes[index].setHeight(115);
-      observer = new ResizeObserver(([entry]) => chart?.resize(Math.max(1, Math.floor(entry.contentRect.width)), Math.max(420, Math.floor(entry.contentRect.height))));
+      observer = new ResizeObserver(([entry]) => chart?.resize(Math.max(1, Math.floor(entry.contentRect.width)), Math.max(320, Math.floor(entry.contentRect.height))));
       observer.observe(hostRef.current);
       setReady(true);
     });
     return () => {
       disposed = true;
       observer?.disconnect();
-      if (chart && clickHandler) chart.unsubscribeClick(clickHandler);
+      if (visibleTimerRef.current) clearTimeout(visibleTimerRef.current);
       if (chart && crosshairHandler) chart.unsubscribeCrosshairMove(crosshairHandler);
+      if (chart && visibleHandler) chart.timeScale().unsubscribeVisibleLogicalRangeChange(visibleHandler);
       chart?.remove();
       chartRef.current = null;
       libraryRef.current = null;
@@ -199,37 +243,75 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       drawingLinesRef.current = [];
       setReady(false);
     };
-  }, [calculated, chartType, comparisons, dataset, indicators, onResetView]);
+  }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId]);
 
   useEffect(() => {
     const chart = chartRef.current;
     const primary = primaryRef.current;
     const library = libraryRef.current;
     if (!ready || !chart || !primary || !library) return;
-    for (const line of drawingLinesRef.current) {
-      try { primary.removePriceLine(line); } catch { /* Chart lifecycle already owns cleanup. */ }
-    }
-    for (const series of drawingSeriesRef.current) {
-      try { chart.removeSeries(series); } catch { /* Chart lifecycle already owns cleanup. */ }
-    }
+    for (const line of drawingLinesRef.current) try { primary.removePriceLine(line); } catch { /* Lifecycle cleanup. */ }
+    for (const series of drawingSeriesRef.current) try { chart.removeSeries(series); } catch { /* Lifecycle cleanup. */ }
     drawingLinesRef.current = [];
     drawingSeriesRef.current = [];
-    for (const drawing of drawings) {
-      if (drawing.type === "horizontal" && drawing.points[0]) drawingLinesRef.current.push(primary.createPriceLine({ price: drawing.points[0].price, color: "#f4a525", lineWidth: 2, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title: "Drawing" }));
-      if (drawing.type === "trend" && drawing.points.length === 2) {
-        const points = [...drawing.points].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
-        if (points[0].timestamp === points[1].timestamp) continue;
-        const series = chart.addSeries(library.LineSeries, { color: "#f4a525", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }) as AnySeries;
-        series.setData(points.map((point) => ({ time: time(point.timestamp), value: point.price })) as never[]);
-        drawingSeriesRef.current.push(series);
+    const precision = pricePrecision(dataset.bars);
+    const addPriceLine = (price: number, title: string, color: string, width: 1 | 2 | 3 = 1) => drawingLinesRef.current.push(primary.createPriceLine({ price, color, lineWidth: width, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title }));
+    const addSeries = (points: TechnicalDrawingPoint[], color: string, width: 1 | 2 | 3 = 2) => {
+      if (points.length < 2) return;
+      const rows = [...points].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+      if (rows[0].timestamp === rows.at(-1)?.timestamp) rows[rows.length - 1] = { ...rows[rows.length - 1], timestamp: new Date(Date.parse(rows[rows.length - 1].timestamp) + 1000).toISOString() };
+      const series = chart.addSeries(library.LineSeries, { color, lineWidth: width, priceLineVisible: false, lastValueVisible: false }) as AnySeries;
+      series.setData(rows.map((point) => ({ time: time(point.timestamp), value: point.price })) as never[]);
+      drawingSeriesRef.current.push(series);
+    };
+    autoLevelsRef.current.forEach((level) => addPriceLine(level.centerPrice, `${level.type} ${level.score}`, level.type === "SUPPORT" ? "rgba(24,168,121,.72)" : "rgba(224,94,114,.72)"));
+    drawings.filter((drawing) => drawing.visible).forEach((drawing) => {
+      const selected = drawing.id === selectedDrawingId;
+      const color = selected ? "#5267e8" : "#f4a525";
+      const width = selected ? 3 : 2;
+      if (drawing.type === "horizontal" && drawing.points[0]) addPriceLine(drawing.points[0].price, "Drawing", color, width);
+      if (drawing.type === "trend" && drawing.points.length === 2) addSeries(drawing.points, color, width);
+      if (drawing.type === "horizontal-ray" && drawing.points[0]) addSeries([drawing.points[0], { timestamp: dataset.bars.at(-1)!.timestamp, price: drawing.points[0].price }], color, width);
+      if (drawing.type === "vertical" && drawing.points[0]) addSeries([{ timestamp: drawing.points[0].timestamp, price: Math.min(...dataset.bars.map((bar) => bar.low)) }, { timestamp: new Date(Date.parse(drawing.points[0].timestamp) + 1000).toISOString(), price: Math.max(...dataset.bars.map((bar) => bar.high)) }], color, width);
+      if (drawing.type === "rectangle" && drawing.points.length === 2) { const [a, b] = drawing.points; addSeries([a, { timestamp: b.timestamp, price: a.price }, b, { timestamp: a.timestamp, price: b.price }, a], color, width); }
+      if (drawing.type === "fib-retracement" && drawing.points.length === 2) fibonacciRetracement(drawing.points[0].price, drawing.points[1].price).forEach((level) => addPriceLine(level.price, `${level.ratio} — ${priceLabel(level.price, precision)}`, color));
+      if (drawing.type === "fib-extension" && drawing.points.length === 3) fibonacciExtension(drawing.points[0].price, drawing.points[1].price, drawing.points[2].price).forEach((level) => addPriceLine(level.price, `${level.ratio} — ${priceLabel(level.price, precision)}`, color));
+      if (drawing.type === "text" && drawing.points[0]) addPriceLine(drawing.points[0].price, drawing.text ?? "Note", color, width);
+      if (drawing.type === "anchored-vwap" && drawing.points[0]) {
+        const values = anchoredVwap(dataset.bars, drawing.points[0].timestamp);
+        addSeries(values.flatMap<TechnicalDrawingPoint>((value, index) => value === null ? [] : [{ timestamp: dataset.bars[index].timestamp, price: value }]), color, width);
       }
-    }
-  }, [drawings, ready]);
+    });
+  }, [autoLevelsSignature, dataset.bars, drawings, ready, selectedDrawingId]);
 
-  return <div className={`technical-chart-stage ${drawingTool !== "cursor" ? "is-drawing" : ""}`} role="img" aria-label={`${dataset.symbol} professional technical chart. ${dataset.bars.length} verified OHLCV bars. Indicators: ${indicators.filter((item) => item.enabled).map((item) => item.kind).join(", ") || "none"}.`} data-chart-engine="lightweight-charts" data-chart-ready={ready ? "true" : "false"} data-drawing-tool={drawingTool} data-testid="technical-terminal-chart">
+  useEffect(() => {
+    if (!ready || !linkedCrosshair || linkedCrosshair.sourcePanelId === panelId) return;
+    const chart = chartRef.current;
+    const primary = primaryRef.current;
+    if (!chart || !primary) return;
+    applyingLinkedCrosshairRef.current = true;
+    if (!linkedCrosshair.timestamp) chart.clearCrosshairPosition();
+    else {
+      const linkedTime = time(linkedCrosshair.timestamp);
+      const target = dataset.bars.find((bar) => time(bar.timestamp) === linkedTime);
+      if (target) chart.setCrosshairPosition(target.close, time(target.timestamp), primary);
+      else chart.clearCrosshairPosition();
+    }
+    queueMicrotask(() => { applyingLinkedCrosshairRef.current = false; });
+  }, [dataset.bars, linkedCrosshair, panelId, ready]);
+
+  const definition = drawingTool === "cursor" ? null : drawingDefinition(drawingTool);
+  const profileMax = Math.max(1, ...(profile?.bins.map((bin) => bin.volume) ?? [1]));
+  return <div className={`technical-chart-stage ${drawingTool !== "cursor" ? "is-drawing" : ""}`} onClick={(event) => placeDrawingAnchor(event.clientX, event.clientY)} role="img" aria-label={`${dataset.symbol} professional technical chart. ${dataset.bars.length} verified OHLCV bars. ${chartType === "heikin-ashi" ? "Heikin Ashi is derived while studies use real OHLC. " : ""}Indicators: ${indicators.filter((item) => item.enabled).map((item) => item.kind).join(", ") || "none"}.`} data-chart-engine="lightweight-charts" data-chart-ready={ready ? "true" : "false"} data-drawing-tool={drawingTool} data-testid="technical-terminal-chart">
     <div ref={hostRef} className="technical-chart-canvas"/>
     {!ready && <div className="technical-chart-loading" role="status">Preparing chart engine…</div>}
-    {drawingTool === "trend" && trendAnchor && <div className="technical-drawing-status" role="status">Start selected · choose the end point</div>}
+    {definition && anchorCount > 0 && <div className="technical-drawing-status" role="status">Anchor {anchorCount}/{definition.anchors} selected · choose next point</div>}
+    {chartType === "heikin-ashi" && <div className="technical-derived-badge">HEIKIN ASHI · DERIVED</div>}
+    {profile?.status === "AVAILABLE" && <div className="technical-volume-profile" aria-label={`Estimated volume-at-price profile. POC ${profile.poc}, VAH ${profile.vah}, VAL ${profile.val}.`}>
+      {profile.bins.slice().reverse().map((bin) => <i key={`${bin.priceLow}-${bin.priceHigh}`} className={`${bin.valueArea ? "value-area" : ""} ${bin.centerPrice === profile.poc ? "poc" : ""}`} style={{ width: `${Math.max(3, bin.volume / profileMax * 100)}%` }} title={`${priceLabel(bin.priceLow, pricePrecision(dataset.bars))}–${priceLabel(bin.priceHigh, pricePrecision(dataset.bars))}`}/>) }
+      <span>Estimated from bar OHLCV</span>
+    </div>}
+    {showVolumeProfile && profile?.status === "UNAVAILABLE" && <div className="technical-profile-unavailable">Volume profile unavailable</div>}
     {tooltip && <div className="technical-crosshair-tooltip" style={{ left: tooltip.left }} aria-hidden="true"><strong>{tooltip.label}</strong>{tooltip.values.slice(0, 9).map((value) => <span key={value}>{value}</span>)}</div>}
   </div>;
 }
