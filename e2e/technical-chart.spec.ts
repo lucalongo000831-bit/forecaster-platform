@@ -23,6 +23,7 @@ test("technical workspace is responsive, persistent and indicator changes never 
   const chart = page.getByTestId("technical-terminal-chart");
   await expect(chart).toHaveAttribute("data-chart-ready", "true", { timeout: 30_000 });
   await expect(page.getByText("Corporate-action adjusted OHLC")).toBeVisible();
+  await expect(page.getByLabel("Technical confluence summary").getByText("VOLATILITY", { exact: true })).toBeVisible();
   const initialRequests = technicalRequests;
 
   await page.getByLabel("Indicator type").selectOption("RSI");
