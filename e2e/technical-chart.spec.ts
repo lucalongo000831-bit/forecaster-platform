@@ -2,6 +2,16 @@ import { expect, test } from "@playwright/test";
 
 const assets = ["NVDA", "AAPL", "MSFT", "STLAM.MI", "SPY", "QQQ", "BTC-USD", "ETH-USD"];
 
+test.beforeEach(async ({ page }, testInfo) => {
+  const seed = `${testInfo.project.name}:${testInfo.title}`
+    .split("")
+    .reduce((hash, character) => ((hash * 31) + character.charCodeAt(0)) >>> 0, 0);
+  const isolatedIp = `198.51.100.${(seed % 200) + 1}`;
+  await page.route("**/api/analysis/technical-chart?**", async (route) => {
+    await route.continue({ headers: { ...route.request().headers(), "x-forwarded-for": isolatedIp } });
+  });
+});
+
 test("technical chart API serves the deterministic cross-asset matrix", async ({ request }, testInfo) => {
   for (const [index, symbol] of assets.entries()) {
     const response = await request.get(`/api/analysis/technical-chart?symbol=${encodeURIComponent(symbol)}&timeframe=1D`, { headers: { "x-forwarded-for": `198.51.${100 + testInfo.project.name.length}.${index + 10}` } });
@@ -103,8 +113,7 @@ test("technical preferences reject corrupt state and reset only after confirmati
   expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v2:NVDA"))).toContain('"version":2');
 });
 
-test("Technical V2 derives locally, persists advanced drawings and reuses multi-chart requests", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "The complete advanced interaction matrix runs once; responsive coverage runs in the shared workspace test.");
+test("Technical V2 derives locally, persists advanced drawings and reuses multi-chart requests", async ({ page }) => {
   let technicalRequests = 0;
   page.on("request", (request) => { if (request.url().includes("/api/analysis/technical-chart?")) technicalRequests += 1; });
   await page.goto("/instrument/nasdaqgs/nvda/technical", { waitUntil: "domcontentloaded" });
@@ -126,9 +135,24 @@ test("Technical V2 derives locally, persists advanced drawings and reuses multi-
   await page.waitForTimeout(350);
   await chart.click({ position: { x: Math.max(240, (box?.width ?? 700) * .72), y: 250 } });
   await expect(page.getByText(/^Fibonacci retracement 1$/)).toBeVisible();
+  await page.getByRole("button", { name: "Fibonacci extension", exact: true }).click();
+  await chart.click({ position: { x: 110, y: 160 } });
+  await page.waitForTimeout(250);
+  await chart.click({ position: { x: 210, y: 230 } });
+  await page.waitForTimeout(250);
+  await chart.click({ position: { x: Math.max(260, (box?.width ?? 700) * .76), y: 190 } });
+  await expect(page.getByText(/^Fibonacci extension 2$/)).toBeVisible();
   await page.getByRole("button", { name: "Anchored VWAP", exact: true }).click();
   await chart.click({ position: { x: 190, y: 210 } });
-  await expect(page.getByText(/^Anchored VWAP 2$/)).toBeVisible();
+  await expect(page.getByText(/^Anchored VWAP 3$/)).toBeVisible();
+  await page.getByRole("button", { name: "Horizontal ray", exact: true }).click();
+  await chart.click({ position: { x: 175, y: 205 } });
+  await expect(page.getByText(/^Horizontal ray 4$/)).toBeVisible();
+  await page.getByRole("button", { name: "Rectangle / zone", exact: true }).click();
+  await chart.click({ position: { x: 130, y: 170 } });
+  await page.waitForTimeout(250);
+  await chart.click({ position: { x: Math.max(250, (box?.width ?? 700) * .7), y: 260 } });
+  await expect(page.getByText(/^Rectangle \/ zone 5$/)).toBeVisible();
   expect(technicalRequests).toBe(baseline);
 
   await page.getByRole("button", { name: "4 chart layout" }).click();
@@ -139,6 +163,12 @@ test("Technical V2 derives locally, persists advanced drawings and reuses multi-
   await expect(page.getByTestId("technical-terminal-chart")).toHaveCount(1);
   await page.getByRole("button", { name: /Restore NVDA panel/ }).click();
   await expect(page.getByTestId("technical-terminal-chart")).toHaveCount(4);
+  await page.getByRole("button", { name: "1 chart layout" }).click();
+  await expect(page.getByTestId("technical-terminal-chart")).toHaveCount(1);
+  await page.getByRole("button", { name: "2V chart layout" }).click();
+  await expect(page.getByTestId("technical-terminal-chart")).toHaveCount(2);
+  await page.getByRole("button", { name: "4 chart layout" }).click();
+  await expect(page.getByTestId("technical-terminal-chart")).toHaveCount(4);
 
   await page.getByRole("button", { name: "Apply Swing template", exact: true }).click();
   await expect(page.getByText("Swing template applied.")).toBeVisible();
@@ -148,10 +178,13 @@ test("Technical V2 derives locally, persists advanced drawings and reuses multi-
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByRole("button", { name: "Apply Desk setup template", exact: true })).toBeVisible();
   await expect(page.getByText(/^Fibonacci retracement 1$/)).toBeVisible();
+  await expect(page.getByText(/^Fibonacci extension 2$/)).toBeVisible();
+  await expect(page.getByText(/^Anchored VWAP 3$/)).toBeVisible();
+  await expect(page.getByText(/^Horizontal ray 4$/)).toBeVisible();
+  await expect(page.getByText(/^Rectangle \/ zone 5$/)).toBeVisible();
 });
 
-test("Technical V2 migrates valid V1 state and preserves legacy drawings", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "Migration behavior is viewport independent.");
+test("Technical V2 migrates valid V1 state and preserves legacy drawings", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("kairo:technical-chart:v1:NVDA", JSON.stringify({
     version: 1,
     chartType: "line",
@@ -167,6 +200,9 @@ test("Technical V2 migrates valid V1 state and preserves legacy drawings", async
   await expect(page.getByText(/^Level 120\.00$/)).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("kairo:technical-chart:v1:NVDA"))).toContain('"version":1');
   expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v2:NVDA"))).toContain('"version":2');
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByText(/^Level 120\.00$/)).toHaveCount(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("kairo:technical:v2:NVDA") ?? "{}").drawings["NVDA:4h"])).toHaveLength(1);
 });
 
 test("technical endpoint rejects invalid symbols and timeframes", async ({ request }) => {

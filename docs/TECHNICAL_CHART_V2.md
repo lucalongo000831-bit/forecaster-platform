@@ -55,13 +55,13 @@ Direct canvas hit-testing and anchor dragging are not implemented in V2. Selecti
    - time-separated touches, maximum 10.
 5. Scores below 35 are excluded. At most five support and five resistance candidates render.
 
-Support/resistance classification is relative to the current close. Mixed historical high/low clusters can become `FLIPPED`; other states are `ACTIVE`, `TESTING`, `BROKEN` and `STALE`. The `asOfIndex` option slices the input before every calculation, which is independently tested against the equivalent historical prefix to prevent lookahead.
+Support/resistance role begins from the earliest confirmed pivot in a cluster. A later opposite pivot at the same zone marks the corresponding support-to-resistance or resistance-to-support role reversal as `FLIPPED`. A pure support below its zone or pure resistance above its zone is `BROKEN`; other states are `ACTIVE`, `TESTING` and `STALE`. The `asOfIndex` option slices the input before every calculation, which is independently tested against the equivalent historical prefix to prevent lookahead. Symmetric pivots are emitted only after the configured right-side confirmation window exists, so historical real-time use observes that confirmation delay.
 
 ## Visible-range volume profile
 
 `volume-profile-v1.0.0` uses only loaded OHLCV bars and performs no provider fetch on toggle, pan or zoom. It is an **estimated volume-at-price from bar data**, not an exchange tick profile.
 
-The visible price range is divided into 24 equal bins. Each bar's volume is distributed uniformly across every bin intersecting its low/high range. POC is the bin with maximum allocated volume. The 70% value area starts at POC and expands to the adjacent bin with more volume until cumulative selected volume reaches at least 70%; VAH/VAL are the selected area's outer bounds. Missing or zero real volume returns `UNAVAILABLE`, never a fabricated zero profile.
+The visible price range is divided into 24 equal bins. Each bar's volume is distributed uniformly across every half-open bin intersecting its low/high range; a high exactly on a boundary does not also allocate into the next bin, while the final range boundary remains included. This conserves the visible source volume without edge double counting. POC is the first lower-priced bin with maximum allocated volume. The 70% value area starts at POC and expands to the adjacent bin with more volume; equal adjacent volumes deterministically choose the lower bin. Expansion stops when cumulative selected volume reaches at least 70%, and VAH/VAL are the selected area's outer bounds. Missing or zero real volume returns `UNAVAILABLE`, never a fabricated zero profile.
 
 Visible-range updates are debounced by 120 ms. Calculations are memoized by bars and range and never run on crosshair movement.
 
@@ -85,7 +85,7 @@ Built-in templates are Clean, Trend, Momentum, Volatility, Swing and Multi-Timef
 
 ## Technical confluence
 
-`technical-confluence-v1.0.0` combines price/EMA20/EMA50 alignment, RSI regime, ATR percentage, nearest qualified support/resistance and estimated profile POC. It returns trend, momentum, volatility, structure, volume context and `HIGH/MEDIUM/LOW` alignment. Missing structural/profile inputs produce `PARTIAL`. It never returns BUY, SELL or a profit probability.
+`technical-confluence-v1.0.0` combines price/EMA20/EMA50 alignment, RSI regime, ATR percentage, nearest qualified unbroken support/resistance and estimated profile POC. ATR below 1.2% of price is `LOW`, above 3% is `HIGH`, and the inclusive middle regime is `NORMAL`. It returns trend, momentum, volatility, structure, volume context and `HIGH/MEDIUM/LOW` alignment. Missing structural/profile inputs produce `PARTIAL`. It never returns BUY, SELL or a profit probability.
 
 ## Alert definitions
 

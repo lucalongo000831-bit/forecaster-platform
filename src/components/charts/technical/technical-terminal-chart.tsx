@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, LogicalRange, MouseEventParams, SeriesType, Time } from "lightweight-charts";
-import { anchoredVwap, calculateIndicatorSeries, calculateVolumeProfile, drawingDefinition, fibonacciExtension, fibonacciRetracement, heikinAshi, normalizeSeriesAtCommonStart } from "@/engines/technical";
+import { anchoredVwap, calculateIndicatorSeries, calculateVolumeProfile, drawingDefinition, fibonacciExtension, fibonacciRetracement, heikinAshi, horizontalRayDrawingSegment, normalizeSeriesAtCommonStart, rectangleDrawingSegments } from "@/engines/technical";
 import type { TechnicalChartDataset, TechnicalChartType, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel } from "@/types";
 import { kairoChartTheme } from "../chart-theme";
 
@@ -271,9 +271,9 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       const width = selected ? 3 : 2;
       if (drawing.type === "horizontal" && drawing.points[0]) addPriceLine(drawing.points[0].price, "Drawing", color, width);
       if (drawing.type === "trend" && drawing.points.length === 2) addSeries(drawing.points, color, width);
-      if (drawing.type === "horizontal-ray" && drawing.points[0]) addSeries([drawing.points[0], { timestamp: dataset.bars.at(-1)!.timestamp, price: drawing.points[0].price }], color, width);
+      if (drawing.type === "horizontal-ray" && drawing.points[0]) addSeries(horizontalRayDrawingSegment(drawing.points[0], dataset.bars.at(-1)!.timestamp), color, width);
       if (drawing.type === "vertical" && drawing.points[0]) addSeries([{ timestamp: drawing.points[0].timestamp, price: Math.min(...dataset.bars.map((bar) => bar.low)) }, { timestamp: new Date(Date.parse(drawing.points[0].timestamp) + 1000).toISOString(), price: Math.max(...dataset.bars.map((bar) => bar.high)) }], color, width);
-      if (drawing.type === "rectangle" && drawing.points.length === 2) { const [a, b] = drawing.points; addSeries([a, { timestamp: b.timestamp, price: a.price }, b, { timestamp: a.timestamp, price: b.price }, a], color, width); }
+      if (drawing.type === "rectangle" && drawing.points.length === 2) rectangleDrawingSegments(drawing.points[0], drawing.points[1]).forEach((segment) => addSeries(segment, color, width));
       if (drawing.type === "fib-retracement" && drawing.points.length === 2) fibonacciRetracement(drawing.points[0].price, drawing.points[1].price).forEach((level) => addPriceLine(level.price, `${level.ratio} — ${priceLabel(level.price, precision)}`, color));
       if (drawing.type === "fib-extension" && drawing.points.length === 3) fibonacciExtension(drawing.points[0].price, drawing.points[1].price, drawing.points[2].price).forEach((level) => addPriceLine(level.price, `${level.ratio} — ${priceLabel(level.price, precision)}`, color));
       if (drawing.type === "text" && drawing.points[0]) addPriceLine(drawing.points[0].price, drawing.text ?? "Note", color, width);
