@@ -8,6 +8,7 @@ The product identity and assets are replaceable. The project does not scrape the
 
 - Global search for equities, ETFs, funds, indices, FX and crypto, including international suffixes.
 - Server-side quotes, OHLCV charts, profiles, fundamentals, statements, ratios, analyst targets, news and calendars.
+- Technical Chart V2 with real OHLCV, Heikin Ashi display, Fibonacci/advanced drawings, deterministic support/resistance, visible-range bar-derived volume profile, anchored VWAP, linked multi-chart layouts, templates and descriptive confluence.
 - Technical indicators, multi-factor signals, market regime, seasonality, targets, DCF, risk plans and probabilistic forecasts.
 - Point-in-time backtesting with fees, spread, slippage, next-session execution and explicit bias controls.
 - Secure credentials authentication, HttpOnly sessions and per-user watchlists, portfolio ledgers, alerts and internal notifications.
@@ -118,6 +119,8 @@ Core boundaries:
 - `src/data/mock`: explicit, centralized demo fallback only; never personal data.
 - `src/ai`: server-only OpenAI client, versioned prompt, context, tool registry, cost controls and agent loop.
 - `src/db`: PostgreSQL schema and migrations, including private Kairo conversation memory.
+
+The Technical workspace is available at `/instrument/[market]/[symbol]/technical`. V2 keeps provider access server-side, preserves and safely migrates V1 local preferences without overwriting the V1 key, and performs drawing/profile/level/confluence interactions without provider refetches. Formulas, persistence policy, performance choices and known limitations are documented in [Technical Chart V2](docs/TECHNICAL_CHART_V2.md).
 
 ## API surface
 

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { SEASONALITY_HISTORICAL_WINDOWS, analyzeSeasonality, type SeasonalityAnalysis, type SeasonalityAssetClass } from "../src/engines/seasonality";
 import type { MarketChartPoint } from "../src/types";
 
@@ -46,6 +46,18 @@ async function mockSeasonalityAnalysis(page: Page) {
     const symbol = new URL(route.request().url()).searchParams.get("symbol") ?? "NVDA";
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: seasonalityAuditAnalysis(symbol), meta: { source: "e2e-audit" } }) });
   });
+}
+
+async function getCompanyAnalysisWithConnectionRetry(request: APIRequestContext, symbol: string) {
+  const url = `/api/company/${encodeURIComponent(symbol)}/analysis`;
+  const options = { headers: { "x-forwarded-for": `198.51.100.${210 + symbol.length}` }, timeout: 60_000 };
+  try {
+    return await request.get(url, options);
+  } catch (error) {
+    if (!(error instanceof Error) || !/ECONNRESET|socket hang up/i.test(error.message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return request.get(url, options);
+  }
 }
 
 test("dashboard, navigation and legal disclosure render", async ({ page }) => {
@@ -241,7 +253,7 @@ test("company intelligence renders a complete cached flow or a controlled provid
 
 test("non-company instruments never receive fabricated corporate analysis", async ({ request }) => {
   for (const symbol of ["SPY", "^GSPC", "BTC-USD"]) {
-    const response = await request.get(`/api/company/${encodeURIComponent(symbol)}/analysis`, { headers: { "x-forwarded-for": `198.51.100.${210 + symbol.length}` }, timeout: 60_000 });
+    const response = await getCompanyAnalysisWithConnectionRetry(request, symbol);
     expect([200, 404, 429, 502, 503, 504]).toContain(response.status());
     const payload = await response.json();
     if (response.ok()) expect(payload).toMatchObject({ data: { applicable: false, verdict: "INSUFFICIENT_DATA" } });

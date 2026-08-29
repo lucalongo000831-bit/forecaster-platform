@@ -66,6 +66,7 @@ const IDENTITIES: Record<string, FixtureIdentity> = {
 };
 
 const chartCache = new Map<string, MarketChartPoint[]>();
+const intradayChartCache = new Map<string, MarketChartPoint[]>();
 
 export function isDeterministicE2EProviderEnabled(source: Record<string, string | undefined> = process.env) {
   return source[DETERMINISTIC_E2E_FLAG] === "true"
@@ -120,6 +121,33 @@ function history(symbolInput: string) {
   return scaled;
 }
 
+function hourlyHistory(symbolInput: string) {
+  const { symbol, value } = identity(symbolInput);
+  const cached = intradayChartCache.get(symbol);
+  if (cached) return cached;
+  const crypto = symbol.endsWith("-USD");
+  const points: MarketChartPoint[] = [];
+  let close = value.price * 0.92;
+  let observation = 0;
+  for (let dayOffset = 31; dayOffset >= 0; dayOffset -= 1) {
+    const dayStart = Date.parse(FIXTURE_AS_OF.slice(0, 10)) - dayOffset * 86_400_000;
+    const day = new Date(dayStart).getUTCDay();
+    if (!crypto && [0, 6].includes(day)) continue;
+    for (let hour = 0; hour < 8; hour += 1) {
+      const timestamp = dayStart + hour * 3_600_000;
+      const drift = 0.00035 + Math.sin(observation / 9) * 0.003 + Math.cos(observation / 31) * 0.0015;
+      const open = close;
+      close = Math.max(0.01, close * Math.exp(drift));
+      points.push({ timestamp: new Date(timestamp).toISOString(), open, high: Math.max(open, close) * 1.003, low: Math.min(open, close) * 0.997, close, adjustedClose: close, volume: 150_000 + observation * 317 });
+      observation += 1;
+    }
+  }
+  const scale = value.price / points.at(-1)!.close;
+  const scaled = points.map((point) => ({ ...point, open: point.open * scale, high: point.high * scale, low: point.low * scale, close: point.close * scale, adjustedClose: point.adjustedClose! * scale }));
+  intradayChartCache.set(symbol, scaled);
+  return scaled;
+}
+
 function rangeStart(range: ChartRange) {
   const days: Partial<Record<ChartRange, number>> = { "1D": 1, "5D": 5, "1M": 31, "3M": 93, "6M": 186, YTD: 233, "1Y": 366, "5Y": 1_827, "10Y": 3_653 };
   return days[range] ? Date.parse(FIXTURE_AS_OF) - days[range]! * 86_400_000 : Number.NEGATIVE_INFINITY;
@@ -169,8 +197,9 @@ export class DeterministicE2EProvider {
   quotes(symbols: string[]) { return Promise.resolve(result(symbols.map(quote))); }
   chart(symbolInput: string, range: ChartRange, interval?: string | null) {
     const { symbol, value } = identity(symbolInput);
-    const points = history(symbol).filter((point) => Date.parse(point.timestamp) >= rangeStart(range));
-    const data: MarketChartDto = { symbol, currency: value.currency, exchange: value.exchange, range, interval: intervalFor(range, interval), previousClose: points.at(-2)?.close ?? null, isDelayed: true, asOf: FIXTURE_AS_OF, points, source: "mock" };
+    const resolvedInterval = intervalFor(range, interval);
+    const points = (resolvedInterval === "1h" || resolvedInterval === "60m" ? hourlyHistory(symbol) : history(symbol)).filter((point) => Date.parse(point.timestamp) >= rangeStart(range));
+    const data: MarketChartDto = { symbol, currency: value.currency, exchange: value.exchange, range, interval: resolvedInterval, previousClose: points.at(-2)?.close ?? null, isDelayed: true, asOf: FIXTURE_AS_OF, points, source: "mock" };
     return Promise.resolve(result(data));
   }
   marketStatus(market = "US") { const data: MarketStatus = { market, state: "closed", asOf: FIXTURE_AS_OF, nextOpen: "2026-08-21T13:30:00.000Z", nextClose: "2026-08-21T20:00:00.000Z" }; return Promise.resolve(result(data)); }
