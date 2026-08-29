@@ -30,6 +30,7 @@ test("technical workspace is responsive, persistent and indicator changes never 
   page.on("request", (request) => { if (request.url().includes("/api/analysis/technical-chart?")) technicalRequests += 1; });
   await page.goto("/instrument/nasdaqgs/nvda/technical", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Technical chart", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add comparison", exact: true })).toBeVisible();
   const chart = page.getByTestId("technical-terminal-chart");
   await expect(chart).toHaveAttribute("data-chart-ready", "true", { timeout: 30_000 });
   await expect(page.getByText("Corporate-action adjusted OHLC")).toBeVisible();
