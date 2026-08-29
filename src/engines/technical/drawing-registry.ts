@@ -1,4 +1,4 @@
-import type { TechnicalDrawingType } from "@/types";
+import type { TechnicalDrawingPoint, TechnicalDrawingType } from "@/types";
 
 export interface TechnicalDrawingDefinition {
   id: TechnicalDrawingType;
@@ -22,4 +22,22 @@ export const TECHNICAL_DRAWING_REGISTRY: readonly TechnicalDrawingDefinition[] =
 
 export function drawingDefinition(type: TechnicalDrawingType) {
   return TECHNICAL_DRAWING_REGISTRY.find((definition) => definition.id === type) ?? null;
+}
+
+export function rectangleDrawingSegments(anchorA: TechnicalDrawingPoint, anchorB: TechnicalDrawingPoint): TechnicalDrawingPoint[][] {
+  const topRight = { timestamp: anchorB.timestamp, price: anchorA.price };
+  const bottomLeft = { timestamp: anchorA.timestamp, price: anchorB.price };
+  return [
+    [anchorA, topRight],
+    [topRight, anchorB],
+    [anchorB, bottomLeft],
+    [bottomLeft, anchorA],
+  ];
+}
+
+export function horizontalRayDrawingSegment(anchor: TechnicalDrawingPoint, datasetEndTimestamp: string): TechnicalDrawingPoint[] {
+  const anchorTime = Date.parse(anchor.timestamp);
+  const datasetEnd = Date.parse(datasetEndTimestamp);
+  const end = Number.isFinite(datasetEnd) ? Math.max(datasetEnd, anchorTime + 1_000) : anchorTime + 1_000;
+  return [anchor, { timestamp: new Date(end).toISOString(), price: anchor.price }];
 }

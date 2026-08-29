@@ -95,6 +95,32 @@ interface SwingCluster {
   center: number;
 }
 
+export function scoreTechnicalLevelCluster(points: SwingPoint[], barCount: number, averageVolume: number, pivotWidth: number) {
+  if (!points.length || barCount < 1 || !Number.isFinite(averageVolume) || averageVolume < 0 || !Number.isInteger(pivotWidth) || pivotWidth < 1) return { score: 0, recency: 0 };
+  const latest = points.reduce((current, point) => point.index > current.index ? point : current);
+  const recency = 1 - Math.min(1, (barCount - 1 - latest.index) / Math.max(1, barCount));
+  const touchScore = Math.min(35, points.length * 7);
+  const reactionScore = Math.min(20, points.reduce((sum, point) => sum + point.reaction, 0) / points.length * 400);
+  const volumeRatio = points.reduce((sum, point) => sum + point.volume, 0) / points.length / Math.max(1, averageVolume);
+  const volumeScore = Math.min(15, volumeRatio * 10);
+  const separated = new Set(points.map((point) => Math.floor(point.index / Math.max(2, pivotWidth)))).size;
+  const separationScore = Math.min(10, separated * 2);
+  return { score: Math.round(Math.min(100, touchScore + recency * 20 + reactionScore + volumeScore + separationScore)), recency };
+}
+
+export function classifyTechnicalLevel(points: SwingPoint[], current: number, zoneLow: number, zoneHigh: number, testingTolerance: number, stale: boolean): Pick<TechnicalLevel, "type" | "status"> {
+  if (!points.length) return { type: current >= (zoneLow + zoneHigh) / 2 ? "SUPPORT" : "RESISTANCE", status: stale ? "STALE" : "ACTIVE" };
+  const ordered = [...points].sort((left, right) => left.index - right.index);
+  const earliestRole = ordered[0].kind === "LOW" ? "SUPPORT" : "RESISTANCE";
+  const latestRole = ordered.at(-1)!.kind === "LOW" ? "SUPPORT" : "RESISTANCE";
+  const roleChanged = points.some((point) => point.kind === "HIGH") && points.some((point) => point.kind === "LOW") && latestRole !== earliestRole;
+  if (roleChanged) return { type: latestRole, status: "FLIPPED" };
+  const broken = earliestRole === "SUPPORT" ? current < zoneLow : current > zoneHigh;
+  if (broken) return { type: earliestRole, status: "BROKEN" };
+  const testing = current >= zoneLow - testingTolerance && current <= zoneHigh + testingTolerance;
+  return { type: earliestRole, status: testing ? "TESTING" : stale ? "STALE" : "ACTIVE" };
+}
+
 export function clusterSwingPoints(points: SwingPoint[], threshold: number): SwingCluster[] {
   if (!Number.isFinite(threshold) || threshold <= 0) return [];
   const clusters: SwingCluster[] = [];
@@ -129,23 +155,11 @@ export function calculateTechnicalLevels(input: MarketChartPoint[], options: { p
     const ordered = [...cluster.points].sort((left, right) => left.index - right.index);
     const latest = ordered.at(-1)!;
     const earliest = ordered[0];
-    const recency = 1 - Math.min(1, (bars.length - 1 - latest.index) / Math.max(1, bars.length));
-    const touchScore = Math.min(35, cluster.points.length * 7);
-    const reactionScore = Math.min(20, cluster.points.reduce((sum, point) => sum + point.reaction, 0) / cluster.points.length * 400);
-    const volumeRatio = cluster.points.reduce((sum, point) => sum + point.volume, 0) / cluster.points.length / Math.max(1, averageVolume);
-    const volumeScore = Math.min(15, volumeRatio * 10);
-    const separated = new Set(cluster.points.map((point) => Math.floor(point.index / Math.max(2, options.pivotWidth ?? 3)))).size;
-    const separationScore = Math.min(10, separated * 2);
-    const score = Math.round(Math.min(100, touchScore + recency * 20 + reactionScore + volumeScore + separationScore));
+    const { score, recency } = scoreTechnicalLevelCluster(cluster.points, bars.length, averageVolume, options.pivotWidth ?? 3);
     if (score < 35) return [];
     const distancePct = (cluster.center / current - 1) * 100;
-    const type = cluster.center <= current ? "SUPPORT" : "RESISTANCE";
-    const hasHigh = cluster.points.some((point) => point.kind === "HIGH");
-    const hasLow = cluster.points.some((point) => point.kind === "LOW");
-    const breached = type === "SUPPORT" ? current < cluster.low : current > cluster.high;
-    const testing = Math.abs(distancePct) <= Math.max(0.35, atr / current * 100);
-    const flipped = hasHigh && hasLow && ((type === "SUPPORT" && latest.kind === "HIGH") || (type === "RESISTANCE" && latest.kind === "LOW"));
-    const status = breached ? "BROKEN" : flipped ? "FLIPPED" : testing ? "TESTING" : recency < 0.2 ? "STALE" : "ACTIVE";
+    const testingTolerance = Math.max(threshold * 0.15, atr, current * 0.0035);
+    const { type, status } = classifyTechnicalLevel(cluster.points, current, cluster.low, cluster.high, testingTolerance, recency < 0.2);
     return [{
       id: `level-${Math.round(cluster.center * 1_000_000)}-${clusterIndex}`,
       type,
@@ -182,7 +196,8 @@ export function calculateVolumeProfile(input: MarketChartPoint[], binCount = 24,
   const volumes = Array<number>(binCount).fill(0);
   for (const bar of bars) {
     const start = Math.max(0, Math.min(binCount - 1, Math.floor((bar.low - low) / size)));
-    const end = Math.max(start, Math.min(binCount - 1, Math.floor((bar.high - low) / size)));
+    const normalizedHigh = (bar.high - low) / size;
+    const end = Math.max(start, Math.min(binCount - 1, Math.ceil(normalizedHigh - 1e-12) - 1));
     const allocation = bar.volume / (end - start + 1);
     for (let index = start; index <= end; index += 1) volumes[index] += allocation;
   }
@@ -235,8 +250,8 @@ export function calculateTechnicalConfluence(bars: MarketChartPoint[], levels: T
   const atrPct = typeof atr === "number" ? atr / close * 100 : null;
   const volatility = atrPct === null ? "UNAVAILABLE" : atrPct < 1.2 ? "LOW" : atrPct > 3 ? "HIGH" : "NORMAL";
   if (atrPct !== null) reasons.push(`ATR is ${atrPct.toFixed(2)}% of price.`);
-  const support = levels.filter((level) => level.type === "SUPPORT").sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0];
-  const resistance = levels.filter((level) => level.type === "RESISTANCE").sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0];
+  const support = levels.filter((level) => level.type === "SUPPORT" && level.status !== "BROKEN" && level.distancePct <= 0).sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0];
+  const resistance = levels.filter((level) => level.type === "RESISTANCE" && level.status !== "BROKEN" && level.distancePct >= 0).sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct))[0];
   const structure = support || resistance ? `${support ? `Support ${Math.abs(support.distancePct).toFixed(1)}% below` : "Support unavailable"}; ${resistance ? `resistance ${Math.abs(resistance.distancePct).toFixed(1)}% above` : "resistance unavailable"}.` : "No qualified structural levels";
   const volume = profile.status === "AVAILABLE" && profile.poc !== null ? `Price ${close >= profile.poc ? "above" : "below"} estimated profile POC.` : "Volume profile unavailable";
   const directional = [trend === "BULLISH" || trend === "BEARISH", momentum === "POSITIVE" || momentum === "NEGATIVE"].filter(Boolean).length;

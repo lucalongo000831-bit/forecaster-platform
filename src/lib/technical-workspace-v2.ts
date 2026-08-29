@@ -158,10 +158,10 @@ function migrateV1(symbol: string, value: unknown): TechnicalWorkspaceV2 {
       if (!Array.isArray(rows)) continue;
       const migrated = rows.flatMap<TechnicalDrawing>((row) => {
         if (!row || typeof row !== "object") return [];
-        const drawing = row as { id?: unknown; type?: unknown; points?: unknown };
-        const sanitized = sanitizeTechnicalDrawing({ ...drawing, visible: true, createdAt: new Date(0).toISOString() });
+        const drawing = row as { id?: unknown; type?: unknown; points?: unknown; visible?: unknown; createdAt?: unknown };
+        const sanitized = sanitizeTechnicalDrawing({ ...drawing, visible: drawing.visible !== false, createdAt: drawing.createdAt ?? new Date(0).toISOString() });
         return sanitized ? [sanitized] : [];
-      });
+      }).slice(0, MAX_TECHNICAL_DRAWINGS_PER_DATASET);
       if (migrated.length) workspace.drawings[technicalDrawingKey(symbol, timeframe)] = migrated;
     }
   }

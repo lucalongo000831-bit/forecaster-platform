@@ -101,10 +101,10 @@ describe("Technical V2 independent quantitative calculations", () => {
       bar(2, 103, 104, 102, 103, 90),
     ], 4, 0.7);
     expect(profile.status).toBe("AVAILABLE");
-    expect(profile.bins.map((bin) => bin.volume)).toEqual([100 / 3, 100 / 3, 100 / 3 + 45, 45]);
-    expect(profile.poc).toBe(102.5);
-    expect(profile.val).toBe(101);
-    expect(profile.vah).toBe(104);
+    expect(profile.bins.map((bin) => bin.volume)).toEqual([50, 50, 45, 45]);
+    expect(profile.poc).toBe(100.5);
+    expect(profile.val).toBe(100);
+    expect(profile.vah).toBe(103);
     expect(profile.bins.filter((bin) => bin.valueArea).reduce((sum, bin) => sum + bin.volume, 0) / profile.totalVolume).toBeGreaterThanOrEqual(0.7);
     expect(profile.methodology).toBe("UNIFORM_BAR_RANGE_ALLOCATION");
   });
