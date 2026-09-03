@@ -8,7 +8,7 @@ The product identity and assets are replaceable. The project does not scrape the
 
 - Global search for equities, ETFs, funds, indices, FX and crypto, including international suffixes.
 - Server-side quotes, OHLCV charts, profiles, fundamentals, statements, ratios, analyst targets, news and calendars.
-- Technical Chart V2 with real OHLCV, Heikin Ashi display, Fibonacci/advanced drawings, deterministic support/resistance, visible-range bar-derived volume profile, anchored VWAP, linked multi-chart layouts, templates and descriptive confluence.
+- Technical Chart V3 with real OHLCV, confirmed market structure and BOS/CHOCH, multi-timeframe structure and support/resistance, fixed/anchored volume profiles, confirmed RSI/MACD divergences, session analytics, linked multi-chart layouts and typed server-side technical alerts.
 - Technical indicators, multi-factor signals, market regime, seasonality, targets, DCF, risk plans and probabilistic forecasts.
 - Point-in-time backtesting with fees, spread, slippage, next-session execution and explicit bias controls.
 - Secure credentials authentication, HttpOnly sessions and per-user watchlists, portfolio ledgers, alerts and internal notifications.
@@ -120,7 +120,7 @@ Core boundaries:
 - `src/ai`: server-only OpenAI client, versioned prompt, context, tool registry, cost controls and agent loop.
 - `src/db`: PostgreSQL schema and migrations, including private Kairo conversation memory.
 
-The Technical workspace is available at `/instrument/[market]/[symbol]/technical`. V2 keeps provider access server-side, preserves and safely migrates V1 local preferences without overwriting the V1 key, and performs drawing/profile/level/confluence interactions without provider refetches. Formulas, persistence policy, performance choices and known limitations are documented in [Technical Chart V2](docs/TECHNICAL_CHART_V2.md).
+The Technical workspace is available at `/instrument/[market]/[symbol]/technical`. V3 keeps provider access server-side, safely migrates V1/V2 preferences without overwriting either source key, and derives structure, profiles, divergences and confluence locally without provider refetches. Authenticated alert definitions use the existing account service, database and scheduled evaluator. Formulas, point-in-time guarantees, persistence, alert freshness policy and limitations are documented in [Technical Chart V3](docs/TECHNICAL_CHART_V3.md); the [V2 methodology](docs/TECHNICAL_CHART_V2.md) remains available for compatibility.
 
 ## API surface
 

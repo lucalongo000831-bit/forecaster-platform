@@ -4,7 +4,7 @@ All production calculations are pure server-side functions, timestamped and vers
 
 ## Versions
 
-- Technical indicators remain backward-compatible at `technical-v1.0.0`; the advanced Technical workspace is `technical-v2.0.0` with separately versioned levels, volume-profile and confluence engines.
+- Technical indicators remain backward-compatible at `technical-v1.0.0`; the advanced workspace is `technical-v3.0.0`, safely migrated from V2, with separately versioned market-structure, divergence, levels, volume-profile and confluence engines.
 - Fundamental scoring: `fundamental-v1.0.1`.
 - Seasonality: `seasonality-v1.0.0`.
 - Multi-horizon signals: `signal-v1.0.0`.

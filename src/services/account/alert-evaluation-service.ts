@@ -7,6 +7,9 @@ import { getSignalAnalysis } from "@/services/analysis/signal-service";
 import { getTechnicalAnalysis } from "@/services/analysis/technical-service";
 import { InternalNotificationChannel } from "@/services/notifications";
 import { getSymbolPoliticalIntelligence } from "@/services/political";
+import { evaluateTechnicalAlertBatch, TECHNICAL_ALERT_CONDITIONS, type TechnicalAlertConditionId } from "@/engines/technical/alert-registry";
+import { getTechnicalChartDataset } from "@/services/analysis/technical-chart-service";
+import type { TechnicalTimeframe } from "@/types";
 import { listPortfolios } from "./portfolio-service";
 
 interface Evaluation { triggered: boolean; observed: number | string | boolean | null; message: string; available: boolean }
@@ -17,13 +20,29 @@ function thresholdOf(configuration: Record<string, unknown>, fallback = 0) { ret
 export async function evaluateActiveAlerts(limit = 100) {
   const database = getDatabase(); const now = new Date();
   const records = await database.select({ alert: alerts, symbol: instruments.canonicalSymbol }).from(alerts).leftJoin(instruments, eq(alerts.instrumentId, instruments.id)).where(eq(alerts.status, "ACTIVE")).limit(limit);
+  const technicalItems = records.flatMap((record) => {
+    if (!TECHNICAL_ALERT_CONDITIONS.includes(record.alert.type as TechnicalAlertConditionId) || !record.symbol) return [];
+    const timeframe = typeof record.alert.configuration.timeframe === "string" ? record.alert.configuration.timeframe : "1h";
+    const cadenceMs = timeframe === "1W" ? 86_400_000 : timeframe === "1D" ? 43_200_000 : 15 * 60_000;
+    if (record.alert.lastEvaluatedAt && now.getTime() - record.alert.lastEvaluatedAt.getTime() < cadenceMs) return [];
+    return [{ id: record.alert.id, condition: record.alert.type as TechnicalAlertConditionId, symbol: record.symbol, timeframe, parameters: record.alert.configuration.parameters ?? {}, previousState: typeof record.alert.configuration.state === "string" ? record.alert.configuration.state : null }];
+  });
+  const technicalResults = new Map((await evaluateTechnicalAlertBatch(technicalItems, async (symbol, timeframe) => {
+    const dataset = await getTechnicalChartDataset(symbol, timeframe as TechnicalTimeframe);
+    return { bars: dataset.data.bars, freshness: dataset.meta.freshnessType };
+  })).map((item) => [item.id, item.evaluation]));
   let evaluated = 0; let triggered = 0; let unavailable = 0; const errors: Array<{ alertId: string; message: string }> = [];
   for (const record of records) {
     const alert = record.alert;
+    if (TECHNICAL_ALERT_CONDITIONS.includes(alert.type as TechnicalAlertConditionId) && !technicalResults.has(alert.id)) continue;
     if (alert.expiresAt && alert.expiresAt <= now) { await database.update(alerts).set({ status: "EXPIRED", lastEvaluatedAt: now, updatedAt: now }).where(eq(alerts.id, alert.id)); continue; }
     try {
-      const configuration = alert.configuration; const threshold = thresholdOf(configuration); let result: Evaluation = { triggered: false, observed: null, message: "Condizione non disponibile", available: false };
-      if (["PRICE_ABOVE", "PRICE_BELOW", "PERCENT_CHANGE", "TARGET_REACHED", "STOP_REACHED"].includes(alert.type) && record.symbol) {
+      const configuration = alert.configuration; const threshold = thresholdOf(configuration); const technicalCondition = TECHNICAL_ALERT_CONDITIONS.includes(alert.type as TechnicalAlertConditionId); const technicalEvaluation = technicalCondition ? technicalResults.get(alert.id) : undefined; let result: Evaluation = { triggered: false, observed: null, message: "Condizione non disponibile", available: false };
+      if (technicalEvaluation) {
+        result = technicalEvaluation;
+        const cooldownMinutes = typeof configuration.cooldownMinutes === "number" ? configuration.cooldownMinutes : 60;
+        if (result.triggered && alert.triggeredAt && now.getTime() - alert.triggeredAt.getTime() < cooldownMinutes * 60_000) result = { ...result, triggered: false, message: `${result.message} Cooldown active.` };
+      } else if (["PRICE_ABOVE", "PRICE_BELOW", "PERCENT_CHANGE", "TARGET_REACHED", "STOP_REACHED"].includes(alert.type) && record.symbol) {
         const quote = (await financialProviderRouter.quote(record.symbol)).data; const above = ["PRICE_ABOVE", "TARGET_REACHED"].includes(alert.type); const observed = alert.type === "PERCENT_CHANGE" ? quote.changePercent : quote.price;
         result = { triggered: alert.type === "PERCENT_CHANGE" ? Math.abs(observed) >= Math.abs(threshold) : above ? observed >= threshold : observed <= threshold, observed, available: true, message: `${record.symbol}: ${alert.type.replaceAll("_", " ")} (${observed.toFixed(2)} vs ${threshold.toFixed(2)})` };
       } else if (["VOLUME_ANOMALY", "RSI", "MACD_CROSS", "BREAKOUT", "BREAKDOWN"].includes(alert.type) && record.symbol) {
@@ -64,10 +83,11 @@ export async function evaluateActiveAlerts(limit = 100) {
         const portfolios = await listPortfolios(alert.userId); const concentration = Math.max(0, ...portfolios.map((portfolio) => portfolio.concentration)); result = { triggered: concentration >= (threshold || 35), observed: concentration, available: portfolios.length > 0, message: `Portfolio concentration ${concentration.toFixed(2)}%` };
       }
       const politicalAlert = alert.type.startsWith("POLITICAL_");
-      const nextConfiguration = { ...configuration, lastObserved: result.observed, lastOutcome: result.available ? result.triggered ? "TRIGGERED" : "CLEAR" : "UNAVAILABLE", ...(alert.type === "MACD_CROSS" ? { lastMacdHistogram: result.observed } : {}), ...(["NEW_SIGNAL", "SIGNAL_CHANGE"].includes(alert.type) ? { lastSignal: result.observed } : {}), ...(politicalAlert ? { lastPoliticalDisclosureDate: typeof result.observed === "string" && /^\d{4}-\d{2}-\d{2}$/.test(result.observed) ? result.observed : configuration.lastPoliticalDisclosureDate, lastPoliticalDirection: alert.type === "POLITICAL_DIRECTION_CHANGE" ? result.observed : configuration.lastPoliticalDirection } : {}) };
+      const nextConfiguration = { ...configuration, lastObserved: result.observed, lastOutcome: result.available ? result.triggered ? "TRIGGERED" : "CLEAR" : "UNAVAILABLE", ...(technicalCondition ? { state: technicalEvaluation?.state ?? configuration.state ?? null, evaluationState: result.available ? result.triggered ? "TRIGGERED" : "EVALUATED" : "DEFERRED_DATA_UNAVAILABLE", lastDeferredReason: result.available ? null : technicalEvaluation?.reason ?? "DATA_UNAVAILABLE" } : {}), ...(alert.type === "MACD_CROSS" ? { lastMacdHistogram: result.observed } : {}), ...(["NEW_SIGNAL", "SIGNAL_CHANGE"].includes(alert.type) ? { lastSignal: result.observed } : {}), ...(politicalAlert ? { lastPoliticalDisclosureDate: typeof result.observed === "string" && /^\d{4}-\d{2}-\d{2}$/.test(result.observed) ? result.observed : configuration.lastPoliticalDisclosureDate, lastPoliticalDirection: alert.type === "POLITICAL_DIRECTION_CHANGE" ? result.observed : configuration.lastPoliticalDirection } : {}) };
       if (result.triggered) {
-        const delivered = await internalChannel.deliver({ alertId: alert.id, deduplicationKey: `${alert.type}:${String(result.observed)}:${now.toISOString().slice(0, 10)}`, payload: { message: result.message, observed: result.observed, threshold, evaluatedAt: now.toISOString(), channel: "internal" } });
-        if (delivered.delivered) { triggered += 1; await database.update(alerts).set({ status: "TRIGGERED", configuration: nextConfiguration, lastEvaluatedAt: now, triggeredAt: now, updatedAt: now }).where(eq(alerts.id, alert.id)); }
+        const delivered = await internalChannel.deliver({ alertId: alert.id, deduplicationKey: `${alert.type}:${String(technicalEvaluation?.state ?? result.observed)}:${now.toISOString().slice(0, 10)}`, payload: { message: result.message, observed: result.observed, threshold, evaluatedAt: now.toISOString(), channel: "internal", modelVersion: technicalCondition ? configuration.modelVersion : undefined } });
+        if (delivered.delivered) triggered += 1;
+        await database.update(alerts).set({ status: technicalCondition ? "ACTIVE" : "TRIGGERED", configuration: nextConfiguration, lastEvaluatedAt: now, triggeredAt: delivered.delivered ? now : alert.triggeredAt, updatedAt: now }).where(eq(alerts.id, alert.id));
       } else await database.update(alerts).set({ configuration: nextConfiguration, lastEvaluatedAt: now, updatedAt: now }).where(eq(alerts.id, alert.id));
       evaluated += 1; if (!result.available) unavailable += 1;
     } catch (error) { errors.push({ alertId: alert.id, message: error instanceof Error ? error.message : "Evaluation failed" }); }
