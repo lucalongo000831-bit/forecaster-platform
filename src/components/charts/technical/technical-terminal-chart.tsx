@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { IChartApi, IPriceLine, ISeriesApi, LogicalRange, MouseEventParams, SeriesType, Time } from "lightweight-charts";
+import type { IChartApi, IPriceLine, ISeriesApi, ISeriesMarkersPluginApi, LogicalRange, MouseEventParams, SeriesMarker, SeriesType, Time } from "lightweight-charts";
 import { anchoredVwap, calculateIndicatorSeries, calculateVolumeProfile, drawingDefinition, fibonacciExtension, fibonacciRetracement, heikinAshi, horizontalRayDrawingSegment, normalizeSeriesAtCommonStart, rectangleDrawingSegments } from "@/engines/technical";
-import type { TechnicalChartDataset, TechnicalChartType, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel } from "@/types";
+import type { MarketStructureResult, MtfTechnicalLevel, RangedVolumeProfileResult, TechnicalChartDataset, TechnicalChartType, TechnicalDivergence, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel, TechnicalSessionAnalytics } from "@/types";
 import { kairoChartTheme } from "../chart-theme";
 
 export type { TechnicalDrawing } from "@/types";
@@ -22,7 +22,7 @@ function pricePrecision(bars: TechnicalChartDataset["bars"]) {
 }
 function priceLabel(value: number, precision: number) { return value.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision }); }
 
-export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, panelId = "panel-1", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView }: {
+export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, marketStructure = null, structureDensity = "MAJOR", mtfLevels = [], divergences = [], rangedProfiles = [], sessionAnalytics = null, panelId = "panel-1", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView }: {
   dataset: TechnicalChartDataset;
   comparisons: TechnicalChartDataset[];
   chartType: TechnicalChartType;
@@ -33,6 +33,12 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   selectedDrawingId?: string | null;
   autoLevels?: TechnicalLevel[];
   showVolumeProfile?: boolean;
+  marketStructure?: MarketStructureResult | null;
+  structureDensity?: "MAJOR" | "ALL";
+  mtfLevels?: MtfTechnicalLevel[];
+  divergences?: TechnicalDivergence[];
+  rangedProfiles?: Array<RangedVolumeProfileResult & { id: string }>;
+  sessionAnalytics?: TechnicalSessionAnalytics | null;
   panelId?: string;
   linkedCrosshair?: LinkedCrosshair | null;
   onCrosshairTime?: (panelId: string, timestamp: string | null) => void;
@@ -45,8 +51,10 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const primaryRef = useRef<AnySeries | null>(null);
   const drawingSeriesRef = useRef<AnySeries[]>([]);
   const drawingLinesRef = useRef<IPriceLine[]>([]);
+  const markerPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const pendingAnchorsRef = useRef<TechnicalDrawingPoint[]>([]);
   const visibleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linkedReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingLinkedCrosshairRef = useRef(false);
   const createDrawingRef = useRef(onCreateDrawing);
   const crosshairCallbackRef = useRef(onCrosshairTime);
@@ -195,7 +203,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       });
       crosshairHandler = (parameter) => {
         if (!parameter.point || !parameter.time) {
-          setTooltip(null);
+          setTooltip((current) => current === null ? current : null);
           if (!applyingLinkedCrosshairRef.current) crosshairCallbackRef.current?.(panelId, null);
           return;
         }
@@ -206,7 +214,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         });
         const hostWidth = hostRef.current?.clientWidth ?? 560;
         const timestamp = timestampFromTime(parameter.time);
-        setTooltip({ left: Math.max(8, Math.min(parameter.point.x + 12, hostWidth - 217)), label: new Date(timestamp).toLocaleString(), values });
+        const nextTooltip = { left: Math.max(8, Math.min(parameter.point.x + 12, hostWidth - 217)), label: new Date(timestamp).toLocaleString(), values };
+        setTooltip((current) => current?.left === nextTooltip.left && current.label === nextTooltip.label && current.values.length === nextTooltip.values.length && current.values.every((value, index) => value === nextTooltip.values[index]) ? current : nextTooltip);
         if (!applyingLinkedCrosshairRef.current) crosshairCallbackRef.current?.(panelId, timestamp);
       };
       chart.subscribeCrosshairMove(crosshairHandler);
@@ -241,6 +250,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       primaryRef.current = null;
       drawingSeriesRef.current = [];
       drawingLinesRef.current = [];
+      markerPluginRef.current = null;
       setReady(false);
     };
   }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId]);
@@ -253,6 +263,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     for (const line of drawingLinesRef.current) try { primary.removePriceLine(line); } catch { /* Lifecycle cleanup. */ }
     for (const series of drawingSeriesRef.current) try { chart.removeSeries(series); } catch { /* Lifecycle cleanup. */ }
     drawingLinesRef.current = [];
+    markerPluginRef.current?.detach();
+    markerPluginRef.current = null;
     drawingSeriesRef.current = [];
     const precision = pricePrecision(dataset.bars);
     const addPriceLine = (price: number, title: string, color: string, width: 1 | 2 | 3 = 1) => drawingLinesRef.current.push(primary.createPriceLine({ price, color, lineWidth: width, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title }));
@@ -265,6 +277,22 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       drawingSeriesRef.current.push(series);
     };
     autoLevelsRef.current.forEach((level) => addPriceLine(level.centerPrice, `${level.type} ${level.score}`, level.type === "SUPPORT" ? "rgba(24,168,121,.72)" : "rgba(224,94,114,.72)"));
+    mtfLevels.slice(0, 8).forEach((level) => addPriceLine(level.centerPrice, `${level.type} · ${level.timeframes.join("+")}`, level.type === "SUPPORT" ? "rgba(21,126,100,.82)" : "rgba(190,70,94,.82)", level.confluenceCount > 1 ? 2 : 1));
+    rangedProfiles.filter((profile) => profile.status === "AVAILABLE").slice(0, 5).forEach((profile) => {
+      const prefix = profile.kind === "FIXED" ? "FIX" : "ANCH";
+      const color = profile.kind === "FIXED" ? "rgba(82,103,232,.78)" : "rgba(147,51,234,.72)";
+      if (profile.poc !== null) addPriceLine(profile.poc, `${prefix} POC`, color, 2);
+      if (profile.vah !== null) addPriceLine(profile.vah, `${prefix} VAH`, color);
+      if (profile.val !== null) addPriceLine(profile.val, `${prefix} VAL`, color);
+    });
+    if (sessionAnalytics?.status === "AVAILABLE") {
+      if (sessionAnalytics.previousDayHigh !== null) addPriceLine(sessionAnalytics.previousDayHigh, "PDH", "rgba(82,103,232,.62)");
+      if (sessionAnalytics.previousDayLow !== null) addPriceLine(sessionAnalytics.previousDayLow, "PDL", "rgba(82,103,232,.62)");
+      if (sessionAnalytics.previousClose !== null) addPriceLine(sessionAnalytics.previousClose, "PDC", "rgba(102,117,139,.62)");
+      if (sessionAnalytics.todayOpen !== null) addPriceLine(sessionAnalytics.todayOpen, "OPEN", "rgba(244,165,37,.72)");
+      if (sessionAnalytics.openingRange15) { addPriceLine(sessionAnalytics.openingRange15.high, "OR15 H", "rgba(32,164,168,.62)"); addPriceLine(sessionAnalytics.openingRange15.low, "OR15 L", "rgba(32,164,168,.62)"); }
+      if (sessionAnalytics.openingRange30) { addPriceLine(sessionAnalytics.openingRange30.high, "OR30 H", "rgba(32,164,168,.45)"); addPriceLine(sessionAnalytics.openingRange30.low, "OR30 L", "rgba(32,164,168,.45)"); }
+    }
     drawings.filter((drawing) => drawing.visible).forEach((drawing) => {
       const selected = drawing.id === selectedDrawingId;
       const color = selected ? "#5267e8" : "#f4a525";
@@ -282,7 +310,13 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         addSeries(values.flatMap<TechnicalDrawingPoint>((value, index) => value === null ? [] : [{ timestamp: dataset.bars[index].timestamp, price: value }]), color, width);
       }
     });
-  }, [autoLevelsSignature, dataset.bars, drawings, ready, selectedDrawingId]);
+    divergences.slice(-12).forEach((divergence) => addSeries([{ timestamp: divergence.pricePivot1.timestamp, price: divergence.pricePivot1.price }, { timestamp: divergence.pricePivot2.timestamp, price: divergence.pricePivot2.price }], divergence.direction === "BULLISH" ? "rgba(24,168,121,.82)" : "rgba(224,94,114,.82)", 2));
+    const markers: SeriesMarker<Time>[] = [];
+    marketStructure?.swings.filter((swing) => structureDensity === "ALL" || swing.hierarchy === "MAJOR").slice(-30).forEach((swing) => markers.push({ time: time(swing.timestamp), position: swing.kind === "HIGH" ? "aboveBar" : "belowBar", color: swing.kind === "HIGH" ? "#66758b" : "#5267e8", shape: "circle", text: swing.label, size: 1 }));
+    marketStructure?.events.slice(-12).forEach((event) => markers.push({ time: time(event.confirmationTimestamp), position: event.direction === "BULLISH" ? "belowBar" : "aboveBar", color: event.type === "CHOCH" ? "#f4a525" : event.direction === "BULLISH" ? "#18a879" : "#e05e72", shape: event.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: event.type, size: 1.3 }));
+    divergences.slice(-8).forEach((divergence) => markers.push({ time: time(divergence.confirmedAt), position: divergence.direction === "BULLISH" ? "belowBar" : "aboveBar", color: divergence.direction === "BULLISH" ? "#18a879" : "#e05e72", shape: divergence.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: `${divergence.indicator} DIV`, size: 1 }));
+    if (markers.length) markerPluginRef.current = library.createSeriesMarkers(primary, markers);
+  }, [autoLevelsSignature, dataset.bars, divergences, drawings, marketStructure, mtfLevels, rangedProfiles, ready, selectedDrawingId, sessionAnalytics, structureDensity]);
 
   useEffect(() => {
     if (!ready || !linkedCrosshair || linkedCrosshair.sourcePanelId === panelId) return;
@@ -290,6 +324,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     const primary = primaryRef.current;
     if (!chart || !primary) return;
     applyingLinkedCrosshairRef.current = true;
+    if (linkedReleaseTimerRef.current) clearTimeout(linkedReleaseTimerRef.current);
     if (!linkedCrosshair.timestamp) chart.clearCrosshairPosition();
     else {
       const linkedTime = time(linkedCrosshair.timestamp);
@@ -297,7 +332,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       if (target) chart.setCrosshairPosition(target.close, time(target.timestamp), primary);
       else chart.clearCrosshairPosition();
     }
-    queueMicrotask(() => { applyingLinkedCrosshairRef.current = false; });
+    linkedReleaseTimerRef.current = setTimeout(() => { applyingLinkedCrosshairRef.current = false; }, 0);
+    return () => { if (linkedReleaseTimerRef.current) clearTimeout(linkedReleaseTimerRef.current); };
   }, [dataset.bars, linkedCrosshair, panelId, ready]);
 
   const definition = drawingTool === "cursor" ? null : drawingDefinition(drawingTool);
