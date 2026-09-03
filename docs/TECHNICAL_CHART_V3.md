@@ -68,7 +68,7 @@ V3 reuses the existing authenticated alert table, ownership checks, internal not
 
 The typed registry supports price crossing a level, entering/exiting a zone, confirmed BOS/CHOCH, RSI crossing, MACD line/signal crossing, confirmed bullish/bearish RSI or MACD divergence, price crossing EMA or Anchored VWAP, and price crossing POC/VAH/VAL. Parameters are validated with bounded schemas; arbitrary expressions and `eval` are not allowed.
 
-The Vercel scheduler calls `/api/cron/alerts` every 15 minutes. Active technical rules are grouped by canonical `symbol:timeframe`; one server dataset evaluates every rule in that group. First evaluation establishes state without notifying. Later notifications occur only on a state transition or a newly confirmed event. A default 60-minute cooldown (one day for 1D/1W rules created by the chart) prevents duplicate delivery. Technical rules remain active after a trigger.
+The Vercel Hobby-compatible scheduler calls `/api/cron/alerts` once per day. Active technical rules are grouped by canonical `symbol:timeframe`; one server dataset evaluates every rule in that group. First evaluation establishes state without notifying. Later notifications occur only on a state transition or a newly confirmed event. A default 60-minute cooldown (one day for 1D/1W rules created by the chart) prevents duplicate delivery. Technical rules remain active after a trigger. A higher-frequency schedule requires a Vercel plan that supports it or an authenticated external scheduler; the UI never claims near-live monitoring from the daily schedule.
 
 `STALE`, `UNAVAILABLE`, request failure or insufficient inputs produce `DEFERRED_DATA_UNAVAILABLE` and never a notification. Delayed/end-of-day data remains honestly labelled by its provider metadata. Alert CRUD remains user-scoped in SQL (`userId` and alert ID); one account cannot update or delete another account's rule. Existing alerts and schema remain backward compatible, so no database migration is required.
 
@@ -91,5 +91,5 @@ Known limitations:
 - divergence is descriptive and not a guaranteed reversal signal;
 - external provider history limits can leave a timeframe or session metric unavailable;
 - fixed/anchored ranges must currently lie within the loaded Technical dataset; no direct provider call is made from the client;
-- Vercel cron cadence is 15 minutes, so 1m/5m conditions are monitored near-live rather than tick-by-tick;
+- the repository's Vercel Hobby cron cadence is daily, so technical conditions are not near-live; a supported higher-frequency scheduler is required for intraday monitoring;
 - triggered events have durable notification history; evaluated/deferred state is the latest durable state, not an unbounded per-run audit log.
