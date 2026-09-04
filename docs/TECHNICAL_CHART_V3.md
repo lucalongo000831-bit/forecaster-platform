@@ -36,7 +36,7 @@ The structure matrix evaluates 15m, 1h, 4h and 1D data already deduplicated by t
 
 MTF levels reuse V2's independently validated S/R engine. Each candidate retains its source timeframe. Documented structural weights are 1m 0.50, 5m 0.65, 15m 0.80, 30m 0.90, 1h 1.00, 4h 1.30, 1D 1.70 and 1W 2.10. Same-role candidates cluster when their weighted centers are within the greatest of 0.4% of price, 1.5 times the current cluster width, or the candidate zone width. The center is timeframe-weighted. The score is the weighted source score plus eight points for each additional represented timeframe, capped at 100. At most eight qualified zones render.
 
-Each timeframe is computed only from the supplied prefix. A historical intraday query never reads future daily data.
+Each timeframe is computed only from the supplied prefix. Point-in-time callers can supply an `asOfTimestamp`; intraday bars are available only after their duration has elapsed, while a daily bar is available only after the exchange-local close. This prevents an unfinished 4h or 1D candle from leaking its future high, low or close into historical intraday analysis. Current/live callers that omit an as-of timestamp continue to use the provider's completed canonical dataset.
 
 ## Volume Profile V3
 
@@ -58,7 +58,7 @@ A divergence is available only after the second price pivot's right-side confirm
 
 ## Session analytics
 
-For equities and ETFs with actual 1m/5m/15m/30m data, the engine calculates previous-session high, low and close plus current-session open. OR15 and OR30 require source resolution no coarser than the requested opening range and a complete number of bars. Exchange-local dates use New York by default, Europe/Rome for Milan, Europe/London for London and Asia/Tokyo for Tokyo identifiers.
+For equities and ETFs with actual 1m/5m/15m/30m data, the engine calculates previous-session high, low and close plus current-session open. OR15 and OR30 require source resolution no coarser than the requested opening range, the true exchange opening bar and a complete number of bars as of the requested instant. Exchange-local dates and clocks use New York by default, Europe/Rome for Milan, Europe/London for London and Asia/Tokyo for Tokyo identifiers, including DST conversion through `Intl.DateTimeFormat`.
 
 Crypto is explicitly `CRYPTO_24_7` and does not inherit equity open or opening-range semantics. Those fields remain unavailable rather than being relabelled as an exchange session.
 
@@ -68,9 +68,11 @@ V3 reuses the existing authenticated alert table, ownership checks, internal not
 
 The typed registry supports price crossing a level, entering/exiting a zone, confirmed BOS/CHOCH, RSI crossing, MACD line/signal crossing, confirmed bullish/bearish RSI or MACD divergence, price crossing EMA or Anchored VWAP, and price crossing POC/VAH/VAL. Parameters are validated with bounded schemas; arbitrary expressions and `eval` are not allowed.
 
-The Vercel Hobby-compatible scheduler calls `/api/cron/alerts` once per day. Active technical rules are grouped by canonical `symbol:timeframe`; one server dataset evaluates every rule in that group. First evaluation establishes state without notifying. Later notifications occur only on a state transition or a newly confirmed event. A default 60-minute cooldown (one day for 1D/1W rules created by the chart) prevents duplicate delivery. Technical rules remain active after a trigger. A higher-frequency schedule requires a Vercel plan that supports it or an authenticated external scheduler; the UI never claims near-live monitoring from the daily schedule.
+The Vercel Hobby-compatible scheduler calls `/api/cron/alerts` once per day. Active technical rules are grouped by canonical `symbol:timeframe`; one server dataset evaluates every rule in that group. First evaluation establishes state without notifying. Later notifications occur only when the persisted state changes or a newly confirmed event appears; repeatedly evaluating the same latest bar cannot retrigger a crossing. A default 60-minute cooldown (one day for 1D/1W rules created by the chart) prevents duplicate delivery. A transition suppressed during cooldown updates the durable state and is recorded as `COOLDOWN_SUPPRESSED`; it is not delivered later as a stale notification. Technical rules remain active after a trigger.
 
-`STALE`, `UNAVAILABLE`, request failure or insufficient inputs produce `DEFERRED_DATA_UNAVAILABLE` and never a notification. Delayed/end-of-day data remains honestly labelled by its provider metadata. Alert CRUD remains user-scoped in SQL (`userId` and alert ID); one account cannot update or delete another account's rule. Existing alerts and schema remain backward compatible, so no database migration is required.
+A daily sampler cannot observe every intermediate 1m/5m/15m/30m transition. Intraday alert definitions therefore mean “compare the latest verified state at each daily evaluation”, not continuous monitoring or notification of every intraday crossing. The builder states this limitation explicitly. A higher-frequency schedule requires a Vercel plan that supports it or an authenticated external scheduler; the UI never claims real-time or near-live alert monitoring from the daily schedule.
+
+`STALE`, `UNAVAILABLE`, request failure or insufficient inputs produce `DEFERRED_DATA_UNAVAILABLE` and never a notification. `DELAYED`, `CACHED` and `END_OF_DAY` datasets may be evaluated by the daily sampler, but their exact freshness class is stored with the latest evaluation and included in triggered notification history; they are never relabelled as live. Alert CRUD remains user-scoped in SQL (`userId` and alert ID); one account cannot update or delete another account's rule. Existing alerts and schema remain backward compatible, so no database migration is required.
 
 Triggered notification history uses the existing `alert_events`. The current evaluated/deferred state and reason are stored in the alert configuration and shown with the rule. Email and SMS are not added.
 

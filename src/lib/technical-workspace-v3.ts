@@ -85,6 +85,9 @@ export function parseTechnicalWorkspaceV3(symbol: string, v3Value: unknown, v2Va
     return fromV2(parseTechnicalWorkspace(symbol, v2Value, v1Value));
   }
   const value = v3Value as Partial<TechnicalWorkspaceV3>;
+  if (!Array.isArray(value.panels) || !value.panels.some((panel) => panel && typeof panel === "object")) {
+    return fromV2(parseTechnicalWorkspace(symbol, v2Value, v1Value));
+  }
   const rawTemplates = Array.isArray(value.customTemplates) ? value.customTemplates : [];
   const v2Candidate = {
     ...value,

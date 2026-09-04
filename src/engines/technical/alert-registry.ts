@@ -61,6 +61,7 @@ export interface TechnicalAlertEvaluation {
   observed: number | string | null;
   message: string;
   reason: string | null;
+  freshness: string | null;
 }
 
 export interface TechnicalAlertBatchItem {
@@ -82,16 +83,20 @@ export async function evaluateTechnicalAlertBatch<T extends { bars: MarketChartP
   }));
   return items.map((item) => {
     const dataset = datasets.get(`${item.symbol.toUpperCase()}:${item.timeframe}`);
-    if (!dataset || dataset instanceof Error || ["STALE", "UNAVAILABLE"].includes(dataset.freshness)) return { id: item.id, evaluation: { available: false, triggered: false, state: item.previousState, observed: null, message: "Technical alert deferred: verified data unavailable.", reason: dataset instanceof Error ? dataset.message : `FRESHNESS_${dataset?.freshness ?? "UNAVAILABLE"}` } satisfies TechnicalAlertEvaluation };
-    try { return { id: item.id, evaluation: evaluateTechnicalAlertCondition(item.condition, item.parameters, dataset.bars, item.previousState) }; }
-    catch { return { id: item.id, evaluation: { available: false, triggered: false, state: item.previousState, observed: null, message: "Technical alert deferred: invalid saved configuration.", reason: "INVALID_CONFIGURATION" } satisfies TechnicalAlertEvaluation }; }
+    if (!dataset || dataset instanceof Error || ["STALE", "UNAVAILABLE"].includes(dataset.freshness)) return { id: item.id, evaluation: { available: false, triggered: false, state: item.previousState, observed: null, message: "Technical alert deferred: verified data unavailable.", reason: dataset instanceof Error ? dataset.message : `FRESHNESS_${dataset?.freshness ?? "UNAVAILABLE"}`, freshness: dataset instanceof Error ? null : dataset?.freshness ?? null } satisfies TechnicalAlertEvaluation };
+    try {
+      const evaluation = evaluateTechnicalAlertCondition(item.condition, item.parameters, dataset.bars, item.previousState);
+      return { id: item.id, evaluation: { ...evaluation, freshness: dataset.freshness, message: `${evaluation.message} Data freshness: ${dataset.freshness}.` } };
+    }
+    catch { return { id: item.id, evaluation: { available: false, triggered: false, state: item.previousState, observed: null, message: "Technical alert deferred: invalid saved configuration.", reason: "INVALID_CONFIGURATION", freshness: dataset.freshness } satisfies TechnicalAlertEvaluation }; }
   });
 }
 
-function crossed(previous: number, current: number, target: number, requested: "UP" | "DOWN" | "EITHER") {
-  const up = previous <= target && current > target;
-  const down = previous >= target && current < target;
-  return { triggered: requested === "UP" ? up : requested === "DOWN" ? down : up || down, state: current > target ? "ABOVE" : current < target ? "BELOW" : "AT", observed: current };
+function crossed(current: number, target: number, requested: "UP" | "DOWN" | "EITHER", previousState: string | null) {
+  const state = current > target ? "ABOVE" : current < target ? "BELOW" : "AT";
+  const up = state === "ABOVE" && (previousState === "BELOW" || previousState === "AT");
+  const down = state === "BELOW" && (previousState === "ABOVE" || previousState === "AT");
+  return { triggered: requested === "UP" ? up : requested === "DOWN" ? down : up || down, state, observed: current };
 }
 
 export function parseTechnicalAlertParameters(condition: TechnicalAlertConditionId, parameters: unknown) {
@@ -100,13 +105,12 @@ export function parseTechnicalAlertParameters(condition: TechnicalAlertCondition
 
 export function evaluateTechnicalAlertCondition(condition: TechnicalAlertConditionId, parametersInput: unknown, input: MarketChartPoint[], previousState: string | null): TechnicalAlertEvaluation {
   const bars = sanitizeTechnicalBars(input);
-  const unavailable = (reason: string): TechnicalAlertEvaluation => ({ available: false, triggered: false, state: previousState, observed: null, message: "Technical alert deferred: verified data unavailable.", reason });
+  const unavailable = (reason: string): TechnicalAlertEvaluation => ({ available: false, triggered: false, state: previousState, observed: null, message: "Technical alert deferred: verified data unavailable.", reason, freshness: null });
   if (bars.length < 2) return unavailable("INSUFFICIENT_HISTORY");
   const parameters = parseTechnicalAlertParameters(condition, parametersInput);
   const current = bars[bars.length - 1].close;
-  const prior = bars[bars.length - 2].close;
-  let evaluation: Omit<TechnicalAlertEvaluation, "available" | "message" | "reason"> | null = null;
-  if (condition === "TECH_PRICE_CROSS_LEVEL") evaluation = crossed(prior, current, parameters.level as number, parameters.direction as "UP" | "DOWN" | "EITHER");
+  let evaluation: Omit<TechnicalAlertEvaluation, "available" | "message" | "reason" | "freshness"> | null = null;
+  if (condition === "TECH_PRICE_CROSS_LEVEL") evaluation = crossed(current, parameters.level as number, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   if (["TECH_PRICE_ENTER_ZONE", "TECH_PRICE_EXIT_ZONE"].includes(condition)) {
     const inside = current >= (parameters.low as number) && current <= (parameters.high as number);
     const state = inside ? "INSIDE" : "OUTSIDE";
@@ -123,13 +127,13 @@ export function evaluateTechnicalAlertCondition(condition: TechnicalAlertConditi
     const values = calculateIndicatorSeries(bars).rsi(14);
     const before = values.at(-2); const now = values.at(-1);
     if (before == null || now == null) return unavailable("RSI_UNAVAILABLE");
-    evaluation = crossed(before, now, parameters.threshold as number, parameters.direction as "UP" | "DOWN" | "EITHER");
+    evaluation = crossed(now, parameters.threshold as number, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   }
   if (condition === "TECH_MACD_CROSS_SIGNAL") {
     const macd = calculateIndicatorSeries(bars).macd();
     const beforeMacd = macd.macd.at(-2); const beforeSignal = macd.signal.at(-2); const nowMacd = macd.macd.at(-1); const nowSignal = macd.signal.at(-1);
     if ([beforeMacd, beforeSignal, nowMacd, nowSignal].some((value) => value == null)) return unavailable("MACD_UNAVAILABLE");
-    evaluation = crossed((beforeMacd as number) - (beforeSignal as number), (nowMacd as number) - (nowSignal as number), 0, parameters.direction as "UP" | "DOWN" | "EITHER");
+    evaluation = crossed((nowMacd as number) - (nowSignal as number), 0, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   }
   if (["TECH_DIVERGENCE_BULLISH", "TECH_DIVERGENCE_BEARISH"].includes(condition)) {
     const requestedDirection = condition === "TECH_DIVERGENCE_BULLISH" ? "BULLISH" : "BEARISH";
@@ -142,23 +146,23 @@ export function evaluateTechnicalAlertCondition(condition: TechnicalAlertConditi
     const values = calculateIndicatorSeries(bars).ema(parameters.period as number);
     const before = values.at(-2); const now = values.at(-1);
     if (before == null || now == null) return unavailable("EMA_UNAVAILABLE");
-    const beforeSpread = prior - before; const nowSpread = current - now;
-    evaluation = crossed(beforeSpread, nowSpread, 0, parameters.direction as "UP" | "DOWN" | "EITHER");
+    const nowSpread = current - now;
+    evaluation = crossed(nowSpread, 0, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   }
   if (condition === "TECH_PRICE_CROSS_AVWAP") {
     const values = anchoredVwap(bars, parameters.anchorTimestamp as string);
     const before = values.at(-2); const now = values.at(-1);
     if (before == null || now == null) return unavailable("ANCHORED_VWAP_UNAVAILABLE");
-    evaluation = crossed(prior - before, current - now, 0, parameters.direction as "UP" | "DOWN" | "EITHER");
+    evaluation = crossed(current - now, 0, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   }
   if (condition === "TECH_PRICE_CROSS_PROFILE") {
     const profile = calculateVolumeProfile(bars, parameters.binCount as number, parameters.valueAreaPercent as number);
     const boundary = parameters.boundary as "POC" | "VAH" | "VAL";
     const level = boundary === "POC" ? profile.poc : boundary === "VAH" ? profile.vah : profile.val;
     if (profile.status !== "AVAILABLE" || level === null) return unavailable("VOLUME_PROFILE_UNAVAILABLE");
-    evaluation = crossed(prior, current, level, parameters.direction as "UP" | "DOWN" | "EITHER");
+    evaluation = crossed(current, level, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   }
   if (!evaluation) return unavailable("CONDITION_NOT_IMPLEMENTED");
   const triggered = previousState === null ? false : evaluation.triggered;
-  return { available: true, triggered, state: evaluation.state, observed: evaluation.observed, message: `${TECHNICAL_ALERT_REGISTRY[condition].label}: ${String(evaluation.observed ?? evaluation.state)}`, reason: null };
+  return { available: true, triggered, state: evaluation.state, observed: evaluation.observed, message: `${TECHNICAL_ALERT_REGISTRY[condition].label}: ${String(evaluation.observed ?? evaluation.state)}`, reason: null, freshness: null };
 }

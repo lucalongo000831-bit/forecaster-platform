@@ -34,6 +34,64 @@ const TIMEFRAME_WEIGHTS: Partial<Record<TechnicalTimeframe, number>> = {
   "1W": 2.1,
 };
 
+const TIMEFRAME_DURATION_MS: Partial<Record<TechnicalTimeframe, number>> = {
+  "1m": 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1W": 7 * 24 * 60 * 60_000,
+};
+
+const SESSION_CLOCKS: Record<string, { open: number; close: number }> = {
+  "America/New_York": { open: 9 * 60 + 30, close: 16 * 60 },
+  "Europe/Rome": { open: 9 * 60, close: 17 * 60 + 30 },
+  "Europe/London": { open: 8 * 60, close: 16 * 60 + 30 },
+  "Asia/Tokyo": { open: 9 * 60, close: 15 * 60 },
+};
+
+function localClock(timestamp: string, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    date: `${value.year}-${value.month}-${value.day}`,
+    minutes: Number(value.hour) * 60 + Number(value.minute),
+  };
+}
+
+export function completedTechnicalBarsAt(
+  input: MarketChartPoint[],
+  timeframe: TechnicalTimeframe,
+  asOfTimestamp: string,
+  options: { timeZone?: string; sessionCloseMinutes?: number } = {},
+) {
+  const bars = sanitizeTechnicalBars(input);
+  const asOf = Date.parse(asOfTimestamp);
+  if (!Number.isFinite(asOf)) return [];
+  const zone = options.timeZone ?? "America/New_York";
+  if (timeframe === "1D") {
+    const asOfLocal = localClock(asOfTimestamp, zone);
+    const close = options.sessionCloseMinutes ?? SESSION_CLOCKS[zone]?.close ?? 16 * 60;
+    return bars.filter((bar) => {
+      const timestamp = Date.parse(bar.timestamp);
+      if (!Number.isFinite(timestamp) || timestamp > asOf) return false;
+      const barLocal = localClock(bar.timestamp, zone);
+      return barLocal.date < asOfLocal.date || barLocal.date === asOfLocal.date && asOfLocal.minutes >= close;
+    });
+  }
+  const duration = TIMEFRAME_DURATION_MS[timeframe];
+  return duration === undefined ? bars.filter((bar) => Date.parse(bar.timestamp) <= asOf) : bars.filter((bar) => Date.parse(bar.timestamp) + duration <= asOf);
+}
+
 function confidence(value: number): "LOW" | "MEDIUM" | "HIGH" {
   return value >= 70 ? "HIGH" : value >= 45 ? "MEDIUM" : "LOW";
 }
@@ -106,7 +164,9 @@ export function calculateMarketStructure(input: MarketChartPoint[], options: { a
   const events: MarketStructureResult["events"] = [];
   const broken = new Set<string>();
   for (let barIndex = 1; barIndex < bars.length; barIndex += 1) {
-    const available = structural.filter((swing) => swing.confirmationIndex <= barIndex);
+    const availableAll = swings.filter((swing) => swing.confirmationIndex <= barIndex);
+    const availableMajor = availableAll.filter((swing) => swing.hierarchy === "MAJOR");
+    const available = availableMajor.length >= 4 ? availableMajor : availableAll;
     const latestHigh = available.filter((swing) => swing.kind === "HIGH").at(-1);
     const latestLow = available.filter((swing) => swing.kind === "LOW").at(-1);
     if (!latestHigh || !latestLow) continue;
@@ -162,9 +222,13 @@ export function calculateMarketStructure(input: MarketChartPoint[], options: { a
   };
 }
 
-export function calculateMtfStructure(input: Partial<Record<TechnicalTimeframe, MarketChartPoint[]>>): MtfStructureRow[] {
+export function calculateMtfStructure(
+  input: Partial<Record<TechnicalTimeframe, MarketChartPoint[]>>,
+  options: { asOfTimestamp?: string; timeZone?: string } = {},
+): MtfStructureRow[] {
   return (["15m", "1h", "4h", "1D"] as TechnicalTimeframe[]).map((timeframe) => {
-    const bars = input[timeframe] ?? [];
+    const source = input[timeframe] ?? [];
+    const bars = options.asOfTimestamp ? completedTechnicalBarsAt(source, timeframe, options.asOfTimestamp, { timeZone: options.timeZone }) : source;
     const result = calculateMarketStructure(bars);
     return { timeframe, state: result.state, protectedHigh: result.protectedHigh?.price ?? null, protectedLow: result.protectedLow?.price ?? null, asOf: sanitizeTechnicalBars(bars).at(-1)?.timestamp ?? null };
   });
@@ -182,11 +246,12 @@ interface WeightedLevel {
   status: TechnicalLevelStatus;
 }
 
-export function calculateMtfTechnicalLevels(input: Partial<Record<TechnicalTimeframe, MarketChartPoint[]>>, options: { asOf?: Partial<Record<TechnicalTimeframe, number>>; maxZones?: number } = {}): MtfTechnicalLevel[] {
+export function calculateMtfTechnicalLevels(input: Partial<Record<TechnicalTimeframe, MarketChartPoint[]>>, options: { asOf?: Partial<Record<TechnicalTimeframe, number>>; asOfTimestamp?: string; timeZone?: string; maxZones?: number } = {}): MtfTechnicalLevel[] {
   const rows: WeightedLevel[] = [];
   for (const [timeframe, source] of Object.entries(input) as Array<[TechnicalTimeframe, MarketChartPoint[]]>) {
     const weight = TIMEFRAME_WEIGHTS[timeframe] ?? 1;
-    calculateTechnicalLevels(source, { asOfIndex: options.asOf?.[timeframe], maxPerSide: 5 }).forEach((level) => rows.push({ timeframe, weight, type: level.type, low: level.priceLow, high: level.priceHigh, center: level.centerPrice, score: level.score, touches: level.touches, status: level.status }));
+    const completed = options.asOfTimestamp ? completedTechnicalBarsAt(source, timeframe, options.asOfTimestamp, { timeZone: options.timeZone }) : source;
+    calculateTechnicalLevels(completed, { asOfIndex: options.asOf?.[timeframe], maxPerSide: 5 }).forEach((level) => rows.push({ timeframe, weight, type: level.type, low: level.priceLow, high: level.priceHigh, center: level.centerPrice, score: level.score, touches: level.touches, status: level.status }));
   }
   const clusters: WeightedLevel[][] = [];
   for (const level of rows.sort((left, right) => left.center - right.center || left.timeframe.localeCompare(right.timeframe))) {
@@ -256,8 +321,8 @@ function divergenceForIndicator(bars: MarketChartPoint[], values: Array<number |
       const firstIndicator = alignedIndicatorValue(values, first.index, kind, tolerance);
       const secondIndicator = alignedIndicatorValue(values, second.index, kind, tolerance);
       if (!firstIndicator || !secondIndicator) continue;
-      const bullish = kind === "LOW" && second.price < first.price * 0.9985 && secondIndicator.value > firstIndicator.value + 0.25;
-      const bearish = kind === "HIGH" && second.price > first.price * 1.0015 && secondIndicator.value < firstIndicator.value - 0.25;
+      const bullish = kind === "LOW" && second.price <= first.price * 0.9985 && secondIndicator.value > firstIndicator.value + 0.25;
+      const bearish = kind === "HIGH" && second.price >= first.price * 1.0015 && secondIndicator.value < firstIndicator.value - 0.25;
       if (!bullish && !bearish) continue;
       const confirmationIndex = Math.min(bars.length - 1, Math.max(second.index + pivotWidth, secondIndicator.index));
       const priceDisplacement = Math.abs(second.price / first.price - 1) * 100;
@@ -305,19 +370,24 @@ export function calculateTechnicalDivergences(input: MarketChartPoint[], options
   return { status: "AVAILABLE", reason: null, divergences, modelVersion: TECHNICAL_DIVERGENCE_MODEL_VERSION };
 }
 
-function localDate(timestamp: string, timeZone: string) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(timestamp));
-}
-
-export function calculateSessionAnalytics(input: MarketChartPoint[], options: { assetClass?: string; timeframe: TechnicalTimeframe; timeZone?: string }): TechnicalSessionAnalytics {
-  const bars = sanitizeTechnicalBars(input);
+export function calculateSessionAnalytics(input: MarketChartPoint[], options: { assetClass?: string; timeframe: TechnicalTimeframe; timeZone?: string; asOfTimestamp?: string; sessionOpenMinutes?: number; sessionCloseMinutes?: number }): TechnicalSessionAnalytics {
+  const clean = sanitizeTechnicalBars(input);
   const semantics = options.assetClass === "CRYPTO" ? "CRYPTO_24_7" : "EQUITY_SESSION";
   const unavailable = (reason: string): TechnicalSessionAnalytics => ({ status: "UNAVAILABLE", reason, semantics, previousDayHigh: null, previousDayLow: null, previousClose: null, todayOpen: null, openingRange15: null, openingRange30: null, sessionDate: null });
   if (semantics === "CRYPTO_24_7") return unavailable("CRYPTO_HAS_NO_EQUITY_OPENING_SESSION");
-  if (!bars.length || ["1D", "1W", "4h", "1h"].includes(options.timeframe)) return unavailable("INTRADAY_RESOLUTION_REQUIRED");
+  if (!clean.length || ["1D", "1W", "4h", "1h"].includes(options.timeframe)) return unavailable("INTRADAY_RESOLUTION_REQUIRED");
   const zone = options.timeZone ?? "America/New_York";
+  const bars = options.asOfTimestamp ? completedTechnicalBarsAt(clean, options.timeframe, options.asOfTimestamp, { timeZone: zone, sessionCloseMinutes: options.sessionCloseMinutes }) : clean;
+  if (!bars.length) return unavailable("INTRADAY_DATA_NOT_YET_COMPLETE");
+  const clock = SESSION_CLOCKS[zone];
+  const open = options.sessionOpenMinutes ?? clock?.open;
+  const close = options.sessionCloseMinutes ?? clock?.close;
   const grouped = new Map<string, MarketChartPoint[]>();
-  bars.forEach((bar) => { const day = localDate(bar.timestamp, zone); grouped.set(day, [...(grouped.get(day) ?? []), bar]); });
+  bars.forEach((bar) => {
+    const local = localClock(bar.timestamp, zone);
+    if (open !== undefined && local.minutes < open || close !== undefined && local.minutes >= close) return;
+    grouped.set(local.date, [...(grouped.get(local.date) ?? []), bar]);
+  });
   const days = [...grouped.keys()].sort();
   if (days.length < 2) return unavailable("PREVIOUS_SESSION_UNAVAILABLE");
   const current = grouped.get(days.at(-1)!)!;
@@ -327,7 +397,9 @@ export function calculateSessionAnalytics(input: MarketChartPoint[], options: { 
     if (intervalMinutes > minutes) return null;
     const count = Math.ceil(minutes / intervalMinutes);
     const sample = current.slice(0, count);
-    return sample.length === count ? { high: Math.max(...sample.map((bar) => bar.high)), low: Math.min(...sample.map((bar) => bar.low)) } : null;
+    if (sample.length !== count) return null;
+    if (open !== undefined && localClock(sample[0].timestamp, zone).minutes !== open) return null;
+    return { high: Math.max(...sample.map((bar) => bar.high)), low: Math.min(...sample.map((bar) => bar.low)) };
   };
   return { status: "AVAILABLE", reason: null, semantics, previousDayHigh: Math.max(...previous.map((bar) => bar.high)), previousDayLow: Math.min(...previous.map((bar) => bar.low)), previousClose: previous.at(-1)!.close, todayOpen: current[0].open, openingRange15: openingRange(15), openingRange30: openingRange(30), sessionDate: days.at(-1)! };
 }
