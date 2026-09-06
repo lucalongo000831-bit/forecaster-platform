@@ -7,6 +7,7 @@ import {
   DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS,
   DASHBOARD_REFRESH_INTERVAL_MS,
   DASHBOARD_REFRESH_PROBE_TIMEOUT_MS,
+  DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS,
   DashboardAutoRefresh,
 } from "./dashboard-auto-refresh";
 
@@ -42,12 +43,32 @@ describe("DashboardAutoRefresh", () => {
     }));
     expect(router.refresh).toHaveBeenCalledTimes(1);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS * 6); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS - 1); });
     expect(request).toHaveBeenCalledTimes(1);
     expect(router.refresh).toHaveBeenCalledTimes(1);
 
     view.rerender(<DashboardAutoRefresh refreshVersion={2}/>);
     await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(router.refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases the route gate when refresh returns the same server version", async () => {
+    vi.useFakeTimers();
+    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
+    render(<DashboardAutoRefresh refreshVersion={1}/>);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(router.refresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await vi.advanceTimersByTimeAsync(DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS - 1);
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1 + DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(request).toHaveBeenCalledTimes(2);
     expect(router.refresh).toHaveBeenCalledTimes(2);
   });
 

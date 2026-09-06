@@ -9,9 +9,13 @@ async function forceVisibleOnline(page: Page) {
   });
 }
 
+async function installAuditClock(page: Page) {
+  await page.clock.install({ time: new Date() });
+}
+
 test("failed dashboard probe preserves the render and the next safe cycle recovers", async ({ page }) => {
   await forceVisibleOnline(page);
-  await page.clock.install({ time: new Date("2026-09-04T10:00:00.000Z") });
+  await installAuditClock(page);
   const criticalErrors: string[] = [];
   let probes = 0;
   let activeProbes = 0;
@@ -49,7 +53,7 @@ test("failed dashboard probe preserves the render and the next safe cycle recove
 
 test("dashboard reconnect events cannot overlap an active probe", async ({ page }) => {
   await forceVisibleOnline(page);
-  await page.clock.install({ time: new Date("2026-09-04T10:00:00.000Z") });
+  await installAuditClock(page);
   let probes = 0;
   let activeProbes = 0;
   let maximumActiveProbes = 0;
@@ -86,7 +90,7 @@ test("visibility pause performs no network work and resumes exactly once", async
       document.dispatchEvent(new Event("visibilitychange"));
     };
   });
-  await page.clock.install({ time: new Date("2026-09-04T10:00:00.000Z") });
+  await installAuditClock(page);
   let probes = 0;
   await page.route("**/api/health/live", async (route) => {
     probes += 1;
@@ -103,7 +107,7 @@ test("visibility pause performs no network work and resumes exactly once", async
 
 test("route navigation leaves exactly one dashboard scheduler", async ({ page }) => {
   await forceVisibleOnline(page);
-  await page.clock.install({ time: new Date("2026-09-04T10:00:00.000Z") });
+  await installAuditClock(page);
   let probes = 0;
   await page.route("**/api/health/live", async (route) => {
     probes += 1;

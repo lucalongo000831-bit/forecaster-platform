@@ -6,6 +6,7 @@ import { useEffect } from "react";
 export const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 export const DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS = 120_000;
 export const DASHBOARD_REFRESH_PROBE_TIMEOUT_MS = 5_000;
+export const DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS = 30_000;
 
 const REFRESH_PROBE_PATH = "/api/health/live";
 
@@ -20,6 +21,7 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
     let requestPending = false;
     let routeRefreshPending = false;
     let timer: number | undefined;
+    let routeRefreshTimeout: number | undefined;
     let controller: AbortController | undefined;
 
     const schedule = () => {
@@ -29,6 +31,14 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
         () => void refresh(),
         document.hidden ? DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS : DASHBOARD_REFRESH_INTERVAL_MS,
       );
+    };
+
+    const releaseStalledRouteRefresh = () => {
+      window.clearTimeout(routeRefreshTimeout);
+      routeRefreshTimeout = undefined;
+      if (!active || !routeRefreshPending) return;
+      routeRefreshPending = false;
+      schedule();
     };
 
     const refresh = async () => {
@@ -47,9 +57,14 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
         });
         if (!active || !canRefreshFrom(response)) return;
 
-        // router.refresh() has no completion promise. Keep the gate closed until
-        // the server render supplies a new refreshVersion and restarts this effect.
+        // router.refresh() has no completion promise and may reproduce the same
+        // cached result. Keep the gate closed for a bounded settle window so a
+        // missing refreshVersion update cannot disable future revalidation.
         routeRefreshPending = true;
+        routeRefreshTimeout = window.setTimeout(
+          releaseStalledRouteRefresh,
+          DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS,
+        );
         router.refresh();
       } catch {
         // Keep the last complete render on transient network/auth gateway errors.
@@ -73,6 +88,7 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
     return () => {
       active = false;
       window.clearTimeout(timer);
+      window.clearTimeout(routeRefreshTimeout);
       controller?.abort();
       document.removeEventListener("visibilitychange", onConnectivityChange);
       window.removeEventListener("online", onConnectivityChange);
