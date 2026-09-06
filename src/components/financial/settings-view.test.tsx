@@ -149,4 +149,46 @@ describe("SettingsView session states", () => {
 
     expect(signal?.aborted).toBe(true);
   });
+
+  it("recognizes a genuinely invalidated session on the next canonical check", async () => {
+    const request = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(sessionResponse({
+        id: "user-1",
+        email: "investor@example.com",
+        name: "Kairo Investor",
+        role: "USER",
+      }))
+      .mockResolvedValueOnce(sessionResponse(null));
+
+    const view = render(<SettingsView/>);
+    expect(await screen.findByDisplayValue("investor@example.com")).toBeVisible();
+    view.unmount();
+
+    render(<SettingsView/>);
+    expect(await screen.findByText("No active session")).toBeVisible();
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves explicit logout and navigates only after server invalidation succeeds", async () => {
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (input === "/api/auth/logout") {
+        expect(init).toMatchObject({ method: "POST" });
+        return sessionResponse({ loggedOut: true });
+      }
+      return sessionResponse({
+        id: "user-1",
+        email: "investor@example.com",
+        name: "Kairo Investor",
+        role: "USER",
+      });
+    });
+
+    render(<SettingsView/>);
+    expect(await screen.findByDisplayValue("investor@example.com")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/login"));
+    expect(router.refresh).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
+  });
 });
