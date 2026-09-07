@@ -12,9 +12,10 @@ import {
 } from "./dashboard-auto-refresh";
 
 const router = { refresh: vi.fn() };
+let currentRouter = router;
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => router,
+  useRouter: () => currentRouter,
 }));
 
 function liveResponse() {
@@ -26,6 +27,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   router.refresh.mockReset();
+  currentRouter = router;
 });
 
 describe("DashboardAutoRefresh", () => {
@@ -68,6 +70,26 @@ describe("DashboardAutoRefresh", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
     expect(request).toHaveBeenCalledTimes(2);
     expect(router.refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the scheduler mounted when Next replaces the router instance", async () => {
+    vi.useFakeTimers();
+    const replacementRouter = { refresh: vi.fn() };
+    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
+    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
+    const removeWindowListener = vi.spyOn(window, "removeEventListener");
+    const view = render(<DashboardAutoRefresh refreshVersion={1}/>);
+
+    currentRouter = replacementRouter;
+    view.rerender(<DashboardAutoRefresh refreshVersion={1}/>);
+
+    expect(removeDocumentListener).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    expect(removeWindowListener).not.toHaveBeenCalledWith("online", expect.any(Function));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(router.refresh).not.toHaveBeenCalled();
+    expect(replacementRouter.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("releases the route gate when refresh returns the same server version", async () => {

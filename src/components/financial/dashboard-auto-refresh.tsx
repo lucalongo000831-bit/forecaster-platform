@@ -16,7 +16,12 @@ function canRefreshFrom(response: Response) {
 
 export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: number }) {
   const router = useRouter();
+  const routerRef = useRef(router);
   const settleRouteRefreshRef = useRef<(() => void) | undefined>(undefined);
+
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
 
   useEffect(() => {
     settleRouteRefreshRef.current?.();
@@ -72,7 +77,7 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
           releaseStalledRouteRefresh,
           DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS,
         );
-        router.refresh();
+        routerRef.current.refresh();
       } catch {
         // Keep the last complete render on transient network/auth gateway errors.
       } finally {
@@ -103,6 +108,6 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
       document.removeEventListener("visibilitychange", onConnectivityChange);
       window.removeEventListener("online", onConnectivityChange);
     };
-  }, [router]);
+  }, []);
   return null;
 }
