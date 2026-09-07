@@ -52,6 +52,24 @@ describe("DashboardAutoRefresh", () => {
     expect(router.refresh).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the scheduler mounted across completed server renders", async () => {
+    vi.useFakeTimers();
+    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
+    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
+    const removeWindowListener = vi.spyOn(window, "removeEventListener");
+    const view = render(<DashboardAutoRefresh refreshVersion={1}/>);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    view.rerender(<DashboardAutoRefresh refreshVersion={2}/>);
+
+    expect(removeDocumentListener).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    expect(removeWindowListener).not.toHaveBeenCalledWith("online", expect.any(Function));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(router.refresh).toHaveBeenCalledTimes(2);
+  });
+
   it("releases the route gate when refresh returns the same server version", async () => {
     vi.useFakeTimers();
     const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 export const DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS = 120_000;
@@ -16,6 +16,12 @@ function canRefreshFrom(response: Response) {
 
 export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: number }) {
   const router = useRouter();
+  const settleRouteRefreshRef = useRef<(() => void) | undefined>(undefined);
+
+  useEffect(() => {
+    settleRouteRefreshRef.current?.();
+  }, [refreshVersion]);
+
   useEffect(() => {
     let active = true;
     let requestPending = false;
@@ -40,6 +46,7 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
       routeRefreshPending = false;
       schedule();
     };
+    settleRouteRefreshRef.current = releaseStalledRouteRefresh;
 
     const refresh = async () => {
       if (!active || requestPending || routeRefreshPending) return;
@@ -87,12 +94,15 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
     window.addEventListener("online", onConnectivityChange);
     return () => {
       active = false;
+      if (settleRouteRefreshRef.current === releaseStalledRouteRefresh) {
+        settleRouteRefreshRef.current = undefined;
+      }
       window.clearTimeout(timer);
       window.clearTimeout(routeRefreshTimeout);
       controller?.abort();
       document.removeEventListener("visibilitychange", onConnectivityChange);
       window.removeEventListener("online", onConnectivityChange);
     };
-  }, [refreshVersion, router]);
+  }, [router]);
   return null;
 }
