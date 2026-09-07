@@ -14,9 +14,10 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: { baseURL, trace: "retain-on-failure", screenshot: "only-on-failure", video: "off" },
   projects: [
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], channel: localChannel } },
-    { name: "tablet-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 1366 }, channel: localChannel } },
-    { name: "mobile-chromium", use: { ...devices["Pixel 7"], channel: localChannel } },
+    { name: "pattern-warmup", testMatch: /pattern-route-warmup\.setup\.ts/ },
+    { name: "desktop-chromium", dependencies: ["pattern-warmup"], use: { ...devices["Desktop Chrome"], channel: localChannel } },
+    { name: "tablet-chromium", dependencies: ["pattern-warmup"], use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 1366 }, channel: localChannel } },
+    { name: "mobile-chromium", dependencies: ["pattern-warmup"], use: { ...devices["Pixel 7"], channel: localChannel } },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
     command: localServerCommand,

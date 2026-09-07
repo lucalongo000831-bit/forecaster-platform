@@ -4,6 +4,7 @@ import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { alertEvents, alerts, getDatabase, instruments } from "@/db";
 import { AppError } from "@/lib/server/app-error";
 import type { AccountAlert, AccountNotification } from "@/types";
+import { parseTechnicalAlertParameters, TECHNICAL_ALERT_CONDITIONS, TECHNICAL_ALERT_MODEL_VERSION, type TechnicalAlertConditionId } from "@/engines/technical/alert-registry";
 import { ensureInstrument } from "./instrument-repository";
 
 export async function listAlerts(userId: string): Promise<AccountAlert[]> {
@@ -11,10 +12,13 @@ export async function listAlerts(userId: string): Promise<AccountAlert[]> {
   return rows.map((row) => ({ ...row, lastEvaluatedAt: row.lastEvaluatedAt?.toISOString() ?? null, triggeredAt: row.triggeredAt?.toISOString() ?? null, expiresAt: row.expiresAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString() }));
 }
 
-export async function createAlert(userId: string, input: { type: string; symbol?: string | null; name?: string; threshold?: number | null; horizon?: string | null; expiresAt?: string | null }) {
+export async function createAlert(userId: string, input: { type: string; symbol?: string | null; name?: string; threshold?: number | null; horizon?: string | null; timeframe?: string; parameters?: Record<string, unknown>; cooldownMinutes?: number; expiresAt?: string | null }) {
   const [{ value }] = await getDatabase().select({ value: count() }).from(alerts).where(eq(alerts.userId, userId)); if (value >= 200) throw new AppError("BAD_REQUEST", "Limite di 200 alert raggiunto", 400);
+  const technical = TECHNICAL_ALERT_CONDITIONS.includes(input.type as TechnicalAlertConditionId);
+  if (technical && !input.symbol) throw new AppError("BAD_REQUEST", "Simbolo richiesto per un alert tecnico", 400);
+  const parameters = technical ? parseTechnicalAlertParameters(input.type as TechnicalAlertConditionId, input.parameters ?? {}) : input.parameters ?? {};
   const instrument = input.symbol ? await ensureInstrument({ symbol: input.symbol, name: input.name ?? input.symbol, type: "EQUITY" }) : null;
-  const [created] = await getDatabase().insert(alerts).values({ userId, instrumentId: instrument?.id, type: input.type, configuration: { threshold: input.threshold ?? null, horizon: input.horizon ?? null }, expiresAt: input.expiresAt ? new Date(input.expiresAt) : null }).returning();
+  const [created] = await getDatabase().insert(alerts).values({ userId, instrumentId: instrument?.id, type: input.type, configuration: { threshold: input.threshold ?? null, horizon: input.horizon ?? null, ...(technical ? { timeframe: input.timeframe ?? "1h", parameters, cooldownMinutes: input.cooldownMinutes ?? 60, state: null, evaluationState: "PENDING", modelVersion: TECHNICAL_ALERT_MODEL_VERSION } : {}) }, expiresAt: input.expiresAt ? new Date(input.expiresAt) : null }).returning();
   return created;
 }
 

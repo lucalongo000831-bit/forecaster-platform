@@ -2,6 +2,7 @@ import type { ApiMeta, MarketChartPoint } from "./market-api";
 
 export const TECHNICAL_V1_MODEL_VERSION = "technical-v1.0.0" as const;
 export const TECHNICAL_CHART_MODEL_VERSION = "technical-v2.0.0" as const;
+export const TECHNICAL_V3_MODEL_VERSION = "technical-v3.0.0" as const;
 
 export type TechnicalTimeframe = "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1D" | "1W";
 export type TechnicalChartType = "candlestick" | "line" | "area" | "heikin-ashi";
@@ -200,4 +201,164 @@ export interface TechnicalConfluence {
   volume: string;
   reasons: string[];
   modelVersion: "technical-confluence-v1.0.0";
+}
+
+export type MarketStructureState = "UPTREND" | "DOWNTREND" | "RANGE" | "TRANSITION" | "INSUFFICIENT_DATA";
+export type MarketStructureSwingLabel = "HH" | "HL" | "LH" | "LL" | "H" | "L";
+export type MarketStructureHierarchy = "MINOR" | "MAJOR";
+
+export interface MarketStructureSwing {
+  id: string;
+  index: number;
+  confirmationIndex: number;
+  timestamp: string;
+  confirmationTimestamp: string;
+  price: number;
+  kind: "HIGH" | "LOW";
+  hierarchy: MarketStructureHierarchy;
+  label: MarketStructureSwingLabel;
+  prominenceAtr: number;
+}
+
+export interface MarketStructureEvent {
+  id: string;
+  type: "BOS" | "CHOCH";
+  direction: "BULLISH" | "BEARISH";
+  timestamp: string;
+  price: number;
+  confirmationTimestamp: string;
+  availableAt: string;
+  swingId: string;
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  structureBefore: MarketStructureState;
+  structureAfter: MarketStructureState;
+  modelVersion: "market-structure-v1.0.0";
+}
+
+export interface MarketStructureResult {
+  status: "AVAILABLE" | "UNAVAILABLE";
+  reason: string | null;
+  state: MarketStructureState;
+  swings: MarketStructureSwing[];
+  events: MarketStructureEvent[];
+  protectedHigh: MarketStructureSwing | null;
+  protectedLow: MarketStructureSwing | null;
+  activeRange: { high: number; low: number } | null;
+  modelVersion: "market-structure-v1.0.0";
+}
+
+export interface MtfStructureRow {
+  timeframe: TechnicalTimeframe;
+  state: MarketStructureState;
+  protectedHigh: number | null;
+  protectedLow: number | null;
+  asOf: string | null;
+}
+
+export interface MtfTechnicalLevel {
+  id: string;
+  type: "SUPPORT" | "RESISTANCE";
+  priceLow: number;
+  priceHigh: number;
+  centerPrice: number;
+  timeframes: TechnicalTimeframe[];
+  touches: number;
+  score: number;
+  higherTimeframeWeight: number;
+  confluenceCount: number;
+  status: TechnicalLevelStatus;
+  modelVersion: "mtf-technical-levels-v1.0.0";
+}
+
+export type TechnicalDivergenceType = "REGULAR_BULLISH" | "REGULAR_BEARISH";
+export type TechnicalDivergenceIndicator = "RSI" | "MACD";
+
+export interface TechnicalDivergencePivot {
+  timestamp: string;
+  price: number;
+  indicatorValue: number;
+  confirmationTimestamp: string;
+}
+
+export interface TechnicalDivergence {
+  id: string;
+  type: TechnicalDivergenceType;
+  indicator: TechnicalDivergenceIndicator;
+  direction: "BULLISH" | "BEARISH";
+  pricePivot1: TechnicalDivergencePivot;
+  pricePivot2: TechnicalDivergencePivot;
+  indicatorPivot1: number;
+  indicatorPivot2: number;
+  confirmedAt: string;
+  strength: number;
+  modelVersion: "technical-divergence-v1.0.0";
+}
+
+export interface TechnicalDivergenceResult {
+  status: "AVAILABLE" | "UNAVAILABLE";
+  reason: string | null;
+  divergences: TechnicalDivergence[];
+  modelVersion: "technical-divergence-v1.0.0";
+}
+
+export interface TechnicalProfileDefinition {
+  id: string;
+  kind: "FIXED" | "ANCHORED";
+  startTimestamp: string;
+  endTimestamp?: string;
+  binCount: number;
+  valueAreaPercent: number;
+  visible: boolean;
+}
+
+export interface RangedVolumeProfileResult extends VolumeProfileResult {
+  kind: "FIXED" | "ANCHORED";
+  rangeStart: string | null;
+  rangeEnd: string | null;
+}
+
+export interface TechnicalSessionAnalytics {
+  status: "AVAILABLE" | "UNAVAILABLE";
+  reason: string | null;
+  semantics: "EQUITY_SESSION" | "CRYPTO_24_7";
+  previousDayHigh: number | null;
+  previousDayLow: number | null;
+  previousClose: number | null;
+  todayOpen: number | null;
+  openingRange15: { high: number; low: number } | null;
+  openingRange30: { high: number; low: number } | null;
+  sessionDate: string | null;
+}
+
+export interface TechnicalFeatureStateV3 extends TechnicalFeatureState {
+  marketStructure: boolean;
+  mtfSupportResistance: boolean;
+  divergences: boolean;
+  sessionLevels: boolean;
+  structureSummary: boolean;
+}
+
+export interface TechnicalTemplateV3 extends Omit<TechnicalTemplate, "features"> {
+  features: TechnicalFeatureStateV3;
+}
+
+export interface TechnicalWorkspaceV3 extends Omit<TechnicalWorkspaceV2, "version" | "features" | "customTemplates"> {
+  version: 3;
+  features: TechnicalFeatureStateV3;
+  customTemplates: TechnicalTemplateV3[];
+  profiles: Record<string, TechnicalProfileDefinition[]>;
+  structureDensity: "MAJOR" | "ALL";
+}
+
+export interface TechnicalConfluenceV2 {
+  structure: "BULLISH" | "BEARISH" | "RANGE" | "TRANSITION" | "UNAVAILABLE";
+  higherTimeframeAlignment: "ALIGNED" | "MIXED" | "OPPOSED" | "UNAVAILABLE";
+  momentum: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "UNAVAILABLE";
+  volatility: "LOW" | "NORMAL" | "HIGH" | "UNAVAILABLE";
+  volumeLocation: "ABOVE_POC" | "BELOW_POC" | "AT_VALUE_AREA" | "UNAVAILABLE";
+  divergence: "BULLISH" | "BEARISH" | "NONE" | "UNAVAILABLE";
+  keyZone: "TESTING_SUPPORT" | "TESTING_RESISTANCE" | "NONE" | "UNAVAILABLE";
+  overallAlignment: "HIGH" | "MEDIUM" | "LOW" | "PARTIAL";
+  reasons: string[];
+  modelVersion: "technical-confluence-v2.0.0";
 }

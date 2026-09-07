@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "crons": [
     { "path": "/api/cron/daily", "schedule": "17 5 * * *" },
+    { "path": "/api/cron/alerts", "schedule": "47 5 * * *" },
     { "path": "/api/cron/data-v2?job=economic", "schedule": "0 6 * * *" },
     { "path": "/api/cron/data-v2?job=calendar", "schedule": "15 6 * * *" },
     { "path": "/api/cron/data-v2?job=central-bank", "schedule": "25 6 * * *" },

@@ -3,13 +3,14 @@ import { ProviderError } from "../src/providers/errors";
 import { financialProviderRouter } from "../src/providers/router";
 import { isDeterministicE2EProviderEnabled } from "../src/providers/testing/deterministic-e2e-provider";
 
-type AssetClass = "EQUITY" | "ETF" | "CRYPTO";
+type AssetClass = "EQUITY" | "ETF" | "CRYPTO" | "INTERNATIONAL";
 type SmokeStatus = "PASS" | "DEGRADED" | "FAIL";
 
 const cases: Array<{ symbol: string; assetClass: AssetClass }> = [
   { symbol: "NVDA", assetClass: "EQUITY" },
   { symbol: "SPY", assetClass: "ETF" },
   { symbol: "BTC-USD", assetClass: "CRYPTO" },
+  { symbol: "STLAM.MI", assetClass: "INTERNATIONAL" },
 ];
 
 function matchesAssetClass(quoteType: string, assetClass: AssetClass) {
@@ -66,7 +67,7 @@ async function main() {
   const results = [];
   for (const entry of cases) results.push(await smoke(entry));
   for (const result of results) process.stdout.write(`${JSON.stringify(result)}\n`);
-  const summary: Record<AssetClass, SmokeStatus> = { EQUITY: "FAIL", ETF: "FAIL", CRYPTO: "FAIL" };
+  const summary: Record<AssetClass, SmokeStatus> = { EQUITY: "FAIL", ETF: "FAIL", CRYPTO: "FAIL", INTERNATIONAL: "FAIL" };
   for (const result of results) summary[result.assetClass] = result.status;
   process.stdout.write(`${JSON.stringify({ summary, controlledUnavailable: results.filter((result) => result.status === "DEGRADED").every((result) => result.errorCode !== "UNEXPECTED_ERROR") })}\n`);
   if (results.some((result) => result.status === "FAIL")) process.exitCode = 1;

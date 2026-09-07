@@ -179,7 +179,9 @@ export function parseTechnicalWorkspace(symbol: string, v2Value: unknown, v1Valu
   const drawings: Record<string, TechnicalDrawing[]> = {};
   if (value.drawings && typeof value.drawings === "object") for (const [key, rows] of Object.entries(value.drawings)) {
     if (!/^[A-Z0-9.^=-]{1,31}:(?:1m|5m|15m|30m|1h|4h|1D|1W)$/.test(key) || !Array.isArray(rows)) continue;
-    const valid = rows.map(sanitizeTechnicalDrawing).filter((drawing): drawing is TechnicalDrawing => drawing !== null).slice(0, MAX_TECHNICAL_DRAWINGS_PER_DATASET);
+    const deduplicated = new Map<string, TechnicalDrawing>();
+    rows.map(sanitizeTechnicalDrawing).forEach((drawing) => { if (drawing) deduplicated.set(drawing.id, drawing); });
+    const valid = [...deduplicated.values()].slice(0, MAX_TECHNICAL_DRAWINGS_PER_DATASET);
     if (valid.length) drawings[key] = valid;
   }
   const customTemplates = Array.isArray(value.customTemplates) ? value.customTemplates.map(sanitizeTemplate).filter((template): template is TechnicalTemplate => template !== null).slice(0, MAX_CUSTOM_TECHNICAL_TEMPLATES) : [];

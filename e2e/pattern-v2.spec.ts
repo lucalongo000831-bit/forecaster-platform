@@ -7,7 +7,7 @@ const analyses = new Map<string, PatternAnalysis>();
 
 function assetClass(symbol: string): PatternAssetClass {
   if (symbol.endsWith("-USD")) return "CRYPTO";
-  if (symbol === "SPY") return "ETF";
+  if (symbol === "SPY" || symbol === "QQQ") return "ETF";
   return "EQUITY";
 }
 
@@ -61,26 +61,36 @@ const paths = [
   ["ETH-USD", "/instrument/crypto/eth-usd/pattern"],
 ] as const;
 
-test("Pattern V2 latest research experience works for equities, ETF and crypto", async ({ page }) => {
-  await mockPattern(page);
-  const consoleErrors: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("pageerror", (error) => consoleErrors.push(error.message));
+test.describe("Pattern V2 latest research experience works for equities, ETF and crypto", () => {
   for (const [symbol, path] of paths) {
-    await page.goto(path, { waitUntil: "domcontentloaded", timeout: 120_000 });
-    await expect(page.getByRole("heading", { name: "Pattern Intelligence" })).toBeVisible({ timeout: 80_000 });
-    await expect(page.getByTestId("pattern-main-chart")).toBeVisible();
-    const chart = page.getByTestId("pattern-main-chart").locator('[data-chart-engine="lightweight-charts"]');
-    await expect(chart).toHaveAttribute("data-chart-ready", "true");
-    const box = await chart.boundingBox();
-    expect(box?.width ?? 0).toBeLessThanOrEqual((page.viewportSize()?.width ?? 1440) + 1);
-    await expect(page.getByTestId("pattern-probability-card")).toContainText("Robustness");
-    await expect(page.getByTestId("most-correlated-card")).toContainText("Max Rise");
-    await expect(page.getByRole("heading", { name: "Correlated Past Events" })).toBeVisible();
-    await expect(page.getByText("pattern-v2.0.0").first()).toBeVisible();
-    await expect(page.getByText(new RegExp(symbol === "BTC-USD" ? "24/7|CRYPTO" : "Pattern Intelligence", "i")).first()).toBeVisible();
+    test(symbol, async ({ page }) => {
+      const fixture = analysisFor(symbol, "1M");
+      expect(fixture).toMatchObject({
+        symbol,
+        assetClass: assetClass(symbol),
+        modelVersion: "pattern-v2.0.0",
+        lookback: "1M",
+      });
+      await mockPattern(page);
+      const consoleErrors: string[] = [];
+      page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+      page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+      await page.goto(path, { waitUntil: "domcontentloaded", timeout: 120_000 });
+      await expect(page.getByRole("heading", { name: "Pattern Intelligence" })).toBeVisible({ timeout: 80_000 });
+      await expect(page.getByTestId("pattern-main-chart")).toBeVisible();
+      const chart = page.getByTestId("pattern-main-chart").locator('[data-chart-engine="lightweight-charts"]');
+      await expect(chart).toHaveAttribute("data-chart-ready", "true");
+      const box = await chart.boundingBox();
+      expect(box?.width ?? 0).toBeLessThanOrEqual((page.viewportSize()?.width ?? 1440) + 1);
+      await expect(page.getByTestId("pattern-probability-card")).toContainText("Robustness");
+      await expect(page.getByTestId("most-correlated-card")).toContainText("Max Rise");
+      await expect(page.getByRole("heading", { name: "Correlated Past Events" })).toBeVisible();
+      await expect(page.getByText("pattern-v2.0.0").first()).toBeVisible();
+      await expect(page.getByText(new RegExp(symbol === "BTC-USD" ? "24/7|CRYPTO" : "Pattern Intelligence", "i")).first()).toBeVisible();
+      expect(consoleErrors.filter((message) => /hydration|react|uncaught|typeerror|referenceerror/i.test(message))).toEqual([]);
+    });
   }
-  expect(consoleErrors.filter((message) => /hydration|react|uncaught|typeerror|referenceerror/i.test(message))).toEqual([]);
 });
 
 test("Pattern V2 recalculates historical as-of and lookback while Single Events stays local", async ({ page }) => {

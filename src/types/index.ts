@@ -9,5 +9,5 @@ export type * from "./global-market-brief";
 export type * from "./political-intelligence";
 export type * from "./data-architecture-v2";
 export type * from "./technical-chart";
-export { TECHNICAL_CHART_MODEL_VERSION, TECHNICAL_V1_MODEL_VERSION } from "./technical-chart";
+export { TECHNICAL_CHART_MODEL_VERSION, TECHNICAL_V1_MODEL_VERSION, TECHNICAL_V3_MODEL_VERSION } from "./technical-chart";
 export { DATA_STATUSES } from "./data-architecture-v2";
