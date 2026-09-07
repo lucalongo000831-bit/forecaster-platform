@@ -8,15 +8,21 @@ import {
   DASHBOARD_REFRESH_INTERVAL_MS,
   DASHBOARD_REFRESH_PROBE_TIMEOUT_MS,
   DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS,
-  DashboardAutoRefresh,
+  DashboardRefreshCommit,
+  DashboardRefreshScheduler,
 } from "./dashboard-auto-refresh";
 
 const router = { refresh: vi.fn() };
 let currentRouter = router;
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard",
   useRouter: () => currentRouter,
 }));
+
+function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: number }) {
+  return <><DashboardRefreshScheduler/><DashboardRefreshCommit refreshVersion={refreshVersion}/></>;
+}
 
 function liveResponse() {
   return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
@@ -90,6 +96,27 @@ describe("DashboardAutoRefresh", () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(router.refresh).not.toHaveBeenCalled();
     expect(replacementRouter.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the layout scheduler alive while the page commit notifier remounts", async () => {
+    vi.useFakeTimers();
+    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
+    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
+    const removeWindowListener = vi.spyOn(window, "removeEventListener");
+    render(<DashboardRefreshScheduler/>);
+    const page = render(<DashboardRefreshCommit refreshVersion={1}/>);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(request).toHaveBeenCalledTimes(1);
+    page.unmount();
+    render(<DashboardRefreshCommit refreshVersion={2}/>);
+
+    expect(removeDocumentListener).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    expect(removeWindowListener).not.toHaveBeenCalledWith("online", expect.any(Function));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(router.refresh).toHaveBeenCalledTimes(2);
   });
 
   it("releases the route gate when refresh returns the same server version", async () => {

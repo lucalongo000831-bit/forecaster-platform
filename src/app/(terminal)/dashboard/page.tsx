@@ -10,7 +10,7 @@ import { getCurrentUser } from "@/lib/server/auth";
 import { isDatabaseConfigured } from "@/db";
 import { listPortfolios, listWatchlists } from "@/services/account";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
-import { DashboardAutoRefresh } from "@/components/financial/dashboard-auto-refresh";
+import { DashboardRefreshCommit } from "@/components/financial/dashboard-auto-refresh";
 import { getGlobalRiskCurrent } from "@/services/global-risk";
 
 function GlobalRiskFallback() {
@@ -63,7 +63,7 @@ async function DashboardContent({ now, userPromise }: { now: number; userPromise
 export default function DashboardPage(){
   const now = new Date().getTime();
   const userPromise = getCurrentUser().catch(() => null);
-  return <div className="container-shell page-stack dashboard-page"><DashboardAutoRefresh refreshVersion={now}/>
+  return <div className="container-shell page-stack dashboard-page"><DashboardRefreshCommit refreshVersion={now}/>
     <header className="dashboard-heading"><div><span className="page-kicker">Personal intelligence workspace</span><h1 className="page-title">Good afternoon<Suspense fallback={null}><GreetingName userPromise={userPromise}/></Suspense>.</h1><p className="muted mt-3 text-base">Focus on what moved, what matters and what comes next.</p></div><Link className="button-primary" href="/search"><Radar size={17}/>Explore markets</Link></header>
     <Suspense fallback={<DashboardContentFallback/>}><DashboardContent now={now} userPromise={userPromise}/></Suspense>
   </div>;

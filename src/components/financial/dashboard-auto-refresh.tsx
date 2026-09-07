@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 export const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
@@ -9,25 +9,31 @@ export const DASHBOARD_REFRESH_PROBE_TIMEOUT_MS = 5_000;
 export const DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS = 30_000;
 
 const REFRESH_PROBE_PATH = "/api/health/live";
+const DASHBOARD_REFRESH_SETTLED_EVENT = "kairo:dashboard-refresh-settled";
 
 function canRefreshFrom(response: Response) {
   return response.status === 204 && !response.redirected && response.type !== "opaqueredirect";
 }
 
-export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: number }) {
+export function DashboardRefreshCommit({ refreshVersion }: { refreshVersion: number }) {
+  useEffect(() => {
+    window.dispatchEvent(new Event(DASHBOARD_REFRESH_SETTLED_EVENT));
+  }, [refreshVersion]);
+  return null;
+}
+
+export function DashboardRefreshScheduler() {
+  const pathname = usePathname();
   const router = useRouter();
   const routerRef = useRef(router);
-  const settleRouteRefreshRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
     routerRef.current = router;
   }, [router]);
 
   useEffect(() => {
-    settleRouteRefreshRef.current?.();
-  }, [refreshVersion]);
+    if (pathname !== "/dashboard") return;
 
-  useEffect(() => {
     let active = true;
     let requestPending = false;
     let routeRefreshPending = false;
@@ -51,8 +57,6 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
       routeRefreshPending = false;
       schedule();
     };
-    settleRouteRefreshRef.current = releaseStalledRouteRefresh;
-
     const refresh = async () => {
       if (!active || requestPending || routeRefreshPending) return;
       if (document.hidden || !navigator.onLine) { schedule(); return; }
@@ -97,17 +101,16 @@ export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: numbe
     schedule();
     document.addEventListener("visibilitychange", onConnectivityChange);
     window.addEventListener("online", onConnectivityChange);
+    window.addEventListener(DASHBOARD_REFRESH_SETTLED_EVENT, releaseStalledRouteRefresh);
     return () => {
       active = false;
-      if (settleRouteRefreshRef.current === releaseStalledRouteRefresh) {
-        settleRouteRefreshRef.current = undefined;
-      }
       window.clearTimeout(timer);
       window.clearTimeout(routeRefreshTimeout);
       controller?.abort();
       document.removeEventListener("visibilitychange", onConnectivityChange);
       window.removeEventListener("online", onConnectivityChange);
+      window.removeEventListener(DASHBOARD_REFRESH_SETTLED_EVENT, releaseStalledRouteRefresh);
     };
-  }, []);
+  }, [pathname]);
   return null;
 }
