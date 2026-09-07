@@ -8,21 +8,14 @@ import {
   DASHBOARD_REFRESH_INTERVAL_MS,
   DASHBOARD_REFRESH_PROBE_TIMEOUT_MS,
   DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS,
-  DashboardRefreshCommit,
-  DashboardRefreshScheduler,
+  DashboardAutoRefresh,
 } from "./dashboard-auto-refresh";
 
 const router = { refresh: vi.fn() };
-let currentRouter = router;
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard",
-  useRouter: () => currentRouter,
+  useRouter: () => router,
 }));
-
-function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: number }) {
-  return <><DashboardRefreshScheduler/><DashboardRefreshCommit refreshVersion={refreshVersion}/></>;
-}
 
 function liveResponse() {
   return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
@@ -33,7 +26,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   router.refresh.mockReset();
-  currentRouter = router;
 });
 
 describe("DashboardAutoRefresh", () => {
@@ -57,65 +49,6 @@ describe("DashboardAutoRefresh", () => {
 
     view.rerender(<DashboardAutoRefresh refreshVersion={2}/>);
     await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
-    expect(router.refresh).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the scheduler mounted across completed server renders", async () => {
-    vi.useFakeTimers();
-    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
-    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
-    const removeWindowListener = vi.spyOn(window, "removeEventListener");
-    const view = render(<DashboardAutoRefresh refreshVersion={1}/>);
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
-    view.rerender(<DashboardAutoRefresh refreshVersion={2}/>);
-
-    expect(removeDocumentListener).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
-    expect(removeWindowListener).not.toHaveBeenCalledWith("online", expect.any(Function));
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
-    expect(request).toHaveBeenCalledTimes(2);
-    expect(router.refresh).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps the scheduler mounted when Next replaces the router instance", async () => {
-    vi.useFakeTimers();
-    const replacementRouter = { refresh: vi.fn() };
-    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
-    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
-    const removeWindowListener = vi.spyOn(window, "removeEventListener");
-    const view = render(<DashboardAutoRefresh refreshVersion={1}/>);
-
-    currentRouter = replacementRouter;
-    view.rerender(<DashboardAutoRefresh refreshVersion={1}/>);
-
-    expect(removeDocumentListener).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
-    expect(removeWindowListener).not.toHaveBeenCalledWith("online", expect.any(Function));
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(router.refresh).not.toHaveBeenCalled();
-    expect(replacementRouter.refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the layout scheduler alive while the page commit notifier remounts", async () => {
-    vi.useFakeTimers();
-    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(liveResponse());
-    const removeDocumentListener = vi.spyOn(document, "removeEventListener");
-    const removeWindowListener = vi.spyOn(window, "removeEventListener");
-    render(<DashboardRefreshScheduler/>);
-    const page = render(<DashboardRefreshCommit refreshVersion={1}/>);
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
-    expect(request).toHaveBeenCalledTimes(1);
-    page.unmount();
-    render(<DashboardRefreshCommit refreshVersion={2}/>);
-
-    expect(removeDocumentListener).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
-    expect(removeWindowListener).not.toHaveBeenCalledWith("online", expect.any(Function));
-
-    await act(async () => { await vi.advanceTimersByTimeAsync(DASHBOARD_REFRESH_INTERVAL_MS); });
-    expect(request).toHaveBeenCalledTimes(2);
     expect(router.refresh).toHaveBeenCalledTimes(2);
   });
 

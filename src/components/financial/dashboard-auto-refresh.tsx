@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 export const DASHBOARD_HIDDEN_REFRESH_INTERVAL_MS = 120_000;
@@ -9,31 +9,14 @@ export const DASHBOARD_REFRESH_PROBE_TIMEOUT_MS = 5_000;
 export const DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS = 30_000;
 
 const REFRESH_PROBE_PATH = "/api/health/live";
-const DASHBOARD_REFRESH_SETTLED_EVENT = "kairo:dashboard-refresh-settled";
 
 function canRefreshFrom(response: Response) {
   return response.status === 204 && !response.redirected && response.type !== "opaqueredirect";
 }
 
-export function DashboardRefreshCommit({ refreshVersion }: { refreshVersion: number }) {
-  useEffect(() => {
-    window.dispatchEvent(new Event(DASHBOARD_REFRESH_SETTLED_EVENT));
-  }, [refreshVersion]);
-  return null;
-}
-
-export function DashboardRefreshScheduler() {
-  const pathname = usePathname();
+export function DashboardAutoRefresh({ refreshVersion }: { refreshVersion: number }) {
   const router = useRouter();
-  const routerRef = useRef(router);
-
   useEffect(() => {
-    routerRef.current = router;
-  }, [router]);
-
-  useEffect(() => {
-    if (pathname !== "/dashboard") return;
-
     let active = true;
     let requestPending = false;
     let routeRefreshPending = false;
@@ -57,6 +40,7 @@ export function DashboardRefreshScheduler() {
       routeRefreshPending = false;
       schedule();
     };
+
     const refresh = async () => {
       if (!active || requestPending || routeRefreshPending) return;
       if (document.hidden || !navigator.onLine) { schedule(); return; }
@@ -81,7 +65,7 @@ export function DashboardRefreshScheduler() {
           releaseStalledRouteRefresh,
           DASHBOARD_ROUTE_REFRESH_SETTLE_TIMEOUT_MS,
         );
-        routerRef.current.refresh();
+        router.refresh();
       } catch {
         // Keep the last complete render on transient network/auth gateway errors.
       } finally {
@@ -101,7 +85,6 @@ export function DashboardRefreshScheduler() {
     schedule();
     document.addEventListener("visibilitychange", onConnectivityChange);
     window.addEventListener("online", onConnectivityChange);
-    window.addEventListener(DASHBOARD_REFRESH_SETTLED_EVENT, releaseStalledRouteRefresh);
     return () => {
       active = false;
       window.clearTimeout(timer);
@@ -109,8 +92,7 @@ export function DashboardRefreshScheduler() {
       controller?.abort();
       document.removeEventListener("visibilitychange", onConnectivityChange);
       window.removeEventListener("online", onConnectivityChange);
-      window.removeEventListener(DASHBOARD_REFRESH_SETTLED_EVENT, releaseStalledRouteRefresh);
     };
-  }, [pathname]);
+  }, [refreshVersion, router]);
   return null;
 }
