@@ -1,4 +1,5 @@
 import type { InstrumentKind } from "@/types";
+import { isCanonicalCryptoSymbol } from "@/lib/instrument-identity";
 
 // Canonical, direct market instruments. This list only classifies the wrapper;
 // it never propagates issuer or holding activity into an ETF.
@@ -11,7 +12,7 @@ const verifiedEtfSymbols = new Set([
 export function verifiedInstrumentKind(symbolInput: string, reportedType?: string | null, name?: string | null): InstrumentKind | null {
   const symbol = symbolInput.toUpperCase();
   const type = reportedType?.toUpperCase() ?? "";
-  if (symbol.endsWith("-USD") || type.includes("CRYPTO")) return "CRYPTO";
+  if (isCanonicalCryptoSymbol(symbol) || type.includes("CRYPTO")) return "CRYPTO";
   if (symbol.startsWith("^") || type === "INDEX") return "INDEX";
   if (verifiedEtfSymbols.has(symbol) || type.includes("ETF") || /\bETF\b|\bEXCHANGE[- ]TRADED FUND\b|\bSPDR\b|\bISHARES\b/i.test(name ?? "")) return "ETF";
   if (type.includes("FUND")) return "FUND";

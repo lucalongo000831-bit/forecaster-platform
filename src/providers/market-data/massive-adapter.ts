@@ -8,6 +8,7 @@ import { ProviderError } from "../errors";
 import { massiveGet, massiveNumber, massiveString, recordValue } from "../massive/client";
 import { providerResult } from "../metadata";
 import type { MarketDataProvider, MarketStatus } from "../types";
+import { isCanonicalCryptoSymbol } from "@/lib/instrument-identity";
 
 const DAY = 86_400_000;
 const intervalMap: Record<ChartInterval, { multiplier: number; timespan: string }> = {
@@ -29,7 +30,7 @@ function timestampToIso(value: number | null): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function isCrypto(symbol: string) { return symbol.endsWith("-USD"); }
+function isCrypto(symbol: string) { return isCanonicalCryptoSymbol(symbol); }
 function massiveSymbol(symbol: string) { return isCrypto(symbol) ? `X:${symbol.replace("-", "")}` : symbol; }
 function quoteType(symbol: string) {
   const kind = verifiedInstrumentKind(symbol);

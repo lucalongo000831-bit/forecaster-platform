@@ -12,6 +12,7 @@ import { analyzeTechnical } from "@/engines/technical";
 import { analyzeFundamentals, statementValue } from "@/engines/fundamental";
 import { getSeasonalityAnalysis } from "@/services/analysis/seasonality-service";
 import { getPatternAnalysis } from "@/services/analysis/pattern-service";
+import { canonicalCryptoSymbol } from "@/lib/instrument-identity";
 import type {
   DashboardData,
   FundamentalsData,
@@ -47,7 +48,10 @@ const SHELL_SEARCH_RESULTS: ShellData["searchResults"] = [
   ["Stellantis N.V.", "STLAM.MI", "MILAN", "EQUITY"],
 ].map(([name, symbol, exchange, type]) => ({ name, meta: `${symbol} · ${exchange}`, href: instrumentHref(symbol, exchange, type) }));
 
-function refSymbol(ref: InstrumentRef) { return normalizeSymbol(decodeURIComponent(ref.symbol)); }
+function refSymbol(ref: InstrumentRef) {
+  const decoded = decodeURIComponent(ref.symbol);
+  return normalizeSymbol(canonicalCryptoSymbol(decoded, { market: ref.market }) ?? decoded);
+}
 function signal(change: number): Signal { return change >= 0.75 ? "BUY" : change <= -0.75 ? "SELL" : "HOLD"; }
 function compact(value: number | null, currency?: string) {
   if (value === null) return "Dato non disponibile";

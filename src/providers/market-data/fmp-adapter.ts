@@ -6,6 +6,7 @@ import { instrumentHref, marketSlug, normalizeSearchQuery, normalizeSymbol } fro
 import { ProviderError } from "../errors";
 import { providerResult } from "../metadata";
 import type { MarketDataProvider } from "../types";
+import { isCanonicalCryptoSymbol } from "@/lib/instrument-identity";
 import { booleanValue, fmpGet, numberValue, stringValue } from "../fmp/client";
 
 const DAY = 86_400_000;
@@ -25,7 +26,7 @@ function searchType(value: string | null): SearchInstrument["type"] {
   return "Stock";
 }
 
-function fmpSymbol(symbol: string) { return symbol.endsWith("-USD") ? symbol.replace("-", "") : symbol; }
+function fmpSymbol(symbol: string) { return isCanonicalCryptoSymbol(symbol) ? symbol.replace("-", "") : symbol; }
 
 function mapQuote(record: Record<string, unknown>, requestedSymbol: string): MarketQuoteDto {
   const symbol = stringValue(record, "symbol") ?? requestedSymbol;
@@ -77,7 +78,7 @@ export class FmpMarketDataAdapter implements MarketDataProvider {
     const row = (await fmpGet("quote", { symbol: fmpSymbol(symbol) }, "quote"))[0];
     const data = mapQuote(row, symbol);
     data.symbol = symbol;
-    data.quoteType = symbol.endsWith("-USD") ? "CRYPTOCURRENCY" : data.quoteType;
+    data.quoteType = isCanonicalCryptoSymbol(symbol) ? "CRYPTOCURRENCY" : data.quoteType;
     return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: "NEAR_REALTIME" });
   }
   async getQuotes(symbols: string[]) {
@@ -87,7 +88,7 @@ export class FmpMarketDataAdapter implements MarketDataProvider {
     const data = requested.flatMap((symbol) => {
       const row = byProviderSymbol.get(fmpSymbol(symbol));
       if (!row) return [];
-      const quote = mapQuote(row, symbol); quote.symbol = symbol; quote.quoteType = symbol.endsWith("-USD") ? "CRYPTOCURRENCY" : quote.quoteType;
+      const quote = mapQuote(row, symbol); quote.symbol = symbol; quote.quoteType = isCanonicalCryptoSymbol(symbol) ? "CRYPTOCURRENCY" : quote.quoteType;
       return [quote];
     });
     if (!data.length) throw new ProviderError(this.name, "NOT_FOUND", "Nessuna quotazione FMP disponibile.", false, 404);
@@ -109,7 +110,7 @@ export class FmpMarketDataAdapter implements MarketDataProvider {
     }).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     if (!points.length) throw new ProviderError(this.name, "NOT_FOUND", "Storico FMP non disponibile.", false, 404);
     const normalizedInterval = (intradayEndpoint[requestedInterval] ? requestedInterval : "1d") as MarketChartDto["interval"];
-    const data: MarketChartDto = { symbol, currency: "USD", exchange: symbol.endsWith("-USD") ? "CRYPTO" : marketSlug("market"), range, interval: normalizedInterval, previousClose: points.at(-2)?.close ?? null, isDelayed: false, asOf: points.at(-1)?.timestamp ?? null, points, source: "fmp" };
+    const data: MarketChartDto = { symbol, currency: "USD", exchange: isCanonicalCryptoSymbol(symbol) ? "CRYPTO" : marketSlug("market"), range, interval: normalizedInterval, previousClose: points.at(-2)?.close ?? null, isDelayed: false, asOf: points.at(-1)?.timestamp ?? null, points, source: "fmp" };
     return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: intradayEndpoint[requestedInterval] ? "realtime" : "cached", freshnessType: intradayEndpoint[requestedInterval] ? "NEAR_REALTIME" : "END_OF_DAY" });
   }
   async getMarketStatus(): Promise<never> {

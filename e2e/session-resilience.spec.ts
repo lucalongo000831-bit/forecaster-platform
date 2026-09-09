@@ -39,6 +39,7 @@ test("failed dashboard probe preserves the render and the next safe cycle recove
   });
 
   await page.goto("/dashboard");
+  await page.waitForLoadState("networkidle");
   await expect(page.getByRole("heading", { name: dashboardHeading })).toBeVisible();
   await page.clock.fastForward(30_000);
   await expect.poll(() => probes).toBe(1);
@@ -68,6 +69,8 @@ test("dashboard reconnect events cannot overlap an active probe", async ({ page 
   });
 
   await page.goto("/dashboard");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: dashboardHeading })).toBeVisible();
   await page.clock.fastForward(30_000);
   await expect.poll(() => probes).toBe(1);
   await page.evaluate(() => {
