@@ -1,5 +1,6 @@
 import "server-only";
 
+import { canonicalCryptoSymbol } from "@/lib/instrument-identity";
 import { FinancialDataError } from "./errors";
 
 const SYMBOL_PATTERN = /^(?:\^[A-Z0-9][A-Z0-9.-]{0,29}|[A-Z0-9][A-Z0-9.^=-]{0,30})$/;
@@ -38,5 +39,6 @@ export function marketSlug(exchange: string | undefined, quoteType?: string): st
 }
 
 export function instrumentHref(symbol: string, exchange?: string, quoteType?: string): string {
-  return `/instrument/${encodeURIComponent(marketSlug(exchange, quoteType))}/${encodeURIComponent(symbol.toLowerCase())}/overview`;
+  const cryptoSymbol = canonicalCryptoSymbol(symbol, { exchange, quoteType });
+  return `/instrument/${encodeURIComponent(cryptoSymbol ? "crypto" : marketSlug(exchange, quoteType))}/${encodeURIComponent((cryptoSymbol ?? symbol).toLowerCase())}/overview`;
 }

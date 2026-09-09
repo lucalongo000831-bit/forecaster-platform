@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { CryptoProfile } from "@/types";
+import { cryptoBaseSymbol } from "@/lib/instrument-identity";
 import { ProviderError } from "../errors";
 import { coinGeckoGet } from "./client";
 import { arrayValue, numericValue, objectValue, textValue } from "../shared";
@@ -10,7 +11,7 @@ const aliases: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum", SOL: 
 export class CoinGeckoAdapter {
   readonly name = "coingecko" as const;
   async resolveId(symbolInput: string) {
-    const symbol = symbolInput.toUpperCase().replace(/-USD$/, "");
+    const symbol = cryptoBaseSymbol(symbolInput) ?? symbolInput.toUpperCase();
     if (aliases[symbol]) return aliases[symbol];
     const results = objectValue(await coinGeckoGet("search", { query: symbol }, "resolve-id"));
     const match = arrayValue(results.coins).map(objectValue).find((row) => textValue(row, "symbol")?.toUpperCase() === symbol);

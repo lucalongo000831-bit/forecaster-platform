@@ -25,6 +25,7 @@ import { EodhdMarketDataAdapter } from "./market-data/eodhd-adapter";
 import { finnhubCompanyAdapter } from "./finnhub/company-adapter";
 import { yahooFinanceClient } from "@/services/yahoo/yahoo-finance-client";
 import { deterministicE2EProvider } from "./testing/deterministic-e2e-provider";
+import { canonicalizeSearchInstrument } from "@/lib/instrument-identity";
 import type {
   FundamentalsProvider,
   MarketDataProvider,
@@ -99,7 +100,8 @@ export class FinancialProviderRouter {
     const query = normalizeSearchQuery(queryInput);
     const fixture = deterministicE2EProvider(); if (fixture) return fixture.search(query);
     const order = [marketAdapters.fmp, marketAdapters.eodhd, marketAdapters.massive, marketAdapters.yahoo];
-    return providerCached(`search:${query.toLowerCase()}`, { freshSeconds: 300, staleSeconds: 1_800 }, () => firstAvailable("search", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.searchInstruments(query) }))));
+    return providerCached(`search:${query.toLowerCase()}`, { freshSeconds: 300, staleSeconds: 1_800 }, () => firstAvailable("search", undefined, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: true, task: () => adapter.searchInstruments(query) }))))
+      .then((result) => ({ ...result, data: result.data.map(canonicalizeSearchInstrument) }));
   }
 
   quote(symbolInput: string) {
