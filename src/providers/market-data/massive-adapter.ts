@@ -11,6 +11,7 @@ import type { MarketDataProvider, MarketStatus } from "../types";
 import { isCanonicalCryptoSymbol } from "@/lib/instrument-identity";
 
 const DAY = 86_400_000;
+const AUTH_FAILURE_COOLDOWN_MS = 60 * 60_000;
 const intervalMap: Record<ChartInterval, { multiplier: number; timespan: string }> = {
   "1m": { multiplier: 1, timespan: "minute" }, "2m": { multiplier: 2, timespan: "minute" }, "5m": { multiplier: 5, timespan: "minute" }, "15m": { multiplier: 15, timespan: "minute" }, "30m": { multiplier: 30, timespan: "minute" }, "60m": { multiplier: 1, timespan: "hour" }, "90m": { multiplier: 90, timespan: "minute" }, "1h": { multiplier: 1, timespan: "hour" }, "1d": { multiplier: 1, timespan: "day" }, "5d": { multiplier: 5, timespan: "day" }, "1wk": { multiplier: 1, timespan: "week" }, "1mo": { multiplier: 1, timespan: "month" }, "3mo": { multiplier: 3, timespan: "month" },
 };
@@ -92,6 +93,9 @@ async function aggregateQuote(symbol: string): Promise<{ data: MarketQuoteDto; d
 
 export class MassiveMarketDataAdapter implements MarketDataProvider {
   readonly name = "massive" as const;
+  private unifiedSnapshotBlockedUntil = 0;
+  private providerAuthBlockedUntil = 0;
+
   isConfigured() { const env = getServerEnvironment(); return Boolean(env.MASSIVE_API_KEY ?? env.POLYGON_API_KEY); }
   supportsSymbol(symbolInput: string) {
     try {
@@ -122,18 +126,29 @@ export class MassiveMarketDataAdapter implements MarketDataProvider {
   async getQuote(symbolInput: string) {
     const symbol = normalizeSymbol(symbolInput);
     if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Simbolo non supportato dall'adapter Massive.", false, 422);
-    try {
-      const response = await massiveGet("/v3/snapshot", { ticker: massiveSymbol(symbol), market_type: isCrypto(symbol) ? "crypto" : "stocks", limit: 1 }, "quote");
-      const values = Array.isArray(response.results) ? response.results : response.results && typeof response.results === "object" ? [response.results] : [];
-      const row = values.find((value) => value && typeof value === "object") as Record<string, unknown> | undefined;
-      if (!row) throw new ProviderError(this.name, "NOT_FOUND", "Snapshot Massive non disponibile.", false, 404);
-      const data = mapUnifiedSnapshot(row, symbol);
-      return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: "NEAR_REALTIME", quality: "verified" });
-    } catch (error) {
-      if (!(error instanceof ProviderError) || !["UNAUTHORIZED", "PLAN_RESTRICTED", "NOT_FOUND"].includes(error.code)) throw error;
-      const aggregate = await aggregateQuote(symbol);
-      return providerResult(this.name, aggregate.data, { sourceTimestamp: aggregate.data.asOf, freshness: aggregate.delayed ? "delayed" : "realtime", freshnessType: aggregate.delayed ? "DELAYED" : "NEAR_REALTIME", quality: "verified" });
+    const now = Date.now();
+    if (this.providerAuthBlockedUntil > now) {
+      throw new ProviderError(this.name, "UNAUTHORIZED", "Credenziale Massive non autorizzata.", false, 401);
     }
+    if (this.unifiedSnapshotBlockedUntil <= now) {
+      try {
+        const response = await massiveGet("/v3/snapshot", { ticker: massiveSymbol(symbol), market_type: isCrypto(symbol) ? "crypto" : "stocks", limit: 1 }, "quote");
+        const values = Array.isArray(response.results) ? response.results : response.results && typeof response.results === "object" ? [response.results] : [];
+        const row = values.find((value) => value && typeof value === "object") as Record<string, unknown> | undefined;
+        if (!row) throw new ProviderError(this.name, "NOT_FOUND", "Snapshot Massive non disponibile.", false, 404);
+        const data = mapUnifiedSnapshot(row, symbol);
+        return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: "NEAR_REALTIME", quality: "verified" });
+      } catch (error) {
+        if (!(error instanceof ProviderError) || !["UNAUTHORIZED", "PLAN_RESTRICTED", "NOT_FOUND"].includes(error.code)) throw error;
+        if (error.code === "UNAUTHORIZED") {
+          this.providerAuthBlockedUntil = now + AUTH_FAILURE_COOLDOWN_MS;
+          throw error;
+        }
+        if (error.code === "PLAN_RESTRICTED") this.unifiedSnapshotBlockedUntil = now + AUTH_FAILURE_COOLDOWN_MS;
+      }
+    }
+    const aggregate = await aggregateQuote(symbol);
+    return providerResult(this.name, aggregate.data, { sourceTimestamp: aggregate.data.asOf, freshness: aggregate.delayed ? "delayed" : "realtime", freshnessType: aggregate.delayed ? "DELAYED" : "NEAR_REALTIME", quality: "verified" });
   }
 
   async getQuotes(symbols: string[]) {

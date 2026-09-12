@@ -35,8 +35,16 @@ export async function providerRequest<T>(request: ProviderRequest<T>): Promise<T
       const response = await coordinatedProviderRequest(request.provider, async () => {
         const upstream = await fetch(request.url, { headers: request.headers, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(request.timeoutMs ?? 12_000) });
         if (!upstream.ok) {
-          const code = upstream.status === 401 || upstream.status === 403 ? "UNAUTHORIZED" : upstream.status === 404 ? "NOT_FOUND" : upstream.status === 429 ? "RATE_LIMITED" : "UPSTREAM_UNAVAILABLE";
-          throw new ProviderError(request.provider, code, `Risposta provider HTTP ${upstream.status}.`, retryableStatus(upstream.status), upstream.status === 404 ? 404 : 502);
+          const code = upstream.status === 401
+            ? "UNAUTHORIZED"
+            : upstream.status === 403
+              ? "PLAN_RESTRICTED"
+              : upstream.status === 404
+                ? "NOT_FOUND"
+                : upstream.status === 429
+                  ? "RATE_LIMITED"
+                  : "UPSTREAM_UNAVAILABLE";
+          throw new ProviderError(request.provider, code, `Risposta provider HTTP ${upstream.status}.`, retryableStatus(upstream.status), upstream.status);
         }
         return upstream;
       });
