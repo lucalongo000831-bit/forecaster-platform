@@ -30,7 +30,8 @@ export class ProviderError extends Error {
 export function normalizeProviderError(provider: ProviderName, error: unknown): ProviderError {
   if (error instanceof ProviderError) return error;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
-  if (message.includes("abort") || message.includes("timeout")) {
+  const name = error instanceof Error ? error.name.toLowerCase() : "";
+  if (name.includes("abort") || name.includes("timeout") || message.includes("abort") || message.includes("timeout") || message.includes("timed out")) {
     return new ProviderError(provider, "TIMEOUT", "Il provider non ha risposto entro il timeout.", true, 504, { cause: error });
   }
   if (message.includes("429") || message.includes("rate limit") || message.includes("too many")) {
