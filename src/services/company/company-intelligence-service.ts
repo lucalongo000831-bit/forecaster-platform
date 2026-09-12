@@ -8,6 +8,8 @@ import { cacheDelete, cacheGet, cacheSet, withDistributedLock } from "@/lib/serv
 import { AppError } from "@/lib/server/app-error";
 import { safeExternalHttpsUrl } from "@/lib/safe-url";
 import { createSingleFlight } from "@/lib/server/single-flight";
+import { structuredLog } from "@/lib/server/logger";
+import { withServerTimeout } from "@/lib/server/promise-timeout";
 import { revalidateTag, unstable_cache } from "next/cache";
 import { financialProviderRouter, type FinancialStatement } from "@/providers";
 import { getSeasonalityAnalysis } from "@/services/analysis/seasonality-service";
@@ -17,7 +19,7 @@ import { getMarketCalendar } from "@/services/calendar/calendar-service";
 import { getNewsIntelligence } from "@/services/intelligence/news-service";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
 import type { CompanyDataQuality, CompanyIntelligenceReport, CompanySource, MarketProfileDto, PeerComparison } from "@/types";
-import { persistCompanyAnalysis } from "./company-analysis-repository";
+import { loadLatestCompanyAnalysis, persistCompanyAnalysis } from "./company-analysis-repository";
 import { classifyCompanyInstrument } from "./instrument-applicability";
 import { getAnalysisDataBundle } from "@/services/financial/data-bundle-service";
 import { convertHistoricalPeriods } from "@/services/financial/currency-service";
@@ -31,6 +33,9 @@ const cacheTag = (symbol: string) => `company-intelligence:${symbol}`;
 const companyAnalysisFlight = createSingleFlight<string, CompanyIntelligenceReport>();
 const DISTRIBUTED_LOCK_SECONDS = 90;
 const CACHE_WAIT_ATTEMPTS = 15;
+const PERSISTED_FAST_PATH_BUDGET_MS = 750;
+const COMPANY_RENDER_BUDGET_MS = 4_500;
+const DEGRADED_CACHE_SECONDS = 30;
 const PROVIDER_VERSIONS: Record<string, string> = {
   yahoo: "yahoo-finance2@4.0.0 / adapter-v1",
   fmp: "fmp-rest / adapter-v1",
@@ -69,6 +74,92 @@ async function waitForCompletedCompanyAnalysis(symbol: string): Promise<CompanyI
     if (cached) return cached;
   }
   return null;
+}
+
+async function loadPersistedFastPath(symbol: string): Promise<CompanyIntelligenceReport | null> {
+  return withServerTimeout(
+    loadLatestCompanyAnalysis(symbol, COMPANY_INTELLIGENCE_MODEL_VERSION),
+    PERSISTED_FAST_PATH_BUDGET_MS,
+    "Persisted company analysis lookup exceeded the render budget",
+  ).catch((error) => {
+    structuredLog("warn", "company.analysis.fast_path_unavailable", { symbol, code: error instanceof Error ? error.name : "UNKNOWN" });
+    return null;
+  });
+}
+
+async function buildCompanyRenderFallback(symbol: string): Promise<CompanyIntelligenceReport> {
+  const profileTask = financialProviderRouter.profile(symbol).catch(() => null);
+  const quote = await financialProviderRouter.quote(symbol);
+  const profile = await withServerTimeout(profileTask, PERSISTED_FAST_PATH_BUDGET_MS, "Company profile exceeded the render fallback budget").catch(() => null);
+  const { instrumentType, applicable } = classifyCompanyInstrument(symbol, profile?.data.quoteType, quote.data.quoteType, profile?.data.name ?? quote.data.name);
+  const sources: CompanySource[] = [
+    { provider: quote.meta.provider, label: `${symbol} market quote`, url: null, timestamp: quote.meta.sourceTimestamp, kind: "FACT" },
+    ...profileSource(profile?.data ?? null, profile?.meta.provider ?? null),
+  ];
+  const limitation = applicable
+    ? "Secondary company analysis exceeded the interactive render budget. Verified quote data remains available while the complete report is rebuilt."
+    : `Corporate analysis is not applicable to instrument type ${instrumentType}.`;
+  return {
+    symbol,
+    market: quote.data.exchange,
+    name: profile?.data.name ?? quote.data.name,
+    exchange: profile?.data.exchange ?? quote.data.exchange,
+    sector: profile?.data.sector ?? null,
+    industry: profile?.data.industry ?? null,
+    currency: quote.data.currency,
+    instrumentType,
+    applicable,
+    currentPrice: quote.data.price,
+    dailyChangePercent: quote.data.changePercent,
+    marketCap: quote.data.marketCap,
+    marketState: quote.data.marketState,
+    verdict: "INSUFFICIENT_DATA",
+    assessment: "INSUFFICIENT_DATA",
+    overallScore: null,
+    confidence: "VERY_LOW",
+    dataQuality: {
+      score: 20,
+      confidence: "VERY_LOW",
+      completeness: 20,
+      stale: quote.meta.freshnessType === "STALE",
+      checks: [{ code: "INTERACTIVE_RENDER_BUDGET", status: "WARN", message: limitation }],
+      missingFields: applicable ? ["fundamentals", "financialStatements", "valuation", "risk", "seasonality"] : [],
+      divergences: [],
+    },
+    historical: [],
+    earningsQuality: null,
+    quality: null,
+    moat: null,
+    management: null,
+    peers: [],
+    valuation: null,
+    horizons: [],
+    dailyOutlook: null,
+    seasonality: [],
+    operationalCalendar: [],
+    risks: null,
+    macro: null,
+    automotive: null,
+    forecast: null,
+    ownership: null,
+    thesis: { verdict: "INSUFFICIENT DATA", whyItMayWork: [], whyItMayFail: applicable ? [limitation] : [], monitor: [] },
+    sources,
+    fieldProvenance: [],
+    missingData: [],
+    limitations: [limitation, "This is non-personalized research, not investment advice or a promise of future performance."],
+    pipeline: [
+      { name: "LoadMarketData", status: "complete", durationMs: 0, message: null },
+      { name: "CompleteCompanyAnalysis", status: applicable ? "partial" : "not-applicable", durationMs: COMPANY_RENDER_BUDGET_MS, message: limitation },
+    ],
+    modelVersion: COMPANY_INTELLIGENCE_MODEL_VERSION,
+    scoringVersion: COMPANY_SCORE_VERSION,
+    valuationVersion: "company-valuation-v1.1.0",
+    signalVersion: TECHNICAL_MODEL_VERSION,
+    reportVersion: COMPANY_REPORT_VERSION,
+    providerVersions: providerVersions(sources),
+    dataTimestamp: quote.meta.sourceTimestamp,
+    calculatedAt: new Date().toISOString(),
+  };
 }
 
 async function buildCompanyIntelligence(symbol: string): Promise<CompanyIntelligenceReport> {
@@ -213,6 +304,11 @@ export async function getCompanyIntelligence(symbolInput: string, options?: { re
   if (!options?.refresh) {
     const cached = await cacheGet<CompanyIntelligenceReport>(cacheKey(symbol));
     if (cached) return cached;
+    const persisted = await loadPersistedFastPath(symbol);
+    if (persisted) {
+      await cacheSet(cacheKey(symbol), persisted, 21_600);
+      return persisted;
+    }
   }
   const coordinatedBuild = () => companyAnalysisFlight.run(symbol, async () => {
     if (!options?.refresh) {
@@ -230,10 +326,23 @@ export async function getCompanyIntelligence(symbolInput: string, options?: { re
     throw new AppError("PROVIDER_UNAVAILABLE", "Analisi già in elaborazione. Riprova tra pochi secondi", 503, true, 2);
   });
   if (options?.refresh) return coordinatedBuild();
-  return unstable_cache(coordinatedBuild, [cacheKey(symbol)], {
+  const complete = unstable_cache(coordinatedBuild, [cacheKey(symbol)], {
     revalidate: 21_600,
     tags: [cacheTag(symbol)],
   })();
+  const fallback = buildCompanyRenderFallback(symbol).catch(() => null);
+  try {
+    return await withServerTimeout(complete, COMPANY_RENDER_BUDGET_MS, "Complete company analysis exceeded the interactive render budget");
+  } catch (error) {
+    const degraded = await fallback;
+    if (!degraded) throw error;
+    structuredLog("warn", "company.analysis.degraded_fast_path", { symbol, code: error instanceof Error ? error.name : "UNKNOWN" });
+    await cacheSet(cacheKey(symbol), degraded, DEGRADED_CACHE_SECONDS);
+    void complete.catch((completionError) => {
+      structuredLog("warn", "company.analysis.background_completion_failed", { symbol, code: completionError instanceof Error ? completionError.name : "UNKNOWN" });
+    });
+    return degraded;
+  }
 }
 
 export const companyIntelligenceVersions = { model: COMPANY_INTELLIGENCE_MODEL_VERSION, scoring: COMPANY_SCORE_VERSION, quality: COMPANY_QUALITY_MODEL_VERSION, valuation: "company-valuation-v1.1.0", signal: TECHNICAL_MODEL_VERSION, news: NEWS_INTELLIGENCE_MODEL_VERSION, report: COMPANY_REPORT_VERSION };

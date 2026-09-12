@@ -70,6 +70,10 @@ export async function getAnalysisDataBundle(symbolInput: string): Promise<Analys
 export async function getEtfDataBundle(symbolInput: string): Promise<EtfDataBundle> {
   const instrument = await resolveInstrument(symbolInput); const symbol = instrument.canonicalSymbol;
   return (await providerCached(`etf-bundle:${symbol}`, { freshSeconds: 21_600, staleSeconds: 172_800 }, async () => {
+    if (deterministicE2EProvider()) {
+      const data: EtfDataBundle = { instrument, profile: null, provenance: [], missing: [], calculatedAt: new Date().toISOString() };
+      return providerResult("yahoo", data, { freshness: "cached", freshnessType: "CACHED", quality: "partial" });
+    }
     let profile = null; const missingData: MissingDataDetail[] = [];
     try { profile = await finnhubCompanyAdapter.getEtfProfile(symbol); } catch (error) { missingData.push(missing("etfProfile", error, ["finnhub"])); }
     const lineage: FieldProvenance[] = profile ? [{ field: "etfProfile", provider: "finnhub", sourceTimestamp: null, fetchedAt: new Date().toISOString(), quality: profile.holdings.length ? "verified" : "partial" }] : [];
@@ -81,6 +85,10 @@ export async function getEtfDataBundle(symbolInput: string): Promise<EtfDataBund
 export async function getCryptoDataBundle(symbolInput: string): Promise<CryptoDataBundle> {
   const instrument = await resolveInstrument(symbolInput); const symbol = instrument.canonicalSymbol;
   return (await providerCached(`crypto-bundle:${symbol}`, { freshSeconds: 300, staleSeconds: 1_800 }, async () => {
+    if (deterministicE2EProvider()) {
+      const data: CryptoDataBundle = { instrument, profile: null, global: {}, provenance: [], missing: [], calculatedAt: new Date().toISOString() };
+      return providerResult("yahoo", data, { freshness: "cached", freshnessType: "CACHED", quality: "partial" });
+    }
     const [profileResult, globalResult] = await Promise.allSettled([coinGeckoAdapter.getProfile(symbol), coinGeckoAdapter.getGlobalContext()]); const missingData: MissingDataDetail[] = [];
     const profile = profileResult.status === "fulfilled" ? profileResult.value : (missingData.push(missing("cryptoProfile", profileResult.reason, ["coingecko"])), null);
     const global = globalResult.status === "fulfilled" ? globalResult.value : (missingData.push(missing("cryptoGlobal", globalResult.reason, ["coingecko"])), {});
