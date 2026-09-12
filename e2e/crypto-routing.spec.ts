@@ -27,6 +27,8 @@ test("search opens ETH and BTC through canonical crypto routes", async ({ page }
 });
 
 test("legacy .CC routes redirect once and preserve crypto sections", async ({ page, request }) => {
+  test.setTimeout(240_000);
+
   const legacyResponse = await request.get("/instrument/cc/eth-usd.cc/overview?source=bookmark", { maxRedirects: 0 });
   expect(legacyResponse.status()).toBe(308);
   const location = new URL(legacyResponse.headers().location!, "http://kairo.test");

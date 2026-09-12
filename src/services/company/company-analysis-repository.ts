@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { companyAnalysisReports, companyAnalysisSnapshots, getDatabase, instruments, isDatabaseConfigured } from "@/db";
 import type { CompanyDecisionSnapshot } from "@/engines/company";
 import { structuredLog } from "@/lib/server/logger";
@@ -22,6 +22,27 @@ export async function persistCompanyAnalysis(report: CompanyIntelligenceReport) 
     return snapshot.id;
   } catch (error) {
     structuredLog("warn", "company.analysis.persistence_failed", { symbol: report.symbol, code: error instanceof Error ? error.name : "UNKNOWN" });
+    return null;
+  }
+}
+
+export async function loadLatestCompanyAnalysis(symbol: string, modelVersion: string): Promise<CompanyIntelligenceReport | null> {
+  if (!isDatabaseConfigured()) return null;
+  try {
+    const [row] = await getDatabase()
+      .select({ payload: companyAnalysisSnapshots.payload })
+      .from(companyAnalysisSnapshots)
+      .where(and(
+        eq(companyAnalysisSnapshots.symbol, symbol),
+        eq(companyAnalysisSnapshots.modelVersion, modelVersion),
+        gte(companyAnalysisSnapshots.expiresAt, new Date()),
+      ))
+      .orderBy(desc(companyAnalysisSnapshots.calculatedAt))
+      .limit(1);
+    if (!row?.payload || row.payload.symbol !== symbol || row.payload.modelVersion !== modelVersion) return null;
+    return row.payload as unknown as CompanyIntelligenceReport;
+  } catch (error) {
+    structuredLog("warn", "company.analysis.lkg_read_failed", { symbol, code: error instanceof Error ? error.name : "UNKNOWN" });
     return null;
   }
 }

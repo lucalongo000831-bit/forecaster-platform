@@ -197,6 +197,8 @@ export function KairoTimeSeriesChart({
       });
       observerRef.current.observe(host);
       setReady((value) => value + 1);
+    }).catch(() => {
+      // A failed optional chart chunk must stay isolated from the surrounding market workspace.
     });
     return () => {
       disposed = true;

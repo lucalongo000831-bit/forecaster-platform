@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { ArrowUpRight, BellRing, Bot, Cpu, Sparkles, Star } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { formatCompactNumber, formatCurrency, formatDataSource, formatPercent, instrumentPath } from "@/lib";
-import type { InstrumentProfile, InstrumentRef, QuoteResponse } from "@/types";
+import { instrumentQuoteRefreshIntervalMs, isUsableQuoteResponse } from "@/lib/instrument-refresh";
+import type { InstrumentProfile, InstrumentRef } from "@/types";
 import { useKairoChat } from "@/components/ai/kairo-chat-provider";
 
 const tabs = [
@@ -25,8 +26,8 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
     if (document.hidden) return;
     try {
       const response = await fetch(`/api/market/quote?symbol=${encodeURIComponent(instrument.symbol)}`, { cache: "no-store" });
-      const body = await response.json() as QuoteResponse | { error?: { message?: string } };
-      if (!response.ok || !("data" in body)) return;
+      const body: unknown = await response.json();
+      if (!response.ok || !isUsableQuoteResponse(body)) return;
       setQuote({
         price: body.data.price, change: body.data.change, changePercent: body.data.changePercent,
         dayLow: body.data.dayLow ?? body.data.price, dayHigh: body.data.dayHigh ?? body.data.price,
@@ -57,14 +58,14 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
     const schedule = () => {
       window.clearTimeout(timer);
       if (document.hidden) return;
-      const interval = quote.marketStatus === "Market open" || quote.marketStatus === "Extended hours" ? 5_000 : 60_000;
+      const interval = instrumentQuoteRefreshIntervalMs(quote.marketStatus, quote.freshnessType);
       timer = window.setTimeout(async () => { await refreshQuote(); schedule(); }, interval);
     };
     const visibility = () => { if (!document.hidden) void refreshQuote(); schedule(); };
     document.addEventListener("visibilitychange", visibility);
     schedule();
     return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", visibility); };
-  }, [quote.marketStatus, refreshQuote]);
+  }, [quote.freshnessType, quote.marketStatus, refreshQuote]);
 
   const freshnessLabel = quote.freshnessType === "REALTIME" ? "LIVE" : quote.freshnessType === "NEAR_REALTIME" ? "LIVE · REST" : quote.freshnessType === "DELAYED" ? `DELAYED${quote.delaySeconds ? ` · ${Math.ceil(quote.delaySeconds / 60)} MIN` : ""}` : quote.freshnessType === "STALE" ? "STALE" : quote.freshnessType === "CACHED" ? "CACHED" : formatDataSource(quote.source, quote.isDelayed);
   const freshnessTitle = `Provider: ${quote.provider ?? quote.source ?? "unavailable"}\nUpdated: ${quote.sourceTimestamp ? new Date(quote.sourceTimestamp).toLocaleTimeString("en-GB") : "unavailable"}\nMarket: ${instrument.exchange ?? instrument.market}`;
