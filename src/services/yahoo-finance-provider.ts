@@ -36,12 +36,13 @@ import type {
 const DEFAULT_SYMBOL = "NVDA";
 const DEFAULT_REF: InstrumentRef = { market: "nasdaq", symbol: DEFAULT_SYMBOL };
 const WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA"];
-const DISCOVERY_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "^GSPC", "BTC-USD", "ENI.MI", "STLAM.MI"];
+const DISCOVERY_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA", "SPY", "^GSPC", "BTC-USD", "ENI.MI", "STLAM.MI"];
 const SHELL_SEARCH_RESULTS: ShellData["searchResults"] = [
   ["Apple Inc.", "AAPL", "NASDAQ", "EQUITY"],
   ["Microsoft Corporation", "MSFT", "NASDAQ", "EQUITY"],
   ["NVIDIA Corporation", "NVDA", "NASDAQ", "EQUITY"],
   ["Tesla, Inc.", "TSLA", "NASDAQ", "EQUITY"],
+  ["SPDR S&P 500 ETF Trust", "SPY", "NYSEARCA", "ETF"],
   ["S&P 500", "^GSPC", "INDEX", "INDEX"],
   ["Bitcoin USD", "BTC-USD", "CRYPTO", "CRYPTOCURRENCY"],
   ["Eni S.p.A.", "ENI.MI", "MILAN", "EQUITY"],

@@ -84,6 +84,9 @@ test("real search interaction returns encoded instrument navigation", async ({ p
   await page.getByPlaceholder("Search company, symbol or theme").fill("STLAM");
   const canonicalResult = page.getByRole("row", { name: /STLAM\.MI Stellantis N\.V\./i });
   await expect(canonicalResult.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", "/instrument/milan/stlam.mi/overview");
+  await page.getByPlaceholder("Search company, symbol or theme").fill("SPY");
+  const canonicalEtf = page.getByRole("row", { name: /SPY SPDR S&P 500 ETF Trust/i });
+  await expect(canonicalEtf.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", /\/instrument\/.+\/spy\/overview/);
 });
 
 test("instrument workspace changes chart period and exposes research tabs", async ({ page }) => {
