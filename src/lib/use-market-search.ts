@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SearchInstrument, SearchResponse } from "@/types";
+import { mergeSearchResults } from "./market-search-results";
 
 const searchMemory = new Map<string, SearchInstrument[]>();
 
@@ -29,8 +30,9 @@ export function useMarketSearch(query: string, initial: SearchInstrument[]) {
           const response = await fetch(`/api/market/search?q=${encodeURIComponent(normalized)}`, { signal: controller.signal });
           const body = await response.json() as SearchResponse | { error?: { message?: string } };
           if (!response.ok || !("data" in body)) throw new Error("error" in body ? body.error?.message : "Ricerca non disponibile");
-          searchMemory.set(cacheKey, body.data);
-          setResults(body.data);
+          const merged = mergeSearchResults(localMatches, body.data);
+          searchMemory.set(cacheKey, merged);
+          setResults(merged);
           setLoading(false);
           return;
         } catch (requestError) {

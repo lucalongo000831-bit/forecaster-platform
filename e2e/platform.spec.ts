@@ -81,6 +81,9 @@ test("real search interaction returns encoded instrument navigation", async ({ p
   await response;
   const result = page.getByRole("row", { name: /KAIRO\.MI Kairo Test Instrument/i });
   await expect(result.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", "/instrument/milan/kairo.mi/overview");
+  await page.getByPlaceholder("Search company, symbol or theme").fill("STLAM");
+  const canonicalResult = page.getByRole("row", { name: /STLAM\.MI Stellantis N\.V\./i });
+  await expect(canonicalResult.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", "/instrument/milan/stlam.mi/overview");
 });
 
 test("instrument workspace changes chart period and exposes research tabs", async ({ page }) => {
@@ -191,7 +194,11 @@ test("private pages expose controlled unauthenticated or empty states", async ({
 });
 
 test("calendar, backtest and invalid ticker produce controlled UI/API states", async ({ page, request }) => {
+  const hydrationErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error" && /react|hydration/i.test(message.text())) hydrationErrors.push(message.text()); });
+  page.on("pageerror", (error) => { if (/react|hydration/i.test(error.message)) hydrationErrors.push(error.message); });
   await page.goto("/calendar"); await expect(page.getByRole("heading", { name: /Market calendar/i })).toBeVisible();
+  expect(hydrationErrors).toEqual([]);
   await page.goto("/backtest"); await expect(page.getByRole("heading", { name: /Backtest, without hindsight/i })).toBeVisible();
   const invalid = await request.get("/api/market/quote?symbol=%20%3Cscript%3E"); expect(invalid.status()).toBe(400);
 });
