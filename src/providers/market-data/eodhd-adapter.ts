@@ -12,7 +12,7 @@ import type { MarketDataProvider } from "../types";
 const DAY = 86_400_000;
 function fromDate(range: ChartRange) {
   const now = new Date();
-  const days: Record<ChartRange, number> = { "1D": 2, "5D": 7, "1M": 35, "3M": 95, "6M": 190, YTD: 370, "1Y": 370, "5Y": 1_830, "10Y": 3_660, MAX: 18_250 };
+  const days: Record<ChartRange, number> = { "1D": 2, "5D": 7, "1M": 35, "3M": 95, "6M": 190, YTD: 370, "1Y": 370, "3Y": 1_100, "5Y": 1_830, "10Y": 3_660, MAX: 18_250 };
   return (range === "YTD" ? new Date(Date.UTC(now.getUTCFullYear(), 0, 1)) : new Date(now.getTime() - days[range] * DAY)).toISOString().slice(0, 10);
 }
 

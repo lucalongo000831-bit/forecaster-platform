@@ -3,6 +3,7 @@ import type { ApiMeta, MarketChartPoint } from "./market-api";
 export const TECHNICAL_V1_MODEL_VERSION = "technical-v1.0.0" as const;
 export const TECHNICAL_CHART_MODEL_VERSION = "technical-v2.0.0" as const;
 export const TECHNICAL_V3_MODEL_VERSION = "technical-v3.0.0" as const;
+export const TECHNICAL_V4_MODEL_VERSION = "technical-v4.0.0" as const;
 
 export type TechnicalTimeframe = "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1D" | "1W";
 export type TechnicalChartType = "candlestick" | "line" | "area" | "heikin-ashi";
@@ -36,6 +37,12 @@ export interface TechnicalChartDataset {
   isDelayed: boolean;
   asOf: string | null;
   source: string;
+  range?: Exclude<TechnicalHistoricalRange, "CUSTOM">;
+  requestedRange?: TechnicalHistoricalRange;
+  historyStart?: string | null;
+  historyEnd?: string | null;
+  rangeAvailability?: TechnicalRangeAvailability;
+  rangeMessage?: string | null;
 }
 
 export interface TechnicalChartResponse {
@@ -361,4 +368,167 @@ export interface TechnicalConfluenceV2 {
   overallAlignment: "HIGH" | "MEDIUM" | "LOW" | "PARTIAL";
   reasons: string[];
   modelVersion: "technical-confluence-v2.0.0";
+}
+
+export type TechnicalHistoricalRange = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "3Y" | "5Y" | "10Y" | "MAX" | "CUSTOM";
+export type TechnicalRangeAvailability = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE" | "LOADING" | "STALE";
+
+export interface TechnicalRangeSelection {
+  range: TechnicalHistoricalRange;
+  from: string | null;
+  to: string | null;
+}
+
+export interface TechnicalPanelRangeState extends TechnicalRangeSelection {
+  availability: TechnicalRangeAvailability;
+  reason: string | null;
+}
+
+export type PositionSide = "LONG" | "SHORT";
+export interface PositionPlannerInput {
+  side: PositionSide;
+  entry: number | null;
+  stop: number | null;
+  targets: Array<number | null>;
+  accountSize: number | null;
+  riskPercent: number | null;
+  atr: number | null;
+  fractional: boolean;
+}
+export interface PositionPlannerTarget {
+  index: number;
+  price: number;
+  reward: number;
+  rewardPercent: number;
+  riskReward: number;
+}
+export interface PositionPlannerResult {
+  status: "VALID" | "INVALID" | "INCOMPLETE";
+  reason: string | null;
+  side: PositionSide;
+  entry: number | null;
+  stop: number | null;
+  risk: number | null;
+  riskPercent: number | null;
+  atrDistance: number | null;
+  riskCapital: number | null;
+  quantity: number | null;
+  wholeQuantity: number | null;
+  notional: number | null;
+  targets: PositionPlannerTarget[];
+  modelVersion: "position-planner-v1.0.0";
+}
+
+export interface TechnicalSwingQuality {
+  swingId: string;
+  score: number;
+  label: "LOW" | "MEDIUM" | "HIGH";
+  contributors: string[];
+}
+export interface TechnicalLiquidityZone {
+  id: string;
+  side: "BUY_SIDE" | "SELL_SIDE";
+  low: number;
+  high: number;
+  touches: number;
+  createdAt: string;
+  availableAt: string;
+  status: "ACTIVE" | "SWEPT";
+}
+export interface TechnicalLiquiditySweep {
+  id: string;
+  zoneId: string;
+  side: TechnicalLiquidityZone["side"];
+  direction: "BULLISH" | "BEARISH";
+  timestamp: string;
+  price: number;
+  availableAt: string;
+}
+export interface TechnicalDisplacement {
+  id: string;
+  direction: "BULLISH" | "BEARISH";
+  timestamp: string;
+  score: number;
+  bodyAtr: number;
+  relativeVolume: number | null;
+  availableAt: string;
+}
+export interface TechnicalFairValueGap {
+  id: string;
+  direction: "BULLISH" | "BEARISH";
+  low: number;
+  high: number;
+  createdAt: string;
+  availableAt: string;
+  status: "OPEN" | "PARTIAL" | "FILLED";
+  filledPercent: number;
+  filledAt: string | null;
+}
+export interface TechnicalStructureTimelineEvent {
+  id: string;
+  type: "BOS" | "CHOCH" | "LIQUIDITY_SWEEP" | "DISPLACEMENT" | "FVG_CREATED" | "FVG_FILLED";
+  direction: "BULLISH" | "BEARISH";
+  timestamp: string;
+  price: number;
+  description: string;
+  availableAt: string;
+}
+export interface TechnicalStructureV4Result {
+  status: "AVAILABLE" | "UNAVAILABLE";
+  reason: string | null;
+  swingQuality: TechnicalSwingQuality[];
+  liquidityZones: TechnicalLiquidityZone[];
+  sweeps: TechnicalLiquiditySweep[];
+  displacements: TechnicalDisplacement[];
+  fairValueGaps: TechnicalFairValueGap[];
+  timeline: TechnicalStructureTimelineEvent[];
+  modelVersion: "technical-structure-v4.0.0";
+}
+
+export interface TechnicalCrossAssetPoint { timestamp: string; asset: number; benchmark: number; relativeStrength: number; correlation20: number | null; correlation60: number | null; }
+export interface TechnicalCrossAssetResult {
+  status: "AVAILABLE" | "INSUFFICIENT_DATA";
+  reason: string | null;
+  benchmark: string;
+  points: TechnicalCrossAssetPoint[];
+  beta: number | null;
+  assetVolatility: number | null;
+  benchmarkVolatility: number | null;
+  relativeVolatility: number | null;
+  context: "OUTPERFORMING" | "UNDERPERFORMING" | "NEUTRAL" | "UNAVAILABLE";
+  overlapStart: string | null;
+  overlapEnd: string | null;
+  modelVersion: "cross-asset-v1.0.0";
+}
+
+export interface TechnicalConfluenceContributor { id: string; label: string; value: number; weight: number; explanation: string; }
+export interface TechnicalConfluenceV4 {
+  status: "AVAILABLE" | "PARTIAL";
+  score: number;
+  label: "LOW" | "MODERATE" | "HIGH";
+  contributors: TechnicalConfluenceContributor[];
+  disclosure: "DESCRIPTIVE_NOT_PROBABILITY";
+  modelVersion: "technical-confluence-v4.0.0";
+}
+
+export interface TechnicalFeatureStateV4 extends TechnicalFeatureStateV3 {
+  liquidity: boolean;
+  fairValueGaps: boolean;
+  displacement: boolean;
+  positionPlanner: boolean;
+  crossAsset: boolean;
+  eventTimeline: boolean;
+  showHistoricalFvg: boolean;
+}
+export interface TechnicalTemplateV4 extends Omit<TechnicalTemplate, "features"> { features: TechnicalFeatureStateV4; favorite?: boolean; }
+export interface TechnicalWorkspaceV4 extends Omit<TechnicalWorkspaceV3, "version" | "features" | "customTemplates"> {
+  version: 4;
+  features: TechnicalFeatureStateV4;
+  customTemplates: TechnicalTemplateV4[];
+  panelRanges: Record<string, TechnicalPanelRangeState>;
+  syncRange: boolean;
+  planners: Record<string, PositionPlannerInput>;
+  benchmarks: Record<string, string>;
+  favoriteTemplateIds: string[];
+  recentSymbols: string[];
 }

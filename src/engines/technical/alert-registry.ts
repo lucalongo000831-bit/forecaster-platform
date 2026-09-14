@@ -3,6 +3,7 @@ import type { MarketChartPoint } from "@/types";
 import { anchoredVwap, calculateVolumeProfile } from "./v2";
 import { calculateIndicatorSeries, sanitizeTechnicalBars } from "./terminal";
 import { calculateMarketStructure, calculateTechnicalDivergences } from "./v3";
+import { calculateTechnicalStructureV4 } from "./structure-v4";
 
 export const TECHNICAL_ALERT_MODEL_VERSION = "technical-alert-v1.0.0" as const;
 
@@ -19,6 +20,11 @@ export const TECHNICAL_ALERT_CONDITIONS = [
   "TECH_PRICE_CROSS_EMA",
   "TECH_PRICE_CROSS_AVWAP",
   "TECH_PRICE_CROSS_PROFILE",
+  "TECH_LIQUIDITY_SWEEP",
+  "TECH_PRICE_ENTER_FVG",
+  "TECH_PLANNER_ENTRY",
+  "TECH_PLANNER_STOP",
+  "TECH_PLANNER_TARGET",
 ] as const;
 
 export type TechnicalAlertConditionId = typeof TECHNICAL_ALERT_CONDITIONS[number];
@@ -37,6 +43,11 @@ const schemas: Record<TechnicalAlertConditionId, z.ZodType<Record<string, unknow
   TECH_PRICE_CROSS_EMA: z.object({ period: z.number().int().min(2).max(250), direction }),
   TECH_PRICE_CROSS_AVWAP: z.object({ anchorTimestamp: z.iso.datetime(), direction }),
   TECH_PRICE_CROSS_PROFILE: z.object({ boundary: z.enum(["POC", "VAH", "VAL"]), binCount: z.number().int().min(4).max(200).default(24), valueAreaPercent: z.number().gt(0).lt(1).default(0.7), direction }),
+  TECH_LIQUIDITY_SWEEP: z.object({ side: z.enum(["BUY_SIDE", "SELL_SIDE", "EITHER"]).default("EITHER") }),
+  TECH_PRICE_ENTER_FVG: z.object({ direction: z.enum(["BULLISH", "BEARISH", "EITHER"]).default("EITHER") }),
+  TECH_PLANNER_ENTRY: z.object({ level: z.number().positive(), direction }),
+  TECH_PLANNER_STOP: z.object({ level: z.number().positive(), direction }),
+  TECH_PLANNER_TARGET: z.object({ level: z.number().positive(), target: z.number().int().min(1).max(3), direction }),
 };
 
 export const TECHNICAL_ALERT_REGISTRY = {
@@ -52,6 +63,11 @@ export const TECHNICAL_ALERT_REGISTRY = {
   TECH_PRICE_CROSS_EMA: { label: "Price crosses EMA", requiredInputs: ["OHLC", "EMA"] },
   TECH_PRICE_CROSS_AVWAP: { label: "Price crosses Anchored VWAP", requiredInputs: ["OHLC", "AVWAP"] },
   TECH_PRICE_CROSS_PROFILE: { label: "Price crosses POC / VAH / VAL", requiredInputs: ["OHLC", "VOLUME_PROFILE"] },
+  TECH_LIQUIDITY_SWEEP: { label: "Liquidity sweep confirmed", requiredInputs: ["OHLC", "LIQUIDITY"] },
+  TECH_PRICE_ENTER_FVG: { label: "Price enters fair value gap", requiredInputs: ["OHLC", "FVG"] },
+  TECH_PLANNER_ENTRY: { label: "Planner entry reached", requiredInputs: ["OHLC", "PLANNER"] },
+  TECH_PLANNER_STOP: { label: "Planner stop reached", requiredInputs: ["OHLC", "PLANNER"] },
+  TECH_PLANNER_TARGET: { label: "Planner target reached", requiredInputs: ["OHLC", "PLANNER"] },
 } as const satisfies Record<TechnicalAlertConditionId, { label: string; requiredInputs: readonly string[] }>;
 
 export interface TechnicalAlertEvaluation {
@@ -162,6 +178,20 @@ export function evaluateTechnicalAlertCondition(condition: TechnicalAlertConditi
     if (profile.status !== "AVAILABLE" || level === null) return unavailable("VOLUME_PROFILE_UNAVAILABLE");
     evaluation = crossed(current, level, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   }
+  if (condition === "TECH_LIQUIDITY_SWEEP") {
+    const side = parameters.side as "BUY_SIDE" | "SELL_SIDE" | "EITHER";
+    const event = calculateTechnicalStructureV4(bars).sweeps.filter((row) => side === "EITHER" || row.side === side).at(-1);
+    const state = event?.id ?? "NONE";
+    evaluation = { state, observed: event?.timestamp ?? null, triggered: Boolean(event && previousState !== null && previousState !== state) };
+  }
+  if (condition === "TECH_PRICE_ENTER_FVG") {
+    const requested = parameters.direction as "BULLISH" | "BEARISH" | "EITHER";
+    const gap = calculateTechnicalStructureV4(bars).fairValueGaps.filter((row) => row.status !== "FILLED" && (requested === "EITHER" || row.direction === requested)).at(-1);
+    if (!gap) return unavailable("OPEN_FVG_UNAVAILABLE");
+    const inside = current >= gap.low && current <= gap.high; const state = inside ? `INSIDE:${gap.id}` : `OUTSIDE:${gap.id}`;
+    evaluation = { state, observed: current, triggered: previousState !== null && inside && previousState !== state };
+  }
+  if (["TECH_PLANNER_ENTRY", "TECH_PLANNER_STOP", "TECH_PLANNER_TARGET"].includes(condition)) evaluation = crossed(current, parameters.level as number, parameters.direction as "UP" | "DOWN" | "EITHER", previousState);
   if (!evaluation) return unavailable("CONDITION_NOT_IMPLEMENTED");
   const triggered = previousState === null ? false : evaluation.triggered;
   return { available: true, triggered, state: evaluation.state, observed: evaluation.observed, message: `${TECHNICAL_ALERT_REGISTRY[condition].label}: ${String(evaluation.observed ?? evaluation.state)}`, reason: null, freshness: null };

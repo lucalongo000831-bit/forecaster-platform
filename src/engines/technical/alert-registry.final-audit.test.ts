@@ -13,6 +13,7 @@ describe("Technical V3 independent alert audit", () => {
       TECH_BOS_CONFIRMED: {}, TECH_CHOCH_CONFIRMED: {}, TECH_RSI_CROSS: { threshold: 70 }, TECH_MACD_CROSS_SIGNAL: {},
       TECH_DIVERGENCE_BULLISH: {}, TECH_DIVERGENCE_BEARISH: {}, TECH_PRICE_CROSS_EMA: { period: 20 },
       TECH_PRICE_CROSS_AVWAP: { anchorTimestamp: "2025-01-01T00:00:00.000Z" }, TECH_PRICE_CROSS_PROFILE: { boundary: "POC" },
+      TECH_LIQUIDITY_SWEEP: {}, TECH_PRICE_ENTER_FVG: {}, TECH_PLANNER_ENTRY: { level: 100 }, TECH_PLANNER_STOP: { level: 90 }, TECH_PLANNER_TARGET: { level: 110, target: 1 },
     };
     for (const condition of TECHNICAL_ALERT_CONDITIONS) expect(parseTechnicalAlertParameters(condition, valid[condition])).toBeTruthy();
   });

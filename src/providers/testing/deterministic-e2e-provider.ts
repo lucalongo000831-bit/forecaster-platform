@@ -149,7 +149,7 @@ function hourlyHistory(symbolInput: string) {
 }
 
 function rangeStart(range: ChartRange) {
-  const days: Partial<Record<ChartRange, number>> = { "1D": 1, "5D": 5, "1M": 31, "3M": 93, "6M": 186, YTD: 233, "1Y": 366, "5Y": 1_827, "10Y": 3_653 };
+  const days: Partial<Record<ChartRange, number>> = { "1D": 1, "5D": 5, "1M": 31, "3M": 93, "6M": 186, YTD: 233, "1Y": 366, "3Y": 1_096, "5Y": 1_827, "10Y": 3_653 };
   return days[range] ? Date.parse(FIXTURE_AS_OF) - days[range]! * 86_400_000 : Number.NEGATIVE_INFINITY;
 }
 

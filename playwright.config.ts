@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const localChannel = process.platform === "darwin" ? "chrome" : undefined;
-const localServerCommand = process.env.PLAYWRIGHT_SERVER_COMMAND ?? "node node_modules/next/dist/bin/next dev --webpack";
+const localServerCommand = process.env.PLAYWRIGHT_SERVER_COMMAND
+  ?? "node --max-old-space-size=4096 node_modules/next/dist/bin/next dev --webpack";
 
 export default defineConfig({
   testDir: "./e2e",
