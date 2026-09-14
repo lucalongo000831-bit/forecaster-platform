@@ -8,7 +8,7 @@ function rows(closes: number[]): MarketChartPoint[] {
 
 describe("Technical alert typed registry", () => {
   it("covers every declared condition with a validator", () => {
-    expect(new Set(TECHNICAL_ALERT_CONDITIONS).size).toBe(12);
+    expect(new Set(TECHNICAL_ALERT_CONDITIONS).size).toBe(17);
     expect(() => parseTechnicalAlertParameters("TECH_PRICE_CROSS_LEVEL", { level: -1 })).toThrow();
     expect(parseTechnicalAlertParameters("TECH_PRICE_CROSS_LEVEL", { level: 100, direction: "UP" })).toEqual({ level: 100, direction: "UP" });
   });

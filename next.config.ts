@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   allowedDevOrigins: ["127.0.0.1"],
+  experimental: process.env.KAIRO_E2E_RUN === "playwright"
+    ? { devMemoryThresholdRestart: false }
+    : undefined,
   async headers() {
     return [{
       source: "/(.*)",

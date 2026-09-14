@@ -12,8 +12,8 @@ export async function GET(request: Request) {
   const context = createRequestContext(request);
   try {
     await enforceRateLimit(context.ip, { scope: "analysis:technical-chart", limit: 30 });
-    const { symbol, timeframe } = technicalChartRequestSchema.parse(queryObject(request));
-    const result = await getTechnicalChartDataset(symbol, timeframe);
+    const { symbol, timeframe, range, from, to } = technicalChartRequestSchema.parse(queryObject(request));
+    const result = await getTechnicalChartDataset(symbol, timeframe, range, { from, to });
     const intraday = ["1m", "5m", "15m", "30m", "1h", "4h"].includes(timeframe);
     return providerApiSuccess(result, context, intraday ? "public, s-maxage=10, stale-while-revalidate=60" : "public, s-maxage=900, stale-while-revalidate=21600");
   } catch (error) {
