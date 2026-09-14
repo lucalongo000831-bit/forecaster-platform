@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AreaChart, BarChart3, CandlestickChart, ChevronDown, Eraser, Expand, Grid2X2, LineChart, Maximize2, Minimize2, MousePointer2, Plus, RotateCcw, Ruler, Save, Trash2 } from "lucide-react";
-import type { ApiSuccess, MtfTechnicalLevel, PositionPlannerInput, RangedVolumeProfileResult, TechnicalChartDataset, TechnicalChartResponse, TechnicalDrawing, TechnicalDrawingTool, TechnicalHistoricalRange, TechnicalIndicatorConfig, TechnicalIndicatorKind, TechnicalLayout, TechnicalPanelState, TechnicalTemplateV4, TechnicalTimeframe, TechnicalWorkspaceV4 } from "@/types";
-import { TECHNICAL_ALERT_CONDITIONS, TECHNICAL_ALERT_REGISTRY, TECHNICAL_DRAWING_REGISTRY, TECHNICAL_TIMEFRAMES, calculateAnchoredVolumeProfile, calculateCrossAssetContext, calculateFixedRangeVolumeProfile, calculateMarketStructure, calculateMtfStructure, calculateMtfTechnicalLevels, calculatePositionPlan, calculateSessionAnalytics, calculateTechnicalConfluenceV2, calculateTechnicalConfluenceV4, calculateTechnicalDivergences, calculateTechnicalLevels, calculateTechnicalStructureV4, calculateVolumeProfile, defaultTechnicalBenchmark, filterTechnicalRange, type TechnicalAlertConditionId } from "@/engines/technical";
+import type { ApiSuccess, MtfTechnicalLevel, PositionPlannerInput, RangedVolumeProfileResult, TechnicalChartDataset, TechnicalChartResponse, TechnicalDrawing, TechnicalDrawingTool, TechnicalHistoricalRange, TechnicalIndicatorConfig, TechnicalIndicatorKind, TechnicalLayout, TechnicalPanelRangeState, TechnicalPanelState, TechnicalRangeSelection, TechnicalTemplateV4, TechnicalTimeframe, TechnicalWorkspaceV4 } from "@/types";
+import { TECHNICAL_ALERT_CONDITIONS, TECHNICAL_ALERT_REGISTRY, TECHNICAL_DRAWING_REGISTRY, TECHNICAL_TIMEFRAMES, calculateAnchoredVolumeProfile, calculateCrossAssetContext, calculateFixedRangeVolumeProfile, calculateMarketStructure, calculateMtfStructure, calculateMtfTechnicalLevels, calculatePositionPlan, calculateSessionAnalytics, calculateTechnicalConfluenceV2, calculateTechnicalConfluenceV4, calculateTechnicalDivergences, calculateTechnicalLevels, calculateTechnicalStructureV4, calculateVolumeProfile, defaultTechnicalBenchmark, filterTechnicalRange, isTechnicalRangeCompatible, type TechnicalAlertConditionId } from "@/engines/technical";
 import { TechnicalTerminalChart } from "@/components/charts/technical/technical-terminal-chart";
 import { MAX_CUSTOM_TECHNICAL_TEMPLATES, sanitizeTechnicalNote, technicalDrawingKey, technicalV1StorageKey, technicalV2StorageKey } from "@/lib/technical-workspace-v2";
 import { MAX_TECHNICAL_PROFILES_PER_DATASET, technicalV3StorageKey } from "@/lib/technical-workspace-v3";
@@ -20,11 +20,14 @@ function validIndicatorPeriod(value: number) { return Number.isInteger(value) &&
 function indicatorAvailable(kind: TechnicalIndicatorKind, timeframe: TechnicalTimeframe) { return kind !== "VWAP" || !["1D", "1W"].includes(timeframe); }
 function panelCount(layout: TechnicalLayout) { return layout === "single" ? 1 : layout === "four-grid" ? 4 : 2; }
 function datasetKey(symbol: string, timeframe: TechnicalTimeframe) { return `${symbol.toUpperCase()}:${timeframe}`; }
+function datasetRequestKey(symbol: string, timeframe: TechnicalTimeframe, selection: TechnicalRangeSelection) { return `${datasetKey(symbol, timeframe)}:${selection.range}:${selection.from ?? ""}:${selection.to ?? ""}`; }
+function defaultRangeSelection(timeframe: TechnicalTimeframe): TechnicalRangeSelection { return { range: timeframe === "1m" ? "1D" : ["5m", "15m"].includes(timeframe) ? "5D" : ["30m", "1h", "4h"].includes(timeframe) ? "1M" : "1Y", from: null, to: null }; }
+function defaultPanelRange(timeframe: TechnicalTimeframe): TechnicalPanelRangeState { return { ...defaultRangeSelection(timeframe), availability: "LOADING", reason: null }; }
 function exchangeTimeZone(exchange: string) { const value = exchange.toUpperCase(); return value.includes("MIL") || value.includes("MTA") ? "Europe/Rome" : value.includes("LSE") || value.includes("LONDON") ? "Europe/London" : value.includes("TOK") ? "Asia/Tokyo" : "America/New_York"; }
 
 async function requestDataset(symbol: string, timeframe: TechnicalTimeframe, range: TechnicalHistoricalRange, custom: { from: string | null; to: string | null }, force = false): Promise<TechnicalChartResponse> {
   if (range === "CUSTOM" && (!custom.from || !custom.to || custom.from >= custom.to)) throw new Error("Select a valid From and To date before loading custom history.");
-  const key = `${datasetKey(symbol, timeframe)}:${range}:${custom.from ?? ""}:${custom.to ?? ""}`;
+  const key = datasetRequestKey(symbol, timeframe, { range, from: custom.from, to: custom.to });
   if (!force && memoryCache.has(key)) return memoryCache.get(key)!;
   if (!force && range !== "CUSTOM" && ["1D", "1W"].includes(timeframe)) {
     const order: TechnicalHistoricalRange[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y", "MAX"];
@@ -128,7 +131,7 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const visiblePanels = useMemo(() => maximizedPanelId ? workspace.panels.filter((panel) => panel.id === maximizedPanelId) : workspace.panels.slice(0, panelCount(workspace.layout)), [maximizedPanelId, workspace.layout, workspace.panels]);
   const activePanel = workspace.panels.find((panel) => panel.id === workspace.activePanelId) ?? workspace.panels[0];
   const activeRange = useMemo(() => workspace.panelRanges[activePanel.id] ?? { range: "1Y" as const, from: null, to: null, availability: "LOADING" as const, reason: null }, [activePanel.id, workspace.panelRanges]);
-  const activeDataset = datasets[datasetKey(activePanel.symbol, activePanel.timeframe)] ?? null;
+  const activeDataset = datasets[datasetRequestKey(activePanel.symbol, activePanel.timeframe, activeRange)] ?? null;
   const activeDrawingKey = technicalDrawingKey(activePanel.symbol, activePanel.timeframe);
   const activeDrawings = workspace.drawings[activeDrawingKey] ?? [];
   const activeProfileDefinitions = useMemo(() => workspace.profiles[activeDrawingKey] ?? [], [activeDrawingKey, workspace.profiles]);
@@ -141,9 +144,9 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const activePlanner = workspace.planners[plannerKey] ?? DEFAULT_POSITION_PLANNER;
   const positionPlan = useMemo(() => calculatePositionPlan(activePlanner), [activePlanner]);
   const benchmarkSymbol = workspace.benchmarks[activePanel.id] ?? defaultTechnicalBenchmark(activePanel.symbol);
-  const benchmarkDataset = datasets[datasetKey(benchmarkSymbol, activePanel.timeframe)] ?? null;
+  const benchmarkDataset = datasets[datasetRequestKey(benchmarkSymbol, activePanel.timeframe, activeRange)] ?? null;
   const crossAsset = useMemo(() => activeDataset && benchmarkDataset ? calculateCrossAssetContext(activeDataset.data.bars, benchmarkDataset.data.bars, benchmarkSymbol) : null, [activeDataset, benchmarkDataset, benchmarkSymbol]);
-  const mtfDatasets = useMemo(() => Object.fromEntries((["15m", "1h", "4h", "1D"] as TechnicalTimeframe[]).flatMap((timeframe) => { const data = datasets[datasetKey(activePanel.symbol, timeframe)]?.data.bars; return data ? [[timeframe, data]] : []; })), [activePanel.symbol, datasets]);
+  const mtfDatasets = useMemo(() => Object.fromEntries((["15m", "1h", "4h", "1D"] as TechnicalTimeframe[]).flatMap((timeframe) => { const selection = timeframe === activePanel.timeframe ? activeRange : defaultRangeSelection(timeframe); const data = datasets[datasetRequestKey(activePanel.symbol, timeframe, selection)]?.data.bars; return data ? [[timeframe, data]] : []; })), [activePanel.symbol, activePanel.timeframe, activeRange, datasets]);
   const mtfStructure = useMemo(() => calculateMtfStructure(mtfDatasets), [mtfDatasets]);
   const mtfLevels = useMemo(() => calculateMtfTechnicalLevels(mtfDatasets), [mtfDatasets]);
   const sessionAnalytics = useMemo(() => activeDataset ? calculateSessionAnalytics(activeDataset.data.bars, { timeframe: activePanel.timeframe, assetClass: activePanel.symbol.endsWith("-USD") ? "CRYPTO" : "EQUITY", timeZone: exchangeTimeZone(activeDataset.data.exchange) }) : null, [activeDataset, activePanel.symbol, activePanel.timeframe]);
@@ -151,30 +154,33 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const confluence = useMemo(() => activeDataset && activeStructure && activeDivergences ? calculateTechnicalConfluenceV2({ bars: activeDataset.data.bars, structure: activeStructure, mtfStructure, mtfLevels, profile: activeProfile, divergences: activeDivergences }) : null, [activeDataset, activeDivergences, activeProfile, activeStructure, mtfLevels, mtfStructure]);
   const confluenceV4 = useMemo(() => calculateTechnicalConfluenceV4({ structure: activeStructure, advanced: activeAdvancedStructure, divergences: activeDivergences, crossAsset }), [activeAdvancedStructure, activeDivergences, activeStructure, crossAsset]);
   const panelAnalytics = useMemo(() => Object.fromEntries(visiblePanels.flatMap((panel) => {
-    const key = datasetKey(panel.symbol, panel.timeframe);
-    const response = datasets[key];
+    const selection = workspace.panelRanges[panel.id] ?? { range: "1Y" as const, from: null, to: null };
+    const response = datasets[datasetRequestKey(panel.symbol, panel.timeframe, selection)];
     if (!response) return [];
     const structure = calculateMarketStructure(response.data.bars);
-    return [[key, {
+    return [[panel.id, {
       levels: workspace.features.autoSupportResistance ? calculateTechnicalLevels(response.data.bars) : [],
       structure: workspace.features.marketStructure ? structure : null,
       divergences: workspace.features.divergences ? calculateTechnicalDivergences(response.data.bars).divergences : [],
       advanced: workspace.features.liquidity || workspace.features.fairValueGaps || workspace.features.displacement ? calculateTechnicalStructureV4(response.data.bars, structure) : null,
     }]];
-  })), [datasets, visiblePanels, workspace.features.autoSupportResistance, workspace.features.displacement, workspace.features.divergences, workspace.features.fairValueGaps, workspace.features.liquidity, workspace.features.marketStructure]);
+  })), [datasets, visiblePanels, workspace.features.autoSupportResistance, workspace.features.displacement, workspace.features.divergences, workspace.features.fairValueGaps, workspace.features.liquidity, workspace.features.marketStructure, workspace.panelRanges]);
 
   const loadKeys = useMemo(() => {
     const requested = visiblePanels.flatMap((panel) => { const selection = workspace.panelRanges[panel.id] ?? { range: "1Y" as const, from: null, to: null }; return [{ symbol: panel.symbol, timeframe: panel.timeframe, selection }, ...panel.comparisons.map((comparison) => ({ symbol: comparison, timeframe: panel.timeframe, selection }))]; });
-    if (workspace.features.structureSummary || workspace.features.marketStructure || workspace.features.mtfSupportResistance) (["15m", "1h", "4h", "1D"] as TechnicalTimeframe[]).forEach((timeframe) => requested.push({ symbol: activePanel.symbol, timeframe, selection: { range: timeframe === "1D" ? "1Y" as const : ["4h", "1h"].includes(timeframe) ? "1M" as const : "5D" as const, from: null, to: null, availability: "LOADING" as const, reason: null } }));
+    if (workspace.features.structureSummary || workspace.features.marketStructure || workspace.features.mtfSupportResistance) (["15m", "1h", "4h", "1D"] as TechnicalTimeframe[]).forEach((timeframe) => {
+      if (requested.some((item) => item.symbol === activePanel.symbol && item.timeframe === timeframe)) return;
+      requested.push({ symbol: activePanel.symbol, timeframe, selection: defaultPanelRange(timeframe) });
+    });
     if (workspace.features.crossAsset) requested.push({ symbol: benchmarkSymbol, timeframe: activePanel.timeframe, selection: activeRange });
-    return [...new Map(requested.map((item) => [`${datasetKey(item.symbol, item.timeframe)}:${item.selection.range}:${item.selection.from ?? ""}:${item.selection.to ?? ""}`, item])).values()];
+    return [...new Map(requested.map((item) => [datasetRequestKey(item.symbol, item.timeframe, item.selection), item])).values()];
   }, [activePanel.symbol, activePanel.timeframe, activeRange, benchmarkSymbol, visiblePanels, workspace.features.crossAsset, workspace.features.marketStructure, workspace.features.mtfSupportResistance, workspace.features.structureSummary, workspace.panelRanges]);
 
   const load = useCallback(async (force = false) => {
-    const keys = loadKeys.map(({ symbol: loadSymbol, timeframe }) => datasetKey(loadSymbol, timeframe));
+    const keys = loadKeys.map(({ symbol: loadSymbol, timeframe, selection }) => datasetRequestKey(loadSymbol, timeframe, selection));
     setLoadingKeys((current) => [...new Set([...current, ...keys])]);
     const results = await Promise.all(loadKeys.map(async ({ symbol: loadSymbol, timeframe, selection }) => {
-      const key = datasetKey(loadSymbol, timeframe);
+      const key = datasetRequestKey(loadSymbol, timeframe, selection);
       try { return { key, response: await requestDataset(loadSymbol, timeframe, selection.range, selection, force), error: "" }; }
       catch (error) { return { key, response: null, error: error instanceof Error ? error.message : "Technical data temporarily unavailable." }; }
     }));
@@ -183,7 +189,7 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
     setWorkspace((current) => {
       let changed = false;
       const panelRanges = Object.fromEntries(Object.entries(current.panelRanges).map(([panelId, selection]) => {
-      const panel = current.panels.find((item) => item.id === panelId); const result = panel ? results.find((item) => item.key === datasetKey(panel.symbol, panel.timeframe)) : null;
+      const panel = current.panels.find((item) => item.id === panelId); const result = panel ? results.find((item) => item.key === datasetRequestKey(panel.symbol, panel.timeframe, selection)) : null;
       const next = result?.response ? { ...selection, availability: result.response.data.rangeAvailability ?? "AVAILABLE", reason: result.response.data.rangeMessage ?? null } : result?.error ? { ...selection, availability: "UNAVAILABLE" as const, reason: result.error } : selection;
       if (next.availability !== selection.availability || next.reason !== selection.reason) changed = true;
       return [panelId, next];
@@ -196,13 +202,22 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   useEffect(() => { if (preferencesReady) queueMicrotask(() => { void load(); }); }, [load, preferencesReady]);
 
   const updateWorkspacePanel = useCallback((panelId: string, patch: Partial<TechnicalPanelState>) => {
-    setWorkspace((current) => current.panels.some((panel) => panel.id === panelId) ? { ...current, ...(patch.symbol ? { recentSymbols: [patch.symbol, ...current.recentSymbols.filter((item) => item !== patch.symbol)].slice(0, 8) } : {}), panels: current.panels.map((panel) => {
-      if (panel.id === panelId) return { ...panel, ...patch };
-      const linked: Partial<TechnicalPanelState> = {};
-      if (current.links.symbol && patch.symbol) linked.symbol = patch.symbol;
-      if (current.links.timeframe && patch.timeframe) linked.timeframe = patch.timeframe;
-      return Object.keys(linked).length ? { ...panel, ...linked } : panel;
-    }) } : current);
+    setWorkspace((current) => {
+      if (!current.panels.some((panel) => panel.id === panelId)) return current;
+      const panels = current.panels.map((panel) => {
+        if (panel.id === panelId) return { ...panel, ...patch };
+        const linked: Partial<TechnicalPanelState> = {};
+        if (current.links.symbol && patch.symbol) linked.symbol = patch.symbol;
+        if (current.links.timeframe && patch.timeframe) linked.timeframe = patch.timeframe;
+        return Object.keys(linked).length ? { ...panel, ...linked } : panel;
+      });
+      const panelRanges = { ...current.panelRanges };
+      if (patch.timeframe) panels.forEach((panel) => {
+        const selection = panelRanges[panel.id] ?? defaultPanelRange(panel.timeframe);
+        if (!isTechnicalRangeCompatible(selection.range, panel.timeframe)) panelRanges[panel.id] = defaultPanelRange(panel.timeframe);
+      });
+      return { ...current, ...(patch.symbol ? { recentSymbols: [patch.symbol, ...current.recentSymbols.filter((item) => item !== patch.symbol)].slice(0, 8) } : {}), panels, panelRanges };
+    });
   }, []);
 
   const changeLayout = (layout: TechnicalLayout) => setWorkspace((current) => {
@@ -210,7 +225,7 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
     const source = current.panels.find((panel) => panel.id === current.activePanelId) ?? current.panels[0];
     const presets: TechnicalTimeframe[] = [source.timeframe, "4h", "1h", "15m"];
     const panels = Array.from({ length: count }, (_, index) => current.panels[index] ?? clonePanel(source, `panel-${index + 1}`, presets[index]));
-    return { ...current, layout, panels, panelRanges: { ...current.panelRanges, ...Object.fromEntries(panels.map((panel) => [panel.id, current.panelRanges[panel.id] ?? { range: "1Y", from: null, to: null, availability: "LOADING", reason: null }])) }, activePanelId: panels.some((panel) => panel.id === current.activePanelId) ? current.activePanelId : panels[0].id };
+    return { ...current, layout, panels, panelRanges: { ...current.panelRanges, ...Object.fromEntries(panels.map((panel) => [panel.id, current.panelRanges[panel.id] ?? defaultPanelRange(panel.timeframe)])) }, activePanelId: panels.some((panel) => panel.id === current.activePanelId) ? current.activePanelId : panels[0].id };
   });
 
   const updateActiveIndicators = (updater: (current: TechnicalIndicatorConfig[]) => TechnicalIndicatorConfig[]) => updateWorkspacePanel(activePanel.id, { indicators: updater(activePanel.indicators) });
@@ -368,12 +383,12 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
     <div className="technical-layout technical-layout-v2">
       <section className={`technical-chart-grid layout-${workspace.layout} ${maximizedPanelId ? "is-maximized" : ""}`} aria-label="Multi-chart workspace">
         {visiblePanels.map((panel) => {
-          const key = datasetKey(panel.symbol, panel.timeframe);
-          const response = datasets[key];
           const panelRange = workspace.panelRanges[panel.id] ?? activeRange;
-          const comparisons = panel.comparisons.flatMap((comparison) => datasets[datasetKey(comparison, panel.timeframe)]?.data ?? []);
+          const key = datasetRequestKey(panel.symbol, panel.timeframe, panelRange);
+          const response = datasets[key];
+          const comparisons = panel.comparisons.flatMap((comparison) => datasets[datasetRequestKey(comparison, panel.timeframe, panelRange)]?.data ?? []);
           const panelDrawings = workspace.drawings[technicalDrawingKey(panel.symbol, panel.timeframe)] ?? [];
-          const analytics = panelAnalytics[key] ?? { levels: [], structure: null, divergences: [], advanced: null };
+          const analytics = panelAnalytics[panel.id] ?? { levels: [], structure: null, divergences: [], advanced: null };
           return <article key={panel.id} className={`technical-chart-card technical-panel ${workspace.activePanelId === panel.id ? "active" : ""}`} onPointerDown={() => setWorkspace((current) => current.activePanelId === panel.id ? current : { ...current, activePanelId: panel.id })} data-panel-id={panel.id}>
             <div className="technical-chart-title technical-panel-header"><div><strong>{panel.symbol} · {panelRange.range} · {panel.timeframe}</strong><span>{response?.data.bars.length ?? 0} verified bars · {panel.chartType}{response?.data.historyStart ? ` · since ${new Date(response.data.historyStart).toLocaleDateString()}` : ""}</span></div><div><span>{panelRange.availability}</span><button aria-label={`${maximizedPanelId ? "Restore" : "Maximize"} ${panel.symbol} panel`} onClick={(event) => { event.stopPropagation(); setMaximizedPanelId((current) => current === panel.id ? null : panel.id); }}>{maximizedPanelId === panel.id ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button></div></div>
             {loadingKeys.includes(key) && !response && <div className="technical-empty" role="status" aria-busy="true"><BarChart3/><strong>Loading verified OHLCV…</strong><span>Connecting to the Kairo server data layer.</span></div>}

@@ -12,6 +12,10 @@ test("V4 range is independent, persistent and retains the chart while expanding"
   await range.getByRole("button", { name: "5Y", exact: true }).click();
   await expect(page.getByTestId("technical-terminal-chart")).toBeVisible();
   await expect(page.getByText(/NVDA · 5Y · 1D/)).toBeVisible({ timeout: 30_000 });
+  const primaryPanel = page.locator('[data-panel-id="panel-1"]');
+  await expect(primaryPanel.locator(".technical-panel-header")).toContainText(/1\d{3} verified bars/, { timeout: 30_000 });
+  await page.waitForTimeout(500);
+  await expect(primaryPanel.locator(".technical-panel-header")).toContainText(/1\d{3} verified bars/);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(range.getByRole("button", { name: "5Y", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "1D", exact: true }).first()).toHaveAttribute("aria-pressed", "true");
