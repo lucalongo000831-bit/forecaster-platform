@@ -4,6 +4,7 @@ import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { getDatabase, instruments, portfolioPositions, portfolioTransactions, portfolios } from "@/db";
 import { calculateLedger } from "@/engines/portfolio";
 import { AppError } from "@/lib/server/app-error";
+import { withServerTimeout } from "@/lib/server/promise-timeout";
 import { financialProviderRouter } from "@/providers";
 import type { AccountPortfolio } from "@/types";
 import { ensureInstrument } from "./instrument-repository";
@@ -14,13 +15,15 @@ async function ownedPortfolio(userId: string, id: string) {
   return record;
 }
 
-export async function listPortfolios(userId: string): Promise<AccountPortfolio[]> {
+export async function listPortfolios(userId: string, options: { enrich?: boolean } = {}): Promise<AccountPortfolio[]> {
   const database = getDatabase();
   const records = await database.select().from(portfolios).where(eq(portfolios.userId, userId)).orderBy(asc(portfolios.createdAt));
   if (!records.length) return [];
   const rows = await database.select({ portfolioId: portfolioPositions.portfolioId, instrumentId: portfolioPositions.instrumentId, quantity: portfolioPositions.quantity, averagePrice: portfolioPositions.averagePrice, realizedPnl: portfolioPositions.realizedPnl, symbol: instruments.canonicalSymbol, name: instruments.name, currency: instruments.currency }).from(portfolioPositions).innerJoin(instruments, eq(portfolioPositions.instrumentId, instruments.id)).where(inArray(portfolioPositions.portfolioId, records.map((record) => record.id)));
   const symbols = [...new Set(rows.map((row) => row.symbol))];
-  const quoteResult = symbols.length ? await financialProviderRouter.quotes(symbols).catch(() => null) : null;
+  const quoteResult = symbols.length && options.enrich !== false
+    ? await withServerTimeout(financialProviderRouter.quotes(symbols), 2_000, "Portfolio quotes exceeded the interactive budget").catch(() => null)
+    : null;
   const quotes = new Map((quoteResult?.data ?? []).map((quote) => [quote.symbol, quote]));
   return records.map((record) => {
     const matching = rows.filter((row) => row.portfolioId === record.id);

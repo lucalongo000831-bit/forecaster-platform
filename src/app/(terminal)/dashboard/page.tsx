@@ -37,7 +37,7 @@ function DashboardContentFallback() {
 async function DashboardContent({ now, userPromise }: { now: number; userPromise: Promise<CurrentUser> }) {
   const today = new Date(now); const nextWeek = new Date(now + 7 * 86_400_000);
   const privateDataPromise = userPromise.then((user) => user && isDatabaseConfigured()
-    ? Promise.all([listPortfolios(user.id), listWatchlists(user.id)]).then(([portfolios, lists]) => ({ portfolios, lists })).catch(() => null)
+    ? Promise.all([listPortfolios(user.id, { enrich: false }), listWatchlists(user.id, { enrich: false })]).then(([portfolios, lists]) => ({ portfolios, lists })).catch(() => null)
     : null);
   const [data, user, privateData, calendar] = await Promise.all([
     financialDataService.getDashboardData().catch(() => null),
