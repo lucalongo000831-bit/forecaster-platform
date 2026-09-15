@@ -22,3 +22,19 @@ export function mergeSearchResults(local: SearchInstrument[], remote: unknown) {
   }
   return [...rows.values()];
 }
+
+export function rankSearchResults(results: SearchInstrument[], query: string) {
+  const normalized = query.trim().toLocaleUpperCase("en");
+  const score = (row: SearchInstrument) => {
+    const symbol = row.symbol.toLocaleUpperCase("en");
+    const name = row.name.toLocaleUpperCase("en");
+    if (symbol === normalized) return 0;
+    if (symbol === `${normalized}-USD` || symbol.split("-")[0] === normalized) return 1;
+    if (symbol.startsWith(normalized)) return 2;
+    if (name.startsWith(normalized)) return 3;
+    return 4;
+  };
+  return results.map((row, index) => ({ row, index, score: score(row) }))
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .map(({ row }) => row);
+}

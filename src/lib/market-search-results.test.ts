@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SearchInstrument } from "@/types";
-import { mergeSearchResults } from "./market-search-results";
+import { mergeSearchResults, rankSearchResults } from "./market-search-results";
 
 const stlam: SearchInstrument = { symbol: "STLAM.MI", name: "Stellantis N.V.", type: "Stock", venue: "Milan", price: 9.2, currency: "EUR", href: "/instrument/milan/stlam.mi/overview", source: "yahoo" };
 const bitcoin: SearchInstrument = { symbol: "BTC-USD", name: "Bitcoin USD", type: "Crypto", venue: "CCC", price: 77_000, currency: "USD", href: "/instrument/crypto/btc-usd/overview", source: "yahoo" };
@@ -42,5 +42,14 @@ describe("market search result merge", () => {
       ["SPY", "ETF", "/instrument/nyse/spy/overview"],
       ["STLAM.MI", "Stock", "/instrument/milan/stlam.mi/overview"],
     ]);
+  });
+});
+
+describe("market search result ranking", () => {
+  it("puts a canonical crypto pair ahead of unrelated name substrings", () => {
+    const ethero: SearchInstrument = { symbol: "ALENT.PA", name: "Ethero", type: "Stock", venue: "PAR", price: 1, currency: "EUR", href: "/instrument/par/alent.pa/overview" };
+    const ethereum: SearchInstrument = { symbol: "ETH-USD", name: "Ethereum", type: "Crypto", venue: "CRYPTO", price: 1, currency: "USD", href: "/instrument/crypto/eth-usd/overview" };
+
+    expect(rankSearchResults([ethero, ethereum], "ETH").map((row) => row.symbol)).toEqual(["ETH-USD", "ALENT.PA"]);
   });
 });
