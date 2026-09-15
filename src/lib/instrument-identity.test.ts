@@ -30,6 +30,10 @@ describe("canonical crypto identity", () => {
     expect(canonicalCryptoSymbol("ETH", { market: "US", quoteType: "ETF" })).toBeNull();
     expect(instrumentPath({ market: "US", symbol: "ETH" })).toBe("/instrument/us/eth/overview");
   });
+
+  it("routes a canonical crypto symbol independently of a provider venue", () => {
+    expect(instrumentPath({ market: "CCC", symbol: "ETH-USD" })).toBe("/instrument/crypto/eth-usd/overview");
+  });
 });
 
 describe("crypto search and route canonicalization", () => {

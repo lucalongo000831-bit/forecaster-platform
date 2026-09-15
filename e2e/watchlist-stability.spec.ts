@@ -9,7 +9,7 @@ type Item = {
 const listId = "10000000-0000-4000-8000-000000000001";
 
 function item(symbol: string, name = symbol): Item {
-  return { id: crypto.randomUUID(), symbol, name, type: symbol.endsWith("-USD") ? "CRYPTO" : symbol === "SPY" ? "ETF" : "EQUITY", currency: symbol === "STLAM.MI" ? "EUR" : "USD", market: symbol.endsWith("-USD") ? "CRYPTO" : symbol === "STLAM.MI" ? "MIL" : "NASDAQ", position: 0, notes: null, price: null, changePercent: null, volume: null, marketState: null, lastUpdated: null, provider: null, signal: null, confidence: null, target: null, nextEvent: null, activeAlerts: 0 };
+  return { id: crypto.randomUUID(), symbol, name, type: symbol.endsWith("-USD") ? "CRYPTO" : symbol === "SPY" ? "ETF" : "EQUITY", currency: symbol === "STLAM.MI" ? "EUR" : "USD", market: symbol.endsWith("-USD") ? "CCC" : symbol === "STLAM.MI" ? "MIL" : "NASDAQ", position: 0, notes: null, price: null, changePercent: null, volume: null, marketState: null, lastUpdated: null, provider: null, signal: null, confidence: null, target: null, nextEvent: null, activeAlerts: 0 };
 }
 
 async function mockAccount(page: Page, initial: Item[] = []) {
@@ -66,6 +66,7 @@ test("watchlist search stays responsive, canonicalizes assets, adds and removes"
   }
   await page.getByRole("button", { name: "Add to watchlist" }).click();
   await expect(page.getByRole("button", { name: "Remove ETH-USD" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Ether" })).toHaveAttribute("href", "/instrument/crypto/eth-usd/overview");
   expect(items.map((entry) => entry.symbol)).toEqual(["ETH-USD"]);
   await page.getByRole("button", { name: "Remove ETH-USD" }).click();
   await expect(page.getByText("Create your first private watchlist.")).not.toBeVisible();
