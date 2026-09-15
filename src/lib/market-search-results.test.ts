@@ -46,6 +46,12 @@ describe("market search result merge", () => {
 });
 
 describe("market search result ranking", () => {
+  it("puts canonical Bitcoin ahead of an exact-symbol BTC ETF", () => {
+    const btcEtf: SearchInstrument = { symbol: "BTC", name: "Grayscale Bitcoin Mini Trust (BTC)", type: "ETF", venue: "US", price: 1, currency: "USD", href: "/instrument/us/btc/overview" };
+
+    expect(rankSearchResults([btcEtf, bitcoin], "BTC").map((row) => row.symbol)).toEqual(["BTC-USD", "BTC"]);
+  });
+
   it("puts a canonical crypto pair ahead of unrelated name substrings", () => {
     const ethero: SearchInstrument = { symbol: "ALENT.PA", name: "Ethero", type: "Stock", venue: "PAR", price: 1, currency: "EUR", href: "/instrument/par/alent.pa/overview" };
     const ethereum: SearchInstrument = { symbol: "ETH-USD", name: "Ethereum", type: "Crypto", venue: "CRYPTO", price: 1, currency: "USD", href: "/instrument/crypto/eth-usd/overview" };

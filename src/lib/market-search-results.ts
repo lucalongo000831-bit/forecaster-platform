@@ -28,6 +28,7 @@ export function rankSearchResults(results: SearchInstrument[], query: string) {
   const score = (row: SearchInstrument) => {
     const symbol = row.symbol.toLocaleUpperCase("en");
     const name = row.name.toLocaleUpperCase("en");
+    if (["BTC", "ETH"].includes(normalized) && row.type === "Crypto" && symbol === `${normalized}-USD`) return -1;
     if (symbol === normalized) return 0;
     if (symbol === `${normalized}-USD` || symbol.split("-")[0] === normalized) return 1;
     if (symbol.startsWith(normalized)) return 2;
