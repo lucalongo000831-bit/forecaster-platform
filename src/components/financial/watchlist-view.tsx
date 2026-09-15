@@ -10,10 +10,12 @@ import type { AccountWatchlist, MarketQuoteDto, SearchInstrument } from "@/types
 type Envelope<T> = { data?: T; error?: { message?: string } };
 const instrumentType = (type: SearchInstrument["type"]) => type === "Stock" ? "EQUITY" : type.toUpperCase();
 
-export function WatchlistView() {
+const EMPTY_SEARCH: SearchInstrument[] = [];
+
+export function WatchlistView({ instruments = EMPTY_SEARCH }: { instruments?: SearchInstrument[] }) {
   const [lists, setLists] = useState<AccountWatchlist[]>([]); const [selectedId, setSelectedId] = useState("");
   const [modal, setModal] = useState(false); const [query, setQuery] = useState(""); const [filter, setFilter] = useState(""); const [sort, setSort] = useState<"position" | "symbol" | "change">("position"); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
-  const { results, loading, error } = useMarketSearch(query, []); const selected = results[0];
+  const { results, loading, error } = useMarketSearch(query, instruments); const selected = query.trim().length >= 2 ? results[0] : undefined;
   const load = useCallback(async () => { setBusy(true); setMessage(""); try { const response = await fetch("/api/account/watchlists", { cache: "no-store" }); const body = await response.json() as Envelope<AccountWatchlist[]>; if (!response.ok) throw new Error(body.error?.message ?? "Watchlist non disponibile"); setLists(body.data ?? []); setSelectedId((current) => current || body.data?.[0]?.id || ""); } catch (requestError) { setMessage(requestError instanceof Error ? requestError.message : "Watchlist non disponibile"); } finally { setBusy(false); } }, []);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   const current = lists.find((list) => list.id === selectedId) ?? lists[0];

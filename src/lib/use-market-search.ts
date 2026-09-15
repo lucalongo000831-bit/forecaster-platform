@@ -1,50 +1,47 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { SearchInstrument, SearchResponse } from "@/types";
+import { useEffect, useMemo, useState } from "react";
+import type { SearchInstrument } from "@/types";
 import { mergeSearchResults } from "./market-search-results";
 
+const EMPTY: SearchInstrument[] = [];
 const searchMemory = new Map<string, SearchInstrument[]>();
 
-export function useMarketSearch(query: string, initial: SearchInstrument[]) {
-  const [results, setResults] = useState(initial);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+export function useMarketSearch(query: string, initial: SearchInstrument[] = EMPTY) {
+  // Depend on seed content, not the caller's array identity (including inline []).
+  const seedKey = JSON.stringify(initial);
+  const seed = useMemo(() => mergeSearchResults([], JSON.parse(seedKey)), [seedKey]);
+  const [state, setState] = useState({ query: "", results: seed, loading: false, error: "" });
+  const normalized = query.trim();
+  const key = normalized.toLocaleLowerCase("en");
+  const local = useMemo(() => seed.filter((item) => `${item.symbol} ${item.name} ${item.venue}`.toLocaleLowerCase("en").includes(key)), [seed, key]);
 
   useEffect(() => {
-    const normalized = query.trim();
     if (normalized.length < 2) return;
-    const cacheKey = normalized.toLocaleLowerCase("en");
-    const cached = searchMemory.get(cacheKey);
-    if (cached) {
-      queueMicrotask(() => { setResults(cached); setLoading(false); setError(""); });
-      return;
-    }
-    const localMatches = initial.filter((item) => `${item.symbol} ${item.name} ${item.venue}`.toLocaleLowerCase("en").includes(cacheKey));
-    queueMicrotask(() => setResults(localMatches));
+    let active = true;
     const controller = new AbortController();
+    let deadline: number | undefined;
     const timer = window.setTimeout(async () => {
-      setLoading(true); setError("");
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          const response = await fetch(`/api/market/search?q=${encodeURIComponent(normalized)}`, { signal: controller.signal });
-          const body = await response.json() as SearchResponse | { error?: { message?: string } };
-          if (!response.ok || !("data" in body)) throw new Error("error" in body ? body.error?.message : "Ricerca non disponibile");
-          const merged = mergeSearchResults(localMatches, body.data);
-          searchMemory.set(cacheKey, merged);
-          setResults(merged);
-          setLoading(false);
-          return;
-        } catch (requestError) {
-          if (controller.signal.aborted) return;
-          if (attempt === 1) setError(requestError instanceof Error && requestError.message !== "error" ? requestError.message : "Ricerca temporaneamente non disponibile.");
-        }
-      }
-      setLoading(false);
+      const cached = searchMemory.get(key);
+      if (cached) { setState({ query: key, results: mergeSearchResults(local, cached), loading: false, error: "" }); return; }
+      setState({ query: key, results: local, loading: true, error: "" });
+      deadline = window.setTimeout(() => controller.abort(), 5_000);
+      try {
+        const response = await fetch(`/api/market/search?q=${encodeURIComponent(normalized)}`, { signal: controller.signal });
+        const body = await response.json();
+        if (!response.ok || !Array.isArray(body?.data)) throw new Error("Ricerca temporaneamente non disponibile.");
+        const results = mergeSearchResults(local, body.data);
+        if (!active) return;
+        if (searchMemory.size >= 100) searchMemory.delete(searchMemory.keys().next().value!);
+        searchMemory.set(key, results);
+        setState({ query: key, results, loading: false, error: "" });
+      } catch {
+        if (active) setState({ query: key, results: local, loading: false, error: "Ricerca temporaneamente non disponibile. Riprova." });
+      } finally { window.clearTimeout(deadline); }
     }, 160);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [initial, query]);
+    return () => { active = false; window.clearTimeout(timer); window.clearTimeout(deadline); controller.abort(); };
+  }, [key, local, normalized]);
 
-  const idle = query.trim().length < 2;
-  return { results: idle ? initial : results, loading: idle ? false : loading, error: idle ? "" : error };
+  const idle = normalized.length < 2;
+  return idle ? { results: seed, loading: false, error: "" } : state.query === key ? state : { results: local, loading: false, error: "" };
 }
