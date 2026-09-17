@@ -19,7 +19,7 @@ Provider limits differ by interval. Intraday history is deliberately constrained
 - Liquidity: equal-high/equal-low clusters use the greater of a price-relative and ATR-relative tolerance. A sweep requires a breach followed by a close back inside the zone.
 - Displacement: deterministic body/ATR, close-location and relative-volume evidence.
 - FVG: three-candle gaps are available only on the third candle. Fill state uses subsequent observations only.
-- Cross asset: exact timestamp intersection, range-specific normalization to 100, rolling 20/60 correlation, covariance beta and annualized realized volatility. Missing benchmark dates are never fabricated.
+- Cross asset: exact timestamp intersection, range-specific normalization to 100, rolling 20/60 correlation, covariance beta and annualized realized volatility. Volatility uses square-root-of-observations-per-year scaling: 252 daily sessions for equities, 365 daily observations for crypto, 52 weekly observations, and the corresponding exchange-session or 24/7 intraday frequency. Missing benchmark dates are never fabricated.
 - Confluence: a transparent weighted descriptive score. It is not a probability, forecast or recommendation.
 
 ## Alerts

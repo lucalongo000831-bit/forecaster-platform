@@ -32,7 +32,7 @@ function sanitizeRange(value: unknown): TechnicalPanelRangeState {
   const range = TECHNICAL_HISTORICAL_RANGES.includes(row.range as TechnicalHistoricalRange) ? row.range as TechnicalHistoricalRange : "1Y";
   const validDate = (date: unknown) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null;
   const from = validDate(row.from); const to = validDate(row.to);
-  return { range: range === "CUSTOM" && (!from || !to || from >= to) ? "1Y" : range, from, to, availability: ["AVAILABLE", "PARTIAL", "UNAVAILABLE", "LOADING", "STALE"].includes(row.availability ?? "") ? row.availability! : "LOADING", reason: typeof row.reason === "string" ? row.reason.slice(0, 160) : null };
+  return { range: range === "CUSTOM" && (!from || !to || from > to) ? "1Y" : range, from, to, availability: ["AVAILABLE", "PARTIAL", "UNAVAILABLE", "LOADING", "STALE"].includes(row.availability ?? "") ? row.availability! : "LOADING", reason: typeof row.reason === "string" ? row.reason.slice(0, 160) : null };
 }
 function sanitizePlanner(value: unknown): PositionPlannerInput {
   if (!value || typeof value !== "object") return { ...DEFAULT_POSITION_PLANNER, targets: [...DEFAULT_POSITION_PLANNER.targets] };

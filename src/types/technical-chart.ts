@@ -495,6 +495,8 @@ export interface TechnicalCrossAssetResult {
   assetVolatility: number | null;
   benchmarkVolatility: number | null;
   relativeVolatility: number | null;
+  annualizationPeriods: number;
+  annualizationMethod: "SQRT_OBSERVATIONS_PER_YEAR";
   context: "OUTPERFORMING" | "UNDERPERFORMING" | "NEUTRAL" | "UNAVAILABLE";
   overlapStart: string | null;
   overlapEnd: string | null;

@@ -21,12 +21,15 @@ function indicatorAvailable(kind: TechnicalIndicatorKind, timeframe: TechnicalTi
 function panelCount(layout: TechnicalLayout) { return layout === "single" ? 1 : layout === "four-grid" ? 4 : 2; }
 function datasetKey(symbol: string, timeframe: TechnicalTimeframe) { return `${symbol.toUpperCase()}:${timeframe}`; }
 function datasetRequestKey(symbol: string, timeframe: TechnicalTimeframe, selection: TechnicalRangeSelection) { return `${datasetKey(symbol, timeframe)}:${selection.range}:${selection.from ?? ""}:${selection.to ?? ""}`; }
+function lastVerifiedDataset(datasets: Record<string, TechnicalChartResponse>, symbol: string, timeframe: TechnicalTimeframe) {
+  return Object.values(datasets).reverse().find((response) => response.data.symbol === symbol.toUpperCase() && response.data.timeframe === timeframe) ?? null;
+}
 function defaultRangeSelection(timeframe: TechnicalTimeframe): TechnicalRangeSelection { return { range: timeframe === "1m" ? "1D" : ["5m", "15m"].includes(timeframe) ? "5D" : ["30m", "1h", "4h"].includes(timeframe) ? "1M" : "1Y", from: null, to: null }; }
 function defaultPanelRange(timeframe: TechnicalTimeframe): TechnicalPanelRangeState { return { ...defaultRangeSelection(timeframe), availability: "LOADING", reason: null }; }
 function exchangeTimeZone(exchange: string) { const value = exchange.toUpperCase(); return value.includes("MIL") || value.includes("MTA") ? "Europe/Rome" : value.includes("LSE") || value.includes("LONDON") ? "Europe/London" : value.includes("TOK") ? "Asia/Tokyo" : "America/New_York"; }
 
 async function requestDataset(symbol: string, timeframe: TechnicalTimeframe, range: TechnicalHistoricalRange, custom: { from: string | null; to: string | null }, force = false): Promise<TechnicalChartResponse> {
-  if (range === "CUSTOM" && (!custom.from || !custom.to || custom.from >= custom.to)) throw new Error("Select a valid From and To date before loading custom history.");
+  if (range === "CUSTOM" && (!custom.from || !custom.to || custom.from > custom.to)) throw new Error("Select a valid From and To date before loading custom history.");
   const key = datasetRequestKey(symbol, timeframe, { range, from: custom.from, to: custom.to });
   if (!force && memoryCache.has(key)) return memoryCache.get(key)!;
   if (!force && range !== "CUSTOM" && ["1D", "1W"].includes(timeframe)) {
@@ -131,7 +134,7 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const visiblePanels = useMemo(() => maximizedPanelId ? workspace.panels.filter((panel) => panel.id === maximizedPanelId) : workspace.panels.slice(0, panelCount(workspace.layout)), [maximizedPanelId, workspace.layout, workspace.panels]);
   const activePanel = workspace.panels.find((panel) => panel.id === workspace.activePanelId) ?? workspace.panels[0];
   const activeRange = useMemo(() => workspace.panelRanges[activePanel.id] ?? { range: "1Y" as const, from: null, to: null, availability: "LOADING" as const, reason: null }, [activePanel.id, workspace.panelRanges]);
-  const activeDataset = datasets[datasetRequestKey(activePanel.symbol, activePanel.timeframe, activeRange)] ?? null;
+  const activeDataset = datasets[datasetRequestKey(activePanel.symbol, activePanel.timeframe, activeRange)] ?? lastVerifiedDataset(datasets, activePanel.symbol, activePanel.timeframe);
   const activeDrawingKey = technicalDrawingKey(activePanel.symbol, activePanel.timeframe);
   const activeDrawings = workspace.drawings[activeDrawingKey] ?? [];
   const activeProfileDefinitions = useMemo(() => workspace.profiles[activeDrawingKey] ?? [], [activeDrawingKey, workspace.profiles]);
@@ -144,8 +147,8 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const activePlanner = workspace.planners[plannerKey] ?? DEFAULT_POSITION_PLANNER;
   const positionPlan = useMemo(() => calculatePositionPlan(activePlanner), [activePlanner]);
   const benchmarkSymbol = workspace.benchmarks[activePanel.id] ?? defaultTechnicalBenchmark(activePanel.symbol);
-  const benchmarkDataset = datasets[datasetRequestKey(benchmarkSymbol, activePanel.timeframe, activeRange)] ?? null;
-  const crossAsset = useMemo(() => activeDataset && benchmarkDataset ? calculateCrossAssetContext(activeDataset.data.bars, benchmarkDataset.data.bars, benchmarkSymbol) : null, [activeDataset, benchmarkDataset, benchmarkSymbol]);
+  const benchmarkDataset = datasets[datasetRequestKey(benchmarkSymbol, activePanel.timeframe, activeRange)] ?? lastVerifiedDataset(datasets, benchmarkSymbol, activePanel.timeframe);
+  const crossAsset = useMemo(() => activeDataset && benchmarkDataset ? calculateCrossAssetContext(activeDataset.data.bars, benchmarkDataset.data.bars, benchmarkSymbol, { timeframe: activePanel.timeframe, assetClass: activePanel.symbol.endsWith("-USD") ? "CRYPTO" : "EQUITY" }) : null, [activeDataset, activePanel.symbol, activePanel.timeframe, benchmarkDataset, benchmarkSymbol]);
   const mtfDatasets = useMemo(() => Object.fromEntries((["15m", "1h", "4h", "1D"] as TechnicalTimeframe[]).flatMap((timeframe) => { const selection = timeframe === activePanel.timeframe ? activeRange : defaultRangeSelection(timeframe); const data = datasets[datasetRequestKey(activePanel.symbol, timeframe, selection)]?.data.bars; return data ? [[timeframe, data]] : []; })), [activePanel.symbol, activePanel.timeframe, activeRange, datasets]);
   const mtfStructure = useMemo(() => calculateMtfStructure(mtfDatasets), [mtfDatasets]);
   const mtfLevels = useMemo(() => calculateMtfTechnicalLevels(mtfDatasets), [mtfDatasets]);
@@ -155,7 +158,7 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const confluenceV4 = useMemo(() => calculateTechnicalConfluenceV4({ structure: activeStructure, advanced: activeAdvancedStructure, divergences: activeDivergences, crossAsset }), [activeAdvancedStructure, activeDivergences, activeStructure, crossAsset]);
   const panelAnalytics = useMemo(() => Object.fromEntries(visiblePanels.flatMap((panel) => {
     const selection = workspace.panelRanges[panel.id] ?? { range: "1Y" as const, from: null, to: null };
-    const response = datasets[datasetRequestKey(panel.symbol, panel.timeframe, selection)];
+    const response = datasets[datasetRequestKey(panel.symbol, panel.timeframe, selection)] ?? lastVerifiedDataset(datasets, panel.symbol, panel.timeframe);
     if (!response) return [];
     const structure = calculateMarketStructure(response.data.bars);
     return [[panel.id, {
@@ -385,7 +388,8 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
         {visiblePanels.map((panel) => {
           const panelRange = workspace.panelRanges[panel.id] ?? activeRange;
           const key = datasetRequestKey(panel.symbol, panel.timeframe, panelRange);
-          const response = datasets[key];
+          const exactResponse = datasets[key];
+          const response = exactResponse ?? lastVerifiedDataset(datasets, panel.symbol, panel.timeframe);
           const comparisons = panel.comparisons.flatMap((comparison) => datasets[datasetRequestKey(comparison, panel.timeframe, panelRange)]?.data ?? []);
           const panelDrawings = workspace.drawings[technicalDrawingKey(panel.symbol, panel.timeframe)] ?? [];
           const analytics = panelAnalytics[panel.id] ?? { levels: [], structure: null, divergences: [], advanced: null };
@@ -423,8 +427,8 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
               }}
               onResetView={(reset) => { resetViewRefs.current[panel.id] = reset; }}
             />}
-            {loadingKeys.includes(key) && response && <div className="technical-refreshing" role="status">Refreshing {panel.timeframe}…</div>}
-            {errors[key] && response && <div className="technical-inline-warning" role="status">Latest refresh failed. Last verified snapshot remains visible.</div>}
+            {loadingKeys.includes(key) && response && <div className="technical-refreshing" role="status">Loading {panelRange.range} · last verified snapshot remains visible…</div>}
+            {errors[key] && response && <div className="technical-inline-warning" role="status">Latest {panelRange.range} request failed. Last verified snapshot remains visible.</div>}
           </article>;
         })}
       </section>

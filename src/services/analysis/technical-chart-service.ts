@@ -44,7 +44,7 @@ export async function getTechnicalChartDataset(symbolInput: string, timeframe: T
   const canonical = timeframe === "1D" || timeframe === "1W"
     ? applyCanonicalPricePolicy(rawBars, instrument?.kind ?? (symbol.endsWith("-USD") ? "CRYPTO" : "EQUITY"))
     : { bars: rawBars, policy: "RAW_OHLC" as const };
-  if (canonical.bars.length < 2) throw new Error(timeframe === "4h" ? "INSUFFICIENT_COMPLETE_1H_BARS_FOR_4H" : "INSUFFICIENT_TECHNICAL_CHART_DATA");
+  if (canonical.bars.length < 1) throw new Error(timeframe === "4h" ? "INSUFFICIENT_COMPLETE_1H_BARS_FOR_4H" : "INSUFFICIENT_TECHNICAL_CHART_DATA");
   return {
     meta: chart.meta,
     data: {
