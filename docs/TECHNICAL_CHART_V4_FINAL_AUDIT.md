@@ -12,3 +12,17 @@ Audit branch: `fix/technical-chart-v4-final-audit`
 | V4-AUD-005 | MEDIUM | Custom history | Client, storage and API validation rejected `FROM = TO`, preventing a valid one-session or one-day historical request. | Accept equal ISO dates end-to-end, cap the effective end at the current instant, and continue rejecting reversed/future-only ranges. | Engine and schema fixtures verify same-day, reversed and future-only behavior. | RESOLVED |
 
 The corrective pass is intentionally limited to these five findings. It does not change Pattern, Seasonality, Analysis, Calendar, Search, authentication or provider routing.
+
+## P0 reconciliation
+
+The audit branch incorporates production main `fd5d7eed4ff4f9b4dfc95c862c52144bf251d7db` via merge `26c1a0f`, after preserving the five corrections in `8bda446`. The merge had zero textual conflicts. Its P0 changes are limited to the authenticated dashboard bootstrap, persistent watchlist mutations, watchlist search and canonical BTC/ETH identity; none overwrote a V4 calculation or chart file.
+
+| Prior issue | Before reconciliation | After reconciliation |
+| --- | --- | --- |
+| V4-AUD-001 · BLOCKER | Resolved by immutable first-pair liquidity geometry and availability. | Regression fixture passes; no-lookahead behavior retained. |
+| V4-AUD-002 · HIGH | Resolved by explicit sizing validation and no-target incomplete status. | LONG/SHORT, zero-input and overflow fixtures pass. |
+| V4-AUD-003 · HIGH | Resolved by same-symbol/timeframe verified chart fallback. | Fault-injected MAX browser test passes with prior chart retained. |
+| V4-AUD-004 · MEDIUM | Resolved by asset/timeframe-specific volatility annualization. | Known-return crypto and equity fixtures pass. |
+| V4-AUD-005 · MEDIUM | Resolved by equal-date custom-range support. | Same-day unit and browser tests pass. |
+
+Targeted reconciliation evidence: 70/70 auth, watchlist, search, identity, workspace and V4 engine tests; 10/10 desktop P0/V4 browser tests; authenticated login → NVDA watchlist → Technical MAX → BTC/ETH search → ETH Technical → logout/login browser flow passes (2/2 including its warmup). Deterministic E2E provider fixtures are enabled. A warm run of the V4 structure engine measured mean/p95/max of 4.2/4.7/4.7 ms at 1,000 bars, 36.7/43.1/43.1 ms at 5,000 bars, and 111.9/118.3/118.3 ms at 10,000 bars, across ten samples after three warmups on the local machine. These are below the V4 reference means of approximately 8/39/131 ms; the harness and fixture may differ, so they are a regression signal rather than a hardware-independent guarantee.

@@ -14,7 +14,7 @@ function item(symbol: string, name = symbol): Item {
 
 async function mockAccount(page: Page, initial: Item[] = []) {
   const items = [...initial];
-  await page.route("**/api/auth/session", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: "test-user" } }) }));
+  await page.route("**/api/auth/session", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: "test-user", email: "audit@example.test", name: "Audit User", role: "USER" } }) }));
   await page.route("**/api/account/watchlists**", async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -97,4 +97,59 @@ test("instrument Watch persists, exposes pending state, and removes", async ({ p
   await page.getByRole("button", { name: "Remove from watchlist" }).click();
   await expect(page.getByRole("button", { name: "Add to watchlist" })).toBeVisible();
   expect(items).toEqual([]);
+});
+
+test("authenticated watchlist to Technical V4 flow preserves canonical crypto identity", async ({ page }) => {
+  const items = await mockAccount(page);
+  const directProviderRequests: string[] = [];
+  page.on("request", (request) => {
+    if (/finance\.yahoo|financialmodelingprep|alphavantage|massive\.com|coingecko/i.test(request.url())) directProviderRequests.push(request.url());
+  });
+  await page.route("**/api/auth/login", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: "test-user" } }) }));
+  await page.route("**/api/auth/logout", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { loggedOut: true } }) }));
+  await page.route("**/api/market/search?**", async (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q")?.toUpperCase() ?? "";
+    const row = searchRows[query];
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: row ? [{ ...row, price: 1, currency: "USD" }] : [] }) });
+  });
+
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("audit@example.test");
+  await page.locator('input[name="password"]').fill("audit-password-123");
+  await page.getByRole("button", { name: "Enter workspace" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { name: /Good afternoon/i })).toBeVisible();
+
+  await page.goto("/instrument/nasdaqgs/nvda/overview");
+  await page.getByRole("button", { name: "Add to watchlist" }).click();
+  await expect(page.getByRole("button", { name: "Remove from watchlist" })).toBeVisible();
+  await page.getByRole("navigation", { name: "Instrument sections" }).getByRole("link", { name: "Technical" }).click();
+  await expect(page.getByTestId("technical-terminal-chart")).toHaveAttribute("data-chart-ready", "true", { timeout: 30_000 });
+  await page.getByLabel("Historical range").getByRole("button", { name: "MAX", exact: true }).click();
+  await expect(page.getByText(/NVDA · MAX · 1D/)).toBeVisible();
+
+  await page.goto("/watchlists");
+  await expect(page.getByRole("button", { name: "Remove NVDA" })).toBeVisible();
+  await page.getByRole("button", { name: "Add instrument" }).click();
+  const search = page.getByPlaceholder("AAPL, ENI.MI, Bitcoin…");
+  await search.fill("BTC");
+  await expect(page.getByText("BTC-USD")).toBeVisible();
+  await search.fill("ETH");
+  await expect(page.getByText("ETH-USD")).toBeVisible();
+  await page.getByRole("button", { name: "Add to watchlist" }).click();
+  await expect(page.getByRole("link", { name: "Ether" })).toHaveAttribute("href", "/instrument/crypto/eth-usd/overview");
+  await page.getByRole("link", { name: "Ether" }).click();
+  await expect(page).toHaveURL(/\/instrument\/crypto\/eth-usd\/overview$/);
+  await page.getByRole("navigation", { name: "Instrument sections" }).getByRole("link", { name: "Technical" }).click();
+  await expect(page.getByTestId("technical-terminal-chart")).toHaveAttribute("data-chart-ready", "true", { timeout: 30_000 });
+  expect(items.map((entry) => entry.symbol)).toEqual(["NVDA", "ETH-USD"]);
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.getByLabel("Email").fill("audit@example.test");
+  await page.locator('input[name="password"]').fill("audit-password-123");
+  await page.getByRole("button", { name: "Enter workspace" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  expect(directProviderRequests).toEqual([]);
 });
