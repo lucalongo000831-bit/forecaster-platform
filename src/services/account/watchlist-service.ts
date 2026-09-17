@@ -3,6 +3,7 @@ import "server-only";
 import { and, asc, count, eq, gte, inArray } from "drizzle-orm";
 import { alerts, calendarEvents, getDatabase, instruments, watchlistItems, watchlists } from "@/db";
 import { AppError } from "@/lib/server/app-error";
+import { withServerTimeout } from "@/lib/server/promise-timeout";
 import { financialProviderRouter } from "@/providers";
 import { getSignalAnalysis } from "@/services/analysis/signal-service";
 import { getTargetAnalysis } from "@/services/analysis/target-service";
@@ -15,26 +16,28 @@ async function ownedWatchlist(userId: string, id: string) {
   return record;
 }
 
-export async function listWatchlists(userId: string): Promise<AccountWatchlist[]> {
+export async function listWatchlists(userId: string, options: { enrich?: boolean } = {}): Promise<AccountWatchlist[]> {
   const database = getDatabase();
   const lists = await database.select().from(watchlists).where(eq(watchlists.userId, userId)).orderBy(asc(watchlists.createdAt));
   if (!lists.length) return [];
   const rows = await database.select({ id: watchlistItems.id, watchlistId: watchlistItems.watchlistId, instrumentId: watchlistItems.instrumentId, position: watchlistItems.position, notes: watchlistItems.notes, symbol: instruments.canonicalSymbol, name: instruments.name, type: instruments.type, currency: instruments.currency, market: instruments.market }).from(watchlistItems).innerJoin(instruments, eq(watchlistItems.instrumentId, instruments.id)).where(inArray(watchlistItems.watchlistId, lists.map((list) => list.id))).orderBy(asc(watchlistItems.position));
+  const base = lists.map((list) => ({ id: list.id, name: list.name, description: list.description, items: rows.filter((row) => row.watchlistId === list.id).map((row) => ({ id: row.id, symbol: row.symbol, name: row.name, type: row.type, currency: row.currency, market: row.market, position: row.position, notes: row.notes, price: null, changePercent: null, volume: null, marketState: null, lastUpdated: null, provider: null, signal: null, confidence: null, target: null, nextEvent: null, activeAlerts: 0 })) })) satisfies AccountWatchlist[];
+  if (options.enrich === false || !rows.length) return base;
   const symbols = [...new Set(rows.map((row) => row.symbol))];
-  const quoteResult = symbols.length ? await financialProviderRouter.quotes(symbols).catch(() => null) : null;
+  const quoteResult = await withServerTimeout(financialProviderRouter.quotes(symbols), 2_000, "Watchlist quotes exceeded the interactive budget").catch(() => null);
   const quoteMap = new Map((quoteResult?.data ?? []).map((quote) => [quote.symbol, quote]));
   const [futureEvents, activeAlertRows] = symbols.length ? await Promise.all([
-    database.select({ symbol: calendarEvents.symbol, title: calendarEvents.title, startsAt: calendarEvents.startsAt }).from(calendarEvents).where(and(inArray(calendarEvents.symbol, symbols), gte(calendarEvents.startsAt, new Date()))).orderBy(asc(calendarEvents.startsAt)),
-    database.select({ instrumentId: alerts.instrumentId }).from(alerts).where(and(eq(alerts.userId, userId), eq(alerts.status, "ACTIVE"), inArray(alerts.instrumentId, rows.map((row) => row.instrumentId)))),
+    database.select({ symbol: calendarEvents.symbol, title: calendarEvents.title, startsAt: calendarEvents.startsAt }).from(calendarEvents).where(and(inArray(calendarEvents.symbol, symbols), gte(calendarEvents.startsAt, new Date()))).orderBy(asc(calendarEvents.startsAt)).catch(() => []),
+    database.select({ instrumentId: alerts.instrumentId }).from(alerts).where(and(eq(alerts.userId, userId), eq(alerts.status, "ACTIVE"), inArray(alerts.instrumentId, rows.map((row) => row.instrumentId)))).catch(() => []),
   ]) : [[], []];
   const nextEvent = new Map<string, { title: string; startsAt: string }>();
   for (const event of futureEvents) if (event.symbol && !nextEvent.has(event.symbol)) nextEvent.set(event.symbol, { title: event.title, startsAt: event.startsAt.toISOString() });
   const alertCounts = new Map<string, number>(); for (const alert of activeAlertRows) if (alert.instrumentId) alertCounts.set(alert.instrumentId, (alertCounts.get(alert.instrumentId) ?? 0) + 1);
   const analyses = new Map<string, { signal: string | null; confidence: number | null; target: number | null }>();
-  await Promise.all(symbols.slice(0, 8).map(async (symbol) => {
+  await withServerTimeout(Promise.all(symbols.slice(0, 8).map(async (symbol) => {
     const [signal, target] = await Promise.all([getSignalAnalysis(symbol, "1m").catch(() => null), getTargetAnalysis(symbol, "12m").catch(() => null)]);
     analyses.set(symbol, { signal: signal?.analysis.category ?? null, confidence: signal?.analysis.confidence ?? null, target: target?.analysis.compositeTarget ?? null });
-  }));
+  })), 2_500, "Watchlist analysis exceeded the interactive budget").catch(() => undefined);
   return lists.map((list) => ({ id: list.id, name: list.name, description: list.description, items: rows.filter((row) => row.watchlistId === list.id).map((row) => { const quote = quoteMap.get(row.symbol); const analysis = analyses.get(row.symbol); return { id: row.id, symbol: row.symbol, name: row.name, type: row.type, currency: row.currency, market: row.market, position: row.position, notes: row.notes, price: quote?.price ?? null, changePercent: quote?.changePercent ?? null, volume: quote?.volume ?? null, marketState: quote?.marketState ?? null, lastUpdated: quote?.asOf ?? quoteResult?.meta.sourceTimestamp ?? null, provider: quote ? quoteResult?.meta.provider ?? null : null, signal: analysis?.signal ?? null, confidence: analysis?.confidence ?? null, target: analysis?.target ?? null, nextEvent: nextEvent.get(row.symbol) ?? null, activeAlerts: alertCounts.get(row.instrumentId) ?? 0 }; }) }));
 }
 

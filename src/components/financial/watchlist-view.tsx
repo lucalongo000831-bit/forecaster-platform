@@ -4,16 +4,19 @@ import Link from "next/link";
 import { ArrowDown, ArrowUp, FilePenLine, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { formatCurrency, formatPercent } from "@/lib";
+import { canonicalCryptoSymbol } from "@/lib/instrument-identity";
 import { useMarketSearch } from "@/lib/use-market-search";
 import type { AccountWatchlist, MarketQuoteDto, SearchInstrument } from "@/types";
 
 type Envelope<T> = { data?: T; error?: { message?: string } };
 const instrumentType = (type: SearchInstrument["type"]) => type === "Stock" ? "EQUITY" : type.toUpperCase();
 
-export function WatchlistView() {
+const EMPTY_SEARCH: SearchInstrument[] = [];
+
+export function WatchlistView({ instruments = EMPTY_SEARCH }: { instruments?: SearchInstrument[] }) {
   const [lists, setLists] = useState<AccountWatchlist[]>([]); const [selectedId, setSelectedId] = useState("");
   const [modal, setModal] = useState(false); const [query, setQuery] = useState(""); const [filter, setFilter] = useState(""); const [sort, setSort] = useState<"position" | "symbol" | "change">("position"); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
-  const { results, loading, error } = useMarketSearch(query, []); const selected = results[0];
+  const { results, loading, error } = useMarketSearch(query, instruments); const selected = query.trim().length >= 2 ? results[0] : undefined;
   const load = useCallback(async () => { setBusy(true); setMessage(""); try { const response = await fetch("/api/account/watchlists", { cache: "no-store" }); const body = await response.json() as Envelope<AccountWatchlist[]>; if (!response.ok) throw new Error(body.error?.message ?? "Watchlist non disponibile"); setLists(body.data ?? []); setSelectedId((current) => current || body.data?.[0]?.id || ""); } catch (requestError) { setMessage(requestError instanceof Error ? requestError.message : "Watchlist non disponibile"); } finally { setBusy(false); } }, []);
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   const current = lists.find((list) => list.id === selectedId) ?? lists[0];
@@ -45,7 +48,7 @@ export function WatchlistView() {
   async function add() { if (!selected || busy) return; setBusy(true); setMessage(""); try { const listId = current?.id ?? await createList(); if (!listId) return; const response = await fetch(`/api/account/watchlists/${listId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: selected.symbol, name: selected.name, type: instrumentType(selected.type), currency: selected.currency, market: selected.venue, position: current?.items.length ?? 0 }) }); const body = await response.json() as Envelope<unknown>; if (!response.ok) throw new Error(body.error?.message ?? "Inserimento non riuscito"); setModal(false); setQuery(""); await load(); } catch (requestError) { setMessage(requestError instanceof Error ? requestError.message : "Inserimento non riuscito"); } finally { setBusy(false); } }
   async function remove(itemId: string) { if (!current) return; setBusy(true); const response = await fetch(`/api/account/watchlists/${current.id}/items/${itemId}`, { method: "DELETE" }); const body = await response.json() as Envelope<unknown>; if (!response.ok) setMessage(body.error?.message ?? "Rimozione non riuscita"); await load(); }
 
-  const displayRows = [...(current?.items ?? [])].filter((row) => `${row.symbol} ${row.name} ${row.notes ?? ""}`.toLowerCase().includes(filter.toLowerCase())).sort((a, b) => sort === "symbol" ? a.symbol.localeCompare(b.symbol) : sort === "change" ? (b.changePercent ?? -Infinity) - (a.changePercent ?? -Infinity) : a.position - b.position);
+  const displayRows = [...(current?.items ?? [])].map((row) => ({ ...row, market: canonicalCryptoSymbol(row.symbol, { market: row.market }) ? "crypto" : row.market })).filter((row) => `${row.symbol} ${row.name} ${row.notes ?? ""}`.toLowerCase().includes(filter.toLowerCase())).sort((a, b) => sort === "symbol" ? a.symbol.localeCompare(b.symbol) : sort === "change" ? (b.changePercent ?? -Infinity) - (a.changePercent ?? -Infinity) : a.position - b.position);
   return <div className="container-shell page-stack"><header className="section-row"><div><span className="page-kicker">Collections / Private workspace</span><h1 className="page-title">Your watchlists.</h1><p className="muted mt-3">Liste persistenti, quotazioni server-side e analisi quantitative esplicite.</p></div><div className="flex gap-2"><button className="button-secondary" onClick={() => void createList().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Creazione non riuscita"))}><Plus size={17}/>New list</button><button className="button-primary" onClick={() => setModal(true)}><Plus size={17}/>Add instrument</button></div></header>
   {message && <section className="soft-card p-5"><strong>Workspace unavailable</strong><p className="muted mt-2">{message}</p>{message.toLowerCase().includes("autentic") && <Link className="button-primary mt-4 inline-flex" href="/login">Sign in</Link>}</section>}
   {lists.length > 0 && <div className="section-row"><div className="flex flex-wrap gap-2">{lists.map((list) => <button key={list.id} className={list.id === current?.id ? "button-primary" : "button-secondary"} onClick={() => setSelectedId(list.id)}>{list.name} · {list.items.length}</button>)}</div><div className="flex gap-2"><button className="button-secondary" onClick={() => void renameList()}><FilePenLine size={15}/>Rename</button><button className="button-secondary" onClick={() => void deleteList()}><Trash2 size={15}/>Delete</button></div></div>}

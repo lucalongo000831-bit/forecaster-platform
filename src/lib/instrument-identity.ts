@@ -40,6 +40,9 @@ export function canonicalCryptoSymbol(symbolInput: string, context: InstrumentId
   const providerPair = symbol.match(/^([A-Z0-9]{2,20})-([A-Z]{3,5})\.CC$/);
   if (providerPair) return canonicalPair(providerPair[1]!, providerPair[2]!);
 
+  const providerBase = symbol.match(/^([A-Z0-9]{2,20})\.CC$/);
+  if (providerBase && KNOWN_CRYPTO_BASES.has(providerBase[1]!)) return `${providerBase[1]}-USD`;
+
   const pair = symbol.match(/^([A-Z0-9]{2,20})-([A-Z]{3,5})$/);
   if (pair) return canonicalPair(pair[1]!, pair[2]!);
 
