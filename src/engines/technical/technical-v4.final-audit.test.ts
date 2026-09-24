@@ -208,14 +208,33 @@ describe("Technical V4 final audit — cross-asset mathematics", () => {
     expect(result.beta).toBeCloseTo(2, 8);
   });
 
-  it("returns undefined beta/correlation for a constant benchmark and never fabricates missing dates", () => {
+  it("returns undefined beta/correlation for a constant benchmark and never fabricates missing sessions", () => {
     const asset = barsFromPrices(pricesFromReturns(benchmarkReturns));
     const constant = barsFromPrices(Array.from({ length: asset.length }, () => 100));
     const constantResult = calculateCrossAssetContext(asset, constant, "SPY", { timeframe: "1D", assetClass: "EQUITY" });
     expect(constantResult.beta).toBeNull();
     expect(constantResult.points.at(-1)?.correlation20).toBeNull();
-    const shifted = barsFromPrices(pricesFromReturns(benchmarkReturns), Date.UTC(2024, 0, 1), 12 * 60 * 60 * 1_000);
-    expect(calculateCrossAssetContext(asset, shifted, "SPY").status).toBe("INSUFFICIENT_DATA");
+    const sparse = constant.filter((_, index) => index % 2 === 0);
+    const sparseResult = calculateCrossAssetContext(asset, sparse, "SPY", { timeframe: "1D" });
+    expect(sparseResult.points).toHaveLength(sparse.length);
+    expect(sparseResult.alignmentMethod).toBe("UTC_SESSION_DATE");
+  });
+
+  it("aligns different provider timestamps for the same daily or weekly session without intraday lookahead", () => {
+    const prices = pricesFromReturns(benchmarkReturns);
+    const asset = barsFromPrices(prices);
+    const shifted = barsFromPrices(prices, Date.UTC(2024, 0, 1), 12 * 60 * 60 * 1_000);
+    const daily = calculateCrossAssetContext(asset, shifted, "QQQ", { timeframe: "1D" });
+    expect(daily).toMatchObject({ status: "AVAILABLE", alignmentMethod: "UTC_SESSION_DATE" });
+    expect(daily.points).toHaveLength(asset.length);
+    expect(daily.points[0]?.timestamp).toBe(shifted[0]?.timestamp);
+    expect(calculateCrossAssetContext(asset, shifted, "QQQ", { timeframe: "1h" })).toMatchObject({ status: "INSUFFICIENT_DATA", alignmentMethod: "EXACT_TIMESTAMP" });
+
+    const weeklyAsset = asset.map((bar, index) => ({ ...bar, timestamp: new Date(Date.UTC(2024, 0, 1) + index * 7 * DAY).toISOString() }));
+    const weeklyBenchmark = weeklyAsset.map((bar) => ({ ...bar, timestamp: new Date(Date.parse(bar.timestamp) + 2 * DAY).toISOString() }));
+    const weekly = calculateCrossAssetContext(weeklyAsset, weeklyBenchmark, "QQQ", { timeframe: "1W" });
+    expect(weekly).toMatchObject({ status: "AVAILABLE", alignmentMethod: "UTC_ISO_WEEK" });
+    expect(weekly.points).toHaveLength(weeklyAsset.length);
   });
 
   it("uses crypto-aware annualization and reports the chosen observation basis", () => {

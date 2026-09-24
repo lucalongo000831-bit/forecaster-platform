@@ -495,12 +495,13 @@ export interface TechnicalCrossAssetResult {
   assetVolatility: number | null;
   benchmarkVolatility: number | null;
   relativeVolatility: number | null;
+  alignmentMethod: "UTC_SESSION_DATE" | "UTC_ISO_WEEK" | "EXACT_TIMESTAMP";
   annualizationPeriods: number;
   annualizationMethod: "SQRT_OBSERVATIONS_PER_YEAR";
   context: "OUTPERFORMING" | "UNDERPERFORMING" | "NEUTRAL" | "UNAVAILABLE";
   overlapStart: string | null;
   overlapEnd: string | null;
-  modelVersion: "cross-asset-v1.0.0";
+  modelVersion: "cross-asset-v1.1.0";
 }
 
 export interface TechnicalConfluenceContributor { id: string; label: string; value: number; weight: number; explanation: string; }
