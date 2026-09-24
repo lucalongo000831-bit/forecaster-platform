@@ -19,6 +19,7 @@ const REQUESTS: Record<TechnicalTimeframe, { range: ChartRange; interval: ChartI
 };
 
 const RANGE_ORDER: ChartRange[] = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y", "MAX"];
+const LONG_RANGE_YEARS: Partial<Record<ChartRange, number>> = { "3Y": 3, "5Y": 5, "10Y": 10, MAX: 25 };
 function requestFor(timeframe: TechnicalTimeframe, range?: ChartRange) {
   const selected = range ?? REQUESTS[timeframe].range;
   const intraday = ["1m", "5m", "15m", "30m", "1h", "4h"].includes(timeframe);
@@ -35,8 +36,11 @@ export async function getTechnicalChartDataset(symbolInput: string, timeframe: T
   const symbol = normalizeSymbol(decodeURIComponent(symbolInput));
   const requestedRange: TechnicalHistoricalRange = custom?.from && custom?.to ? "CUSTOM" : range ?? REQUESTS[timeframe].range;
   const request = requestFor(timeframe, requestedRange === "CUSTOM" ? "MAX" : requestedRange);
+  const preferredYears = LONG_RANGE_YEARS[request.range];
   const [chart, instrument] = await Promise.all([
-    financialProviderRouter.chart(symbol, request.range, request.interval),
+    preferredYears
+      ? financialProviderRouter.technicalChart(symbol, request.range, request.interval, preferredYears)
+      : financialProviderRouter.chart(symbol, request.range, request.interval),
     resolveInstrument(symbol).catch(() => null),
   ]);
   const sliced = chart.data.points.filter((bar) => (!custom?.from || bar.timestamp.slice(0, 10) >= custom.from) && (!custom?.to || bar.timestamp.slice(0, 10) <= custom.to));
