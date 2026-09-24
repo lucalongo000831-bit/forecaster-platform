@@ -6,7 +6,7 @@ Technical V4 is an additive decision workspace built on the V1–V3 chart, drawi
 
 Interval and historical range are independent controls. Supported ranges are `1D`, `5D`, `1M`, `3M`, `6M`, `YTD`, `1Y`, `3Y`, `5Y`, `10Y`, `MAX` and validated custom dates. `MAX` requests the longest valid series exposed by Kairo's provider router and never aliases one year. The UI discloses the earliest returned observation, bar count, provider and partial/unavailable states. Invalid range/interval pairs return a readable local error while the last valid chart remains visible.
 
-Long-range requests use the existing server cache and single-flight provider router. The browser additionally caches exact symbol/interval/range requests; a cached longer response can remain visible during expansion failures. Provider series are not silently downsampled. Daily/weekly bars preserve the canonical corporate-action policy and crypto weekend observations.
+Long-range requests (`3Y`, `5Y`, `10Y`, `MAX`) use a coverage-aware server route: configured providers are compared until the requested span is satisfied, with the deepest verified response retained as the fallback. `MAX` targets at least 25 years when the instrument has that history, preventing a successful but plan-limited upstream response from silently truncating the chart. The server cache and single-flight behavior remain active. The browser additionally caches exact symbol/interval/range requests; a cached longer response can remain visible during expansion failures. Provider series are not silently downsampled. Daily/weekly bars preserve the canonical corporate-action policy and crypto weekend observations.
 
 `Fit all data` changes only the viewport. Manual zoom/pan is retained across background refreshes for the same panel/range. A range change deliberately fits the newly selected dataset. Each pane persists its own range; optional range sync is explicit.
 
@@ -19,7 +19,7 @@ Provider limits differ by interval. Intraday history is deliberately constrained
 - Liquidity: equal-high/equal-low clusters use the greater of a price-relative and ATR-relative tolerance. A sweep requires a breach followed by a close back inside the zone.
 - Displacement: deterministic body/ATR, close-location and relative-volume evidence.
 - FVG: three-candle gaps are available only on the third candle. Fill state uses subsequent observations only.
-- Cross asset: exact timestamp intersection, range-specific normalization to 100, rolling 20/60 correlation, covariance beta and annualized realized volatility. Missing benchmark dates are never fabricated.
+- Cross asset: daily bars intersect by UTC trading date, weekly bars by UTC ISO-week start, and intraday bars by exact timestamp. The paired point is available only at the later of the two source timestamps; missing sessions are never fabricated. Range-specific normalization to 100, rolling 20/60 correlation, covariance beta and annualized realized volatility use only paired observations. Volatility uses square-root-of-observations-per-year scaling: 252 daily sessions for equities, 365 daily observations for crypto, 52 weekly observations, and the corresponding exchange-session or 24/7 intraday frequency.
 - Confluence: a transparent weighted descriptive score. It is not a probability, forecast or recommendation.
 
 ## Alerts

@@ -29,13 +29,17 @@ function swingQuality(structure: MarketStructureResult, bars: MarketChartPoint[]
 
 function liquidity(structure: MarketStructureResult, bars: MarketChartPoint[], atr: Array<number | null>) {
   const zones: TechnicalLiquidityZone[] = [];
+  const coveredSwingIds = new Set<string>();
   for (const kind of ["HIGH", "LOW"] as const) {
     const swings = structure.swings.filter((swing) => swing.kind === kind);
     for (let index = 0; index < swings.length; index += 1) {
-      const seed = swings[index]!; if (zones.some((zone) => seed.price >= zone.low && seed.price <= zone.high)) continue;
+      const seed = swings[index]!;
+      if (coveredSwingIds.has(seed.id)) continue;
       const tolerance = Math.max(seed.price * 0.0015, (atr[seed.confirmationIndex] ?? 0) * 0.25);
-      const cluster = swings.slice(index).filter((swing) => Math.abs(swing.price - seed.price) <= tolerance);
-      if (cluster.length < 2) continue;
+      const match = swings.slice(index + 1).find((swing) => Math.abs(swing.price - seed.price) <= tolerance);
+      if (!match) continue;
+      const cluster = [seed, match];
+      swings.slice(index).filter((swing) => Math.abs(swing.price - seed.price) <= tolerance).forEach((swing) => coveredSwingIds.add(swing.id));
       const low = Math.min(...cluster.map((swing) => swing.price)); const high = Math.max(...cluster.map((swing) => swing.price));
       const confirmed = cluster.map((swing) => swing.confirmationTimestamp).sort().at(-1)!;
       const zone: TechnicalLiquidityZone = { id: `liq-${kind.toLowerCase()}-${seed.id}`, side: kind === "HIGH" ? "BUY_SIDE" : "SELL_SIDE", low: low - tolerance * 0.15, high: high + tolerance * 0.15, touches: cluster.length, createdAt: seed.timestamp, availableAt: confirmed, status: "ACTIVE" };

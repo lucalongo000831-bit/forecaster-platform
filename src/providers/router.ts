@@ -38,7 +38,7 @@ import type {
   StatementKind,
   StatementPeriod,
 } from "./types";
-import type { ChartRange, ResolvedInstrument } from "@/types";
+import type { ChartRange, MarketChartPoint, ResolvedInstrument } from "@/types";
 
 const marketAdapters = {
   massive: new MassiveMarketDataAdapter(),
@@ -53,6 +53,13 @@ const macroAdapters = { fmp: new FmpMacroAdapter(), "alpha-vantage": new AlphaVa
 const capabilityBlocks = new Map<string, number>();
 
 function unique<T>(values: T[]) { return [...new Set(values)]; }
+
+export function historicalCoverageYears(points: MarketChartPoint[]) {
+  if (points.length < 2) return 0;
+  const first = Date.parse(points[0]!.timestamp);
+  const last = Date.parse(points.at(-1)!.timestamp);
+  return Number.isFinite(first) && Number.isFinite(last) && last >= first ? (last - first) / (365.2425 * 86_400_000) : 0;
+}
 
 function mappedSymbol(instrument: ResolvedInstrument, provider: ProviderName) {
   const candidates = instrument.mappings.filter((mapping) => mapping.provider === provider);
@@ -129,6 +136,32 @@ export class FinancialProviderRouter {
     const order = this.marketOrder();
     const intraday = range === "1D" || range === "5D";
     return providerCached(`chart:${symbol}:${range}:${interval ?? "auto"}`, { freshSeconds: intraday ? 10 : 900, staleSeconds: intraday ? 60 : 21_600 }, () => firstAvailable("chart", symbol, order.map((adapter) => ({ name: adapter.name, configured: adapter.isConfigured(), supported: adapter.supportsSymbol(symbol), task: () => adapter.getHistoricalBars(symbol, range, interval) }))));
+  }
+
+  technicalChart(symbolInput: string, range: ChartRange, interval: string | null, preferredYears: number) {
+    const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider(); if (fixture) return fixture.chart(symbol, range, interval);
+    const order = this.marketOrder();
+    return providerCached(`technical-chart:v1:${symbol}:${range}:${interval ?? "auto"}:${preferredYears}`, { freshSeconds: 900, staleSeconds: 21_600 }, async () => {
+      let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
+      let lastError: unknown = null;
+      for (let index = 0; index < order.length; index += 1) {
+        const adapter = order[index];
+        if (!adapter.isConfigured() || !adapter.supportsSymbol(symbol)) continue;
+        try {
+          const candidate = await adapter.getHistoricalBars(symbol, range, interval);
+          if (candidate.data.points.length < 2) continue;
+          if (!best || candidate.data.points.length > best.data.points.length) best = { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+          const spanYears = historicalCoverageYears(candidate.data.points);
+          if (spanYears >= preferredYears * 0.9) return { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+        } catch (error) {
+          lastError = error;
+          structuredLog("warn", "provider.router.technical-history.fallback", { provider: adapter.name, operation: "technical-chart", symbol, code: error instanceof ProviderError ? error.code : "UPSTREAM_UNAVAILABLE" });
+        }
+      }
+      if (best) return best;
+      throw lastError ?? new ProviderError("yahoo", "NOT_FOUND", "Storico sufficiente non disponibile per Technical V4.", false, 404);
+    });
   }
 
   analyticsChart(symbolInput: string, range: ChartRange = "MAX", interval: string | null = "1d") {

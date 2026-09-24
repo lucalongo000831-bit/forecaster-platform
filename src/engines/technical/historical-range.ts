@@ -11,8 +11,11 @@ export function filterTechnicalRange(bars: MarketChartPoint[], range: TechnicalH
   if (range === "MAX") return [...bars];
   const end = range === "CUSTOM" && custom?.to ? Date.parse(`${custom.to}T23:59:59.999Z`) : now.getTime();
   if (range === "CUSTOM") {
-    if (!custom?.from || !custom.to || custom.from >= custom.to || end > now.getTime() + 86_400_000) return [];
-    const start = Date.parse(`${custom.from}T00:00:00.000Z`); return bars.filter((bar) => { const value = Date.parse(bar.timestamp); return value >= start && value <= end; });
+    if (!custom?.from || !custom.to || custom.from > custom.to) return [];
+    const start = Date.parse(`${custom.from}T00:00:00.000Z`);
+    if (start > now.getTime()) return [];
+    const effectiveEnd = Math.min(end, now.getTime());
+    return bars.filter((bar) => { const value = Date.parse(bar.timestamp); return value >= start && value <= effectiveEnd; });
   }
   const days: Partial<Record<TechnicalHistoricalRange, number>> = { "1D": 1, "5D": 5, "1M": 31, "3M": 92, "6M": 183, "1Y": 366, "3Y": 1_096, "5Y": 1_827, "10Y": 3_653 };
   const start = range === "YTD" ? Date.UTC(now.getUTCFullYear(), 0, 1) : end - (days[range] ?? 366) * 86_400_000;

@@ -6,8 +6,21 @@ import { ArrowUpRight, BellRing, Bot, Cpu, Sparkles, Star } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { formatCompactNumber, formatCurrency, formatDataSource, formatPercent, instrumentPath } from "@/lib";
 import { instrumentQuoteRefreshIntervalMs, isUsableQuoteResponse } from "@/lib/instrument-refresh";
-import type { InstrumentProfile, InstrumentRef } from "@/types";
+import type { AccountWatchlist, InstrumentProfile, InstrumentRef } from "@/types";
 import { useKairoChat } from "@/components/ai/kairo-chat-provider";
+import { canonicalCryptoSymbol } from "@/lib/instrument-identity";
+
+type Envelope<T> = { data?: T; error?: { message?: string } };
+
+function watchlistType(instrument: InstrumentProfile) {
+  const value = `${instrument.quoteType ?? ""} ${instrument.category}`.toUpperCase();
+  if (value.includes("CRYPTO") || canonicalCryptoSymbol(instrument.symbol, { market: instrument.market, quoteType: instrument.quoteType })) return "CRYPTO";
+  if (value.includes("ETF")) return "ETF";
+  if (value.includes("INDEX")) return "INDEX";
+  if (value.includes("FOREX") || value.includes("CURRENCY")) return "FOREX";
+  if (value.includes("FUND")) return "FUND";
+  return "EQUITY";
+}
 
 const tabs = [
   ["overview", "Overview"], ["technical", "Technical"], ["analysis", "Analisi completa"], ["signal", "Signals"], ["forecast", "Forecast"], ["targets", "Targets"], ["seasonality", "Seasonality"], ["pattern", "Patterns"],
@@ -19,8 +32,72 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
   const { openKairo } = useKairoChat();
   const pathname = usePathname();
   const [favorite, setFavorite] = useState(false);
+  const [favoriteItem, setFavoriteItem] = useState<{ listId: string; itemId: string } | null>(null);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [favoriteError, setFavoriteError] = useState("");
+  const [accountAvailable, setAccountAvailable] = useState<boolean | null>(null);
   const [quote, setQuote] = useState(instrument.quote);
   const compact = !pathname.endsWith("/overview");
+
+  const readWatchlists = useCallback(async () => {
+    const response = await fetch("/api/account/watchlists", { cache: "no-store" });
+    const body = await response.json() as Envelope<AccountWatchlist[]>;
+    if (!response.ok) throw new Error(body.error?.message ?? "Watchlist unavailable");
+    return body.data ?? [];
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/auth/session", { cache: "no-store" }).then(async (response) => {
+      const body = await response.json() as Envelope<unknown>;
+      if (!active) return;
+      if (!response.ok || !body.data) { setAccountAvailable(false); return; }
+      setAccountAvailable(true);
+      const lists = await readWatchlists();
+      if (!active) return;
+      const canonical = canonicalCryptoSymbol(instrument.symbol, { market: instrument.market, quoteType: instrument.quoteType }) ?? instrument.symbol.toUpperCase();
+      for (const list of lists) {
+        const item = list.items.find((entry) => entry.symbol.toUpperCase() === canonical);
+        if (item) { setFavorite(true); setFavoriteItem({ listId: list.id, itemId: item.id }); return; }
+      }
+      setFavorite(false); setFavoriteItem(null);
+    }).catch(() => { if (active) setAccountAvailable(false); });
+    return () => { active = false; };
+  }, [instrument.market, instrument.quoteType, instrument.symbol, readWatchlists]);
+
+  const toggleFavorite = useCallback(async () => {
+    if (favoriteBusy) return;
+    setFavoriteBusy(true); setFavoriteError("");
+    try {
+      if (accountAvailable === false) throw new Error("Sign in to use your watchlist");
+      if (favoriteItem) {
+        const response = await fetch(`/api/account/watchlists/${favoriteItem.listId}/items/${favoriteItem.itemId}`, { method: "DELETE" });
+        const body = await response.json() as Envelope<unknown>;
+        if (!response.ok) throw new Error(body.error?.message ?? "Removal failed");
+        setFavorite(false); setFavoriteItem(null);
+        return;
+      }
+      let lists = await readWatchlists();
+      let listId = lists[0]?.id;
+      if (!listId) {
+        const response = await fetch("/api/account/watchlists", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "My Watchlist" }) });
+        const body = await response.json() as Envelope<{ id: string }>;
+        if (!response.ok || !body.data?.id) throw new Error(body.error?.message ?? "Watchlist creation failed");
+        listId = body.data.id;
+        lists = [];
+      }
+      const canonical = canonicalCryptoSymbol(instrument.symbol, { market: instrument.market, quoteType: instrument.quoteType }) ?? instrument.symbol.toUpperCase();
+      const response = await fetch(`/api/account/watchlists/${listId}/items`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: canonical, name: instrument.name, type: watchlistType(instrument), currency: instrument.currency, market: canonical.includes("-") && watchlistType(instrument) === "CRYPTO" ? "CRYPTO" : instrument.exchange ?? instrument.market, position: lists[0]?.items.length ?? 0 }),
+      });
+      const body = await response.json() as Envelope<{ id: string }>;
+      if (!response.ok || !body.data?.id) throw new Error(body.error?.message ?? "Add to watchlist failed");
+      setFavorite(true); setFavoriteItem({ listId, itemId: body.data.id });
+    } catch (error) {
+      setFavoriteError(error instanceof Error ? error.message : "Watchlist unavailable");
+    } finally { setFavoriteBusy(false); }
+  }, [accountAvailable, favoriteBusy, favoriteItem, instrument, readWatchlists]);
 
   const refreshQuote = useCallback(async () => {
     if (document.hidden) return;
@@ -97,9 +174,10 @@ export function InstrumentShell({ children, instrument }: { children: React.Reac
             return <Link key={route} className={active ? "active" : ""} href={href} onPointerEnter={prefetch} onFocus={prefetch}>{label}</Link>;
           })}
         </nav>
-        <button className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => setFavorite(!favorite)} aria-pressed={favorite} aria-label="Toggle favorite"><Star size={18} fill={favorite ? "currentColor" : "none"}/><span>{favorite ? "Watching" : "Watch"}</span></button>
+        <button disabled={favoriteBusy} className={`favorite-button ${favorite ? "active" : ""}`} onClick={() => void toggleFavorite()} aria-pressed={favorite} aria-label={favorite ? "Remove from watchlist" : "Add to watchlist"}><Star size={18} fill={favorite ? "currentColor" : "none"}/><span>{favoriteBusy ? (favorite ? "Removing…" : "Adding…") : favorite ? "Watching" : "Watch"}</span></button>
         <button className="agent-cta" onClick={() => openKairo()}><Sparkles size={17}/>Ask Lens</button>
       </div>
+      {favoriteError && <p role="alert" className="negative container-shell mt-2 text-sm">{favoriteError}</p>}
       <div className="event-strip"><span className="event-icon"><BellRing size={17}/></span><span>{instrument.earnings.daysUntil > 0 ? <><strong>Earnings in {instrument.earnings.daysUntil} days</strong><small>Consensus EPS {formatCurrency(instrument.earnings.consensusEps, instrument.currency)} · {instrument.earnings.dateLabel}</small></> : <><strong>Earnings data unavailable</strong><small>No verified event is currently available from the configured providers.</small></>}</span><button><Bot size={16}/>View event brief <ArrowUpRight size={15}/></button></div>
     </section>
     {children}
