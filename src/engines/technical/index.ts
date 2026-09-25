@@ -6,3 +6,8 @@ export * from "./v2";
 export * from "./v3";
 export * from "./drawing-registry";
 export * from "./alert-registry";
+export * from "./position-planner";
+export * from "./structure-v4";
+export * from "./cross-asset";
+export * from "./confluence-v4";
+export * from "./historical-range";

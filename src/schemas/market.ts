@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const symbolSchema = z.string().trim().min(1).max(32).regex(/^(?:\^[A-Za-z0-9][A-Za-z0-9.-]{0,29}|[A-Za-z0-9][A-Za-z0-9.^=-]{0,30})$/);
 export const searchQuerySchema = z.string().trim().min(1).max(80).regex(/^[\p{L}\p{N}\s.'’&+^=:_-]+$/u);
-export const chartRangeSchema = z.enum(["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "10Y", "MAX"]);
+export const chartRangeSchema = z.enum(["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y", "MAX"]);
 export const chartIntervalSchema = z.enum(["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]);
 
 export const searchRequestSchema = z.object({ q: searchQuerySchema });
@@ -30,7 +30,13 @@ export const earningsRequestSchema = z.object({
 export const analysisHorizonSchema = z.enum(["intraday", "1d", "1w", "1m", "3m", "6m", "12m", "long"]);
 export const technicalRequestSchema = z.object({ symbol: symbolSchema, horizon: analysisHorizonSchema.default("1m"), benchmark: symbolSchema.default("^GSPC") });
 export const technicalTimeframeSchema = z.enum(["1m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"]);
-export const technicalChartRequestSchema = z.object({ symbol: symbolSchema, timeframe: technicalTimeframeSchema.default("1D") });
+export const technicalChartRequestSchema = z.object({
+  symbol: symbolSchema,
+  timeframe: technicalTimeframeSchema.default("1D"),
+  range: chartRangeSchema.optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+}).refine((value) => !value.from || !value.to || value.from < value.to, { message: "Intervallo storico non valido" });
 export const seasonalityWindowSchema = z.enum(["1Y", "3Y", "5Y", "7Y", "10Y", "15Y", "20Y", "25Y", "MAX"]);
 const seasonalityBooleanSchema = z.preprocess((value) => value === "true" ? true : value === "false" ? false : value, z.boolean()).default(true);
 const seasonalityDatePartSchema = z.string().regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/).refine((value) => new Date(`2024-${value}T00:00:00Z`).toISOString().slice(5, 10) === value, "Data MM-DD non valida");

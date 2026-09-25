@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, ISeriesMarkersPluginApi, LogicalRange, MouseEventParams, SeriesMarker, SeriesType, Time } from "lightweight-charts";
 import { anchoredVwap, calculateIndicatorSeries, calculateVolumeProfile, drawingDefinition, fibonacciExtension, fibonacciRetracement, heikinAshi, horizontalRayDrawingSegment, normalizeSeriesAtCommonStart, rectangleDrawingSegments } from "@/engines/technical";
-import type { MarketStructureResult, MtfTechnicalLevel, RangedVolumeProfileResult, TechnicalChartDataset, TechnicalChartType, TechnicalDivergence, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel, TechnicalSessionAnalytics } from "@/types";
+import type { MarketStructureResult, MtfTechnicalLevel, PositionPlannerResult, RangedVolumeProfileResult, TechnicalChartDataset, TechnicalChartType, TechnicalDivergence, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel, TechnicalSessionAnalytics, TechnicalStructureV4Result } from "@/types";
 import { kairoChartTheme } from "../chart-theme";
 
 export type { TechnicalDrawing } from "@/types";
@@ -22,7 +22,7 @@ function pricePrecision(bars: TechnicalChartDataset["bars"]) {
 }
 function priceLabel(value: number, precision: number) { return value.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision }); }
 
-export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, marketStructure = null, structureDensity = "MAJOR", mtfLevels = [], divergences = [], rangedProfiles = [], sessionAnalytics = null, panelId = "panel-1", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView }: {
+export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, marketStructure = null, advancedStructure = null, positionPlan = null, structureDensity = "MAJOR", mtfLevels = [], divergences = [], rangedProfiles = [], sessionAnalytics = null, panelId = "panel-1", viewportKey = "default", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView }: {
   dataset: TechnicalChartDataset;
   comparisons: TechnicalChartDataset[];
   chartType: TechnicalChartType;
@@ -34,12 +34,15 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   autoLevels?: TechnicalLevel[];
   showVolumeProfile?: boolean;
   marketStructure?: MarketStructureResult | null;
+  advancedStructure?: TechnicalStructureV4Result | null;
+  positionPlan?: PositionPlannerResult | null;
   structureDensity?: "MAJOR" | "ALL";
   mtfLevels?: MtfTechnicalLevel[];
   divergences?: TechnicalDivergence[];
   rangedProfiles?: Array<RangedVolumeProfileResult & { id: string }>;
   sessionAnalytics?: TechnicalSessionAnalytics | null;
   panelId?: string;
+  viewportKey?: string;
   linkedCrosshair?: LinkedCrosshair | null;
   onCrosshairTime?: (panelId: string, timestamp: string | null) => void;
   onCreateDrawing: (drawing: TechnicalDrawing) => void;
@@ -56,6 +59,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const visibleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const linkedReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingLinkedCrosshairRef = useRef(false);
+  const preservedRangeRef = useRef<LogicalRange | null>(null);
+  const viewportKeyRef = useRef(viewportKey);
   const createDrawingRef = useRef(onCreateDrawing);
   const crosshairCallbackRef = useRef(onCrosshairTime);
   const drawingToolRef = useRef(drawingTool);
@@ -229,7 +234,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         }, 120);
       };
       chart.timeScale().subscribeVisibleLogicalRangeChange(visibleHandler);
-      chart.timeScale().fitContent();
+      if (viewportKeyRef.current === viewportKey && preservedRangeRef.current) chart.timeScale().setVisibleLogicalRange(preservedRangeRef.current);
+      else { viewportKeyRef.current = viewportKey; preservedRangeRef.current = null; chart.timeScale().fitContent(); }
       resetViewCallbackRef.current?.(() => chart?.timeScale().fitContent());
       const panes = chart.panes();
       if (panes[1]) panes[1].setHeight(95);
@@ -244,6 +250,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       if (visibleTimerRef.current) clearTimeout(visibleTimerRef.current);
       if (chart && crosshairHandler) chart.unsubscribeCrosshairMove(crosshairHandler);
       if (chart && visibleHandler) chart.timeScale().unsubscribeVisibleLogicalRangeChange(visibleHandler);
+      preservedRangeRef.current = chart?.timeScale().getVisibleLogicalRange() ?? preservedRangeRef.current;
       chart?.remove();
       chartRef.current = null;
       libraryRef.current = null;
@@ -253,7 +260,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       markerPluginRef.current = null;
       setReady(false);
     };
-  }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId]);
+  }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId, viewportKey]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -293,6 +300,13 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       if (sessionAnalytics.openingRange15) { addPriceLine(sessionAnalytics.openingRange15.high, "OR15 H", "rgba(32,164,168,.62)"); addPriceLine(sessionAnalytics.openingRange15.low, "OR15 L", "rgba(32,164,168,.62)"); }
       if (sessionAnalytics.openingRange30) { addPriceLine(sessionAnalytics.openingRange30.high, "OR30 H", "rgba(32,164,168,.45)"); addPriceLine(sessionAnalytics.openingRange30.low, "OR30 L", "rgba(32,164,168,.45)"); }
     }
+    advancedStructure?.liquidityZones.filter((zone) => zone.status === "ACTIVE").slice(-8).forEach((zone) => addPriceLine((zone.low + zone.high) / 2, zone.side === "BUY_SIDE" ? "BUY LIQ" : "SELL LIQ", zone.side === "BUY_SIDE" ? "rgba(224,94,114,.62)" : "rgba(24,168,121,.62)"));
+    advancedStructure?.fairValueGaps.filter((gap) => gap.status !== "FILLED").slice(-8).forEach((gap) => addPriceLine((gap.low + gap.high) / 2, `FVG ${gap.filledPercent}%`, gap.direction === "BULLISH" ? "rgba(24,168,121,.45)" : "rgba(224,94,114,.45)"));
+    if (positionPlan?.status === "VALID") {
+      if (positionPlan.entry !== null) addPriceLine(positionPlan.entry, "ENTRY", "rgba(82,103,232,.92)", 2);
+      if (positionPlan.stop !== null) addPriceLine(positionPlan.stop, "STOP", "rgba(224,94,114,.92)", 2);
+      positionPlan.targets.forEach((target) => addPriceLine(target.price, `T${target.index} · ${target.riskReward.toFixed(1)}R`, "rgba(24,168,121,.82)", 2));
+    }
     drawings.filter((drawing) => drawing.visible).forEach((drawing) => {
       const selected = drawing.id === selectedDrawingId;
       const color = selected ? "#5267e8" : "#f4a525";
@@ -314,9 +328,11 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     const markers: SeriesMarker<Time>[] = [];
     marketStructure?.swings.filter((swing) => structureDensity === "ALL" || swing.hierarchy === "MAJOR").slice(-30).forEach((swing) => markers.push({ time: time(swing.timestamp), position: swing.kind === "HIGH" ? "aboveBar" : "belowBar", color: swing.kind === "HIGH" ? "#66758b" : "#5267e8", shape: "circle", text: swing.label, size: 1 }));
     marketStructure?.events.slice(-12).forEach((event) => markers.push({ time: time(event.confirmationTimestamp), position: event.direction === "BULLISH" ? "belowBar" : "aboveBar", color: event.type === "CHOCH" ? "#f4a525" : event.direction === "BULLISH" ? "#18a879" : "#e05e72", shape: event.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: event.type, size: 1.3 }));
+    advancedStructure?.sweeps.slice(-8).forEach((event) => markers.push({ time: time(event.timestamp), position: event.direction === "BULLISH" ? "belowBar" : "aboveBar", color: "#9333ea", shape: event.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: "SWEEP", size: 1 }));
+    advancedStructure?.displacements.slice(-8).forEach((event) => markers.push({ time: time(event.timestamp), position: event.direction === "BULLISH" ? "belowBar" : "aboveBar", color: "#f4a525", shape: event.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: "DISP", size: 1 }));
     divergences.slice(-8).forEach((divergence) => markers.push({ time: time(divergence.confirmedAt), position: divergence.direction === "BULLISH" ? "belowBar" : "aboveBar", color: divergence.direction === "BULLISH" ? "#18a879" : "#e05e72", shape: divergence.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: `${divergence.indicator} DIV`, size: 1 }));
     if (markers.length) markerPluginRef.current = library.createSeriesMarkers(primary, markers);
-  }, [autoLevelsSignature, dataset.bars, divergences, drawings, marketStructure, mtfLevels, rangedProfiles, ready, selectedDrawingId, sessionAnalytics, structureDensity]);
+  }, [advancedStructure, autoLevelsSignature, dataset.bars, divergences, drawings, marketStructure, mtfLevels, positionPlan, rangedProfiles, ready, selectedDrawingId, sessionAnalytics, structureDensity]);
 
   useEffect(() => {
     if (!ready || !linkedCrosshair || linkedCrosshair.sourcePanelId === panelId) return;
