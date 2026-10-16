@@ -188,12 +188,15 @@ export class YahooFinanceClient {
     )).value;
   }
 
-  async chart(symbolInput: string, range: ChartRange, requestedInterval?: string | null): Promise<MarketChartDto> {
+  async chart(symbolInput: string, range: ChartRange, requestedInterval?: string | null, bounds?: { from: string; to: string }): Promise<MarketChartDto> {
     const symbol = normalizeSymbol(symbolInput);
-    const interval = resolveChartInterval(range, requestedInterval);
+    const interval = bounds && requestedInterval ? requestedInterval as ChartInterval : resolveChartInterval(range, requestedInterval);
+    const intraday = !["1d", "5d", "1wk", "1mo", "3mo"].includes(interval);
+    const retentionDays = interval === "1m" ? 7 : ["1h", "60m"].includes(interval) ? 729 : 59;
+    const start = bounds ? new Date(Math.max(Date.parse(bounds.from), intraday ? Date.now() - retentionDays * DAY : 0)) : periodStart(range);
     const policy = range === "1D" || range === "5D" ? { freshMs: 60_000, staleMs: 5 * 60_000 } : { freshMs: 15 * 60_000, staleMs: 6 * 60 * 60_000 };
-    return (await cached(`chart:${symbol}:${range}:${interval}`, policy, () => withRetry("chart", symbol, async () => {
-      const result = await yahoo.chart(symbol, { period1: periodStart(range), interval, events: "div|split", return: "array" }, moduleOptions(18_000));
+    return (await cached(`chart:${symbol}:${range}:${interval}:${bounds?.from ?? ""}:${bounds?.to ?? ""}`, policy, () => withRetry("chart", symbol, async () => {
+      const result = await yahoo.chart(symbol, { period1: start, ...(bounds ? { period2: new Date(bounds.to) } : {}), interval, events: "div|split", return: "array" }, moduleOptions(18_000));
       const points = result.quotes.flatMap((point) => {
         if (!(point.date instanceof Date) || [point.open, point.high, point.low, point.close, point.volume].some((value) => typeof value !== "number" || !Number.isFinite(value))) return [];
         return [{
@@ -218,6 +221,8 @@ export class YahooFinanceClient {
         isDelayed: delayedMinutes > 20,
         asOf: result.meta.regularMarketTime?.toISOString() ?? points.at(-1)?.timestamp ?? null,
         points,
+        historyComplete: !bounds || start.getTime() <= Date.parse(bounds.from),
+        historyLimitations: bounds && start.getTime() > Date.parse(bounds.from) ? [`Yahoo ${interval} retention limits the requested calculation history.`] : [],
         source: "yahoo" as const,
       };
     }, 1))).value;

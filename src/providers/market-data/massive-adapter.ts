@@ -92,6 +92,7 @@ async function aggregateQuote(symbol: string): Promise<{ data: MarketQuoteDto; d
 }
 
 export class MassiveMarketDataAdapter implements MarketDataProvider {
+  readonly supportsHistoryBounds = true;
   readonly name = "massive" as const;
   private unifiedSnapshotBlockedUntil = 0;
   private providerAuthBlockedUntil = 0;
@@ -159,14 +160,33 @@ export class MassiveMarketDataAdapter implements MarketDataProvider {
     return providerResult(this.name, data, { sourceTimestamp, freshness: "realtime", freshnessType: "NEAR_REALTIME", quality: data.length === symbols.length ? "verified" : "partial" });
   }
 
-  async getHistoricalBars(symbolInput: string, range: ChartRange, intervalInput?: string | null) {
+  async getHistoricalBars(symbolInput: string, range: ChartRange, intervalInput?: string | null, bounds?: import("../types").HistoryBounds) {
     const symbol = normalizeSymbol(symbolInput);
     if (!this.supportsSymbol(symbol)) throw new ProviderError(this.name, "UNSUPPORTED_SYMBOL", "Simbolo non supportato dall'adapter Massive.", false, 422);
     const interval = (intervalInput ?? defaultIntervals[range]) as ChartInterval;
     const mapped = intervalMap[interval];
     if (!mapped) throw new ProviderError(this.name, "NOT_FOUND", "Intervallo Massive non supportato.", false, 400);
-    const response = await massiveGet(`/v2/aggs/ticker/${encodeURIComponent(massiveSymbol(symbol))}/range/${mapped.multiplier}/${mapped.timespan}/${fromDate(range)}/${new Date().toISOString().slice(0, 10)}`, { adjusted: true, sort: "asc", limit: 50_000 }, "historical-bars");
-    const results = Array.isArray(response.results) ? response.results : [];
+    const initialPath = `/v2/aggs/ticker/${encodeURIComponent(massiveSymbol(symbol))}/range/${mapped.multiplier}/${mapped.timespan}/${bounds ? Date.parse(bounds.from) : fromDate(range)}/${bounds ? Date.parse(bounds.to) : new Date().toISOString().slice(0, 10)}`;
+    const results: unknown[] = [];
+    let next: string | null = initialPath;
+    let historyComplete = true;
+    let delayed = false;
+    const seen = new Set<string>();
+    for (let page = 0; next && page < 64; page += 1) {
+      if (seen.has(next)) { historyComplete = false; break; }
+      seen.add(next);
+      const response = await massiveGet(next, { adjusted: true, sort: "asc", limit: 50_000 }, "historical-bars");
+      delayed ||= response.status === "DELAYED";
+      if (Array.isArray(response.results)) results.push(...response.results);
+      const cursor = typeof response.next_url === "string" ? response.next_url : null;
+      if (!cursor) { next = null; break; }
+      const url = new URL(cursor, "https://api.massive.com");
+      // Never follow an upstream cursor to an arbitrary host or endpoint, or echo credentials.
+      if (url.protocol !== "https:" || url.hostname !== "api.massive.com" || url.username || url.password || !url.pathname.startsWith("/v2/aggs/ticker/")) throw new ProviderError(this.name, "UPSTREAM_UNAVAILABLE", "Invalid history pagination response.", false, 502);
+      url.searchParams.delete("apiKey"); url.searchParams.delete("apikey");
+      next = `${url.pathname}${url.search}`;
+    }
+    if (next) historyComplete = false;
     const points = results.flatMap((value) => {
       if (!value || typeof value !== "object") return [];
       const row = value as Record<string, unknown>;
@@ -175,8 +195,10 @@ export class MassiveMarketDataAdapter implements MarketDataProvider {
       return [{ timestamp, open, high, low, close, volume }];
     });
     if (!points.length) throw new ProviderError(this.name, "NOT_FOUND", "Storico Massive non disponibile.", false, 404);
-    const data: MarketChartDto = { symbol, currency: "USD", exchange: isCrypto(symbol) ? "CRYPTO" : "US", range, interval, previousClose: points.at(-2)?.close ?? null, isDelayed: false, asOf: points.at(-1)?.timestamp ?? null, points, source: "massive" };
-    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: "realtime", freshnessType: range === "1D" || range === "5D" ? "NEAR_REALTIME" : "END_OF_DAY" });
+    const uniquePoints = [...new Map(points.map((point) => [point.timestamp, point])).values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    delayed ||= Date.now() - Date.parse(uniquePoints.at(-1)!.timestamp) > 120_000;
+    const data: MarketChartDto = { symbol, currency: "USD", exchange: isCrypto(symbol) ? "CRYPTO" : "US", range, interval, previousClose: uniquePoints.at(-2)?.close ?? null, isDelayed: delayed, asOf: uniquePoints.at(-1)?.timestamp ?? null, points: uniquePoints, source: "massive", historyComplete, historyLimitations: historyComplete ? [] : ["History pagination did not finish; coverage is partial."] };
+    return providerResult(this.name, data, { sourceTimestamp: data.asOf, freshness: delayed ? "delayed" : "cached", freshnessType: delayed ? "DELAYED" : "CACHED", quality: historyComplete ? "verified" : "partial" });
   }
 
   async getMarketStatus(market = "US") {

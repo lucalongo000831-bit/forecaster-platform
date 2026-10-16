@@ -14,6 +14,7 @@ import type {
   SearchInstrument,
 } from "@/types";
 import { ProviderError } from "../errors";
+import { exchangeSession, sessionClock } from "@/engines/technical/history-v5";
 import { providerResult } from "../metadata";
 import type {
   AnalystConsensus,
@@ -159,6 +160,29 @@ function quote(symbolInput: string): MarketQuoteDto {
   return { symbol, name: value.name, exchange: value.exchange, quoteType: value.quoteType, currency: value.currency, price: value.price, change: value.price - previousClose, changePercent: 1.2, open: previousClose * 1.002, previousClose, dayLow: value.price * 0.985, dayHigh: value.price * 1.009, volume: 23_400_000, marketCap: ["ETF", "INDEX", "CRYPTOCURRENCY"].includes(value.quoteType) ? null : value.price * 15_000_000_000, bid: value.price * 0.9998, ask: value.price * 1.0002, marketState: value.quoteType === "CRYPTOCURRENCY" ? "REGULAR" : "CLOSED", asOf: FIXTURE_AS_OF, isDelayed: true, source: "mock" };
 }
 
+function technicalHistoryFixture(symbol: string, interval: ChartInterval, bounds: { from: string; to: string }) {
+  const session = exchangeSession(symbol);
+  const minuteSteps: Partial<Record<ChartInterval, number>> = { "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60 };
+  const step = minuteSteps[interval];
+  const end = Date.parse(bounds.to);
+  const start = Math.max(Date.parse(bounds.from), step ? end - 730 * 86_400_000 : Date.UTC(session.crypto ? 2017 : 1998, 0, 1));
+  const rows: MarketChartPoint[] = [];
+  for (let day = Math.floor(start / 86_400_000) * 86_400_000; day <= end; day += 86_400_000) {
+    if (!session.crypto && [0, 6].includes(new Date(day).getUTCDay())) continue;
+    const midday = new Date(day + 12 * 3_600_000).toISOString();
+    const offset = sessionClock(midday, session.timeZone).minute - 720;
+    if (interval === "1wk" && new Date(day).getUTCDay() !== 1) continue;
+    for (let minute = step ? session.open : session.crypto ? 0 : session.open; minute < (step ? session.close : (session.crypto ? 0 : session.open) + 1); minute += step ?? 1440) {
+      const timestamp = day + (minute - offset) * 60_000;
+      if (timestamp < start || timestamp > end) continue;
+      const n = timestamp / (60_000 * (step ?? 1440));
+      const price = identity(symbol).value.price * (1 + Math.sin(n / 17) * .03 + Math.cos(n / 29) * .02);
+      rows.push({ timestamp: new Date(timestamp).toISOString(), open: price, high: price * 1.01, low: price * .99, close: price * 1.001, adjustedClose: price * 1.001, volume: 100_000 });
+    }
+  }
+  return rows;
+}
+
 function profile(symbolInput: string): MarketProfileDto {
   const { symbol, value } = identity(symbolInput);
   return { symbol, name: value.name, exchange: value.exchange, quoteType: value.quoteType, currency: value.currency, country: value.country, sector: value.sector, industry: value.industry, description: `Deterministic automated-test profile for ${value.name}.`, employees: value.quoteType === "EQUITY" ? 25_000 : null, website: null, source: "mock" };
@@ -195,12 +219,12 @@ export class DeterministicE2EProvider {
   }
   quote(symbol: string) { return Promise.resolve(result(quote(symbol))); }
   quotes(symbols: string[]) { return Promise.resolve(result(symbols.map(quote))); }
-  chart(symbolInput: string, range: ChartRange, interval?: string | null) {
+  chart(symbolInput: string, range: ChartRange, interval?: string | null, bounds?: { from: string; to: string }) {
     const { symbol, value } = identity(symbolInput);
     const resolvedInterval = intervalFor(range, interval);
-    const points = (resolvedInterval === "1h" || resolvedInterval === "60m" ? hourlyHistory(symbol) : history(symbol)).filter((point) => Date.parse(point.timestamp) >= rangeStart(range));
-    const data: MarketChartDto = { symbol, currency: value.currency, exchange: value.exchange, range, interval: resolvedInterval, previousClose: points.at(-2)?.close ?? null, isDelayed: true, asOf: FIXTURE_AS_OF, points, source: "mock" };
-    return Promise.resolve(result(data));
+    const points = bounds ? technicalHistoryFixture(symbol, resolvedInterval, bounds) : (resolvedInterval === "1h" || resolvedInterval === "60m" ? hourlyHistory(symbol) : history(symbol)).filter((point) => Date.parse(point.timestamp) >= rangeStart(range));
+    const data: MarketChartDto = { symbol, currency: value.currency, exchange: value.exchange, range, interval: resolvedInterval, previousClose: points.at(-2)?.close ?? null, isDelayed: true, asOf: bounds ? points.at(-1)?.timestamp ?? null : FIXTURE_AS_OF, points, source: "mock" };
+    return Promise.resolve(result(data, data.asOf));
   }
   marketStatus(market = "US") { const data: MarketStatus = { market, state: "closed", asOf: FIXTURE_AS_OF, nextOpen: "2026-08-21T13:30:00.000Z", nextClose: "2026-08-21T20:00:00.000Z" }; return Promise.resolve(result(data)); }
   profile(symbol: string) { return Promise.resolve(result(profile(symbol))); }

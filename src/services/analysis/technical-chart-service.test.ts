@@ -1,48 +1,49 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChartRange, MarketChartPoint } from "@/types";
-
-const mocks = vi.hoisted(() => ({ chart: vi.fn(), technicalChart: vi.fn(), resolveInstrument: vi.fn() }));
-
-vi.mock("@/providers", () => ({ financialProviderRouter: { chart: mocks.chart, technicalChart: mocks.technicalChart } }));
-vi.mock("@/services/instruments/instrument-resolver", () => ({ resolveInstrument: mocks.resolveInstrument }));
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MarketChartPoint, TechnicalTimeframe } from "@/types";
+const mocks = vi.hoisted(() => ({ technicalHistory: vi.fn() }));
+vi.mock("@/providers", () => ({ financialProviderRouter: mocks }));
 import { getTechnicalChartDataset } from "./technical-chart-service";
-
-const points: MarketChartPoint[] = [
-  { timestamp: "1999-01-22T22:00:00.000Z", open: 10, high: 11, low: 9, close: 10.5, adjustedClose: 10.5, volume: 1_000 },
-  { timestamp: "2026-09-23T22:00:00.000Z", open: 200, high: 210, low: 195, close: 205, adjustedClose: 205, volume: 2_000 },
-];
-
-function result(range: ChartRange) {
-  return {
-    meta: { provider: "yahoo", sourceTimestamp: points.at(-1)!.timestamp, freshness: "delayed", freshnessType: "DELAYED", isFallback: true },
-    data: { symbol: "NVDA", currency: "USD", exchange: "NASDAQ", range, interval: "1d", previousClose: 10.5, isDelayed: true, asOf: points.at(-1)!.timestamp, points, source: "yahoo" },
-  };
+function series(from: string, to: string, interval: string): MarketChartPoint[] {
+  const step = interval === "30m" ? 30 * 60_000 : interval === "1h" ? 3_600_000 : interval === "1wk" ? 7 * 86_400_000 : 86_400_000;
+  const start = Math.max(Date.parse(from), Date.parse(to) - 366 * 86_400_000);
+  return Array.from({ length: Math.floor((Date.parse(to) - start) / step) + 1 }, (_, i) => ({ timestamp: new Date(start + i * step).toISOString(), open: 100, high: 102, low: 99, close: 101, volume: 10 }));
 }
-
 beforeEach(() => {
-  vi.clearAllMocks();
-  mocks.resolveInstrument.mockResolvedValue({ kind: "EQUITY" });
+  vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-24T20:00:00Z")); vi.clearAllMocks();
+  mocks.technicalHistory.mockImplementation(async (symbol, range, interval, bounds) => ({
+    meta: { provider: "yahoo", freshness: "delayed", freshnessType: "DELAYED" },
+    data: { symbol, range, interval, exchange: symbol.endsWith("-USD") ? "CRYPTO" : "NASDAQ", currency: "USD", points: series(bounds.from, bounds.to, interval), isDelayed: true, asOf: bounds.to },
+  }));
 });
-
-describe("Technical V4 long-history routing", () => {
-  it.each([
-    ["3Y", 3],
-    ["5Y", 5],
-    ["10Y", 10],
-    ["MAX", 25],
-  ] as const)("uses coverage-aware provider selection for %s", async (range, years) => {
-    mocks.technicalChart.mockResolvedValue(result(range));
-    const dataset = await getTechnicalChartDataset("NVDA", "1D", range);
-    expect(mocks.technicalChart).toHaveBeenCalledWith("NVDA", range, "1d", years);
-    expect(mocks.chart).not.toHaveBeenCalled();
-    expect(dataset.data.requestedRange).toBe(range);
+afterEach(() => vi.useRealTimers());
+describe("Technical V5 interval/range contract", () => {
+  const matrix: Array<[TechnicalTimeframe, string[]]> = [
+    ["1h", ["1D", "5D", "1M", "3M", "6M", "1Y"]],
+    ["4h", ["5D", "1M", "3M", "6M", "1Y"]],
+    ["1D", ["1M", "3M", "6M", "1Y", "3Y", "5Y", "10Y", "MAX"]],
+    ["1W", ["1Y", "3Y", "5Y", "10Y", "MAX"]],
+  ];
+  for (const [timeframe, ranges] of matrix) it.each(ranges)(`${timeframe} + %s retains the explicit interval and range`, async (range) => {
+    const response = await getTechnicalChartDataset("BTC-USD", timeframe, range as Parameters<typeof getTechnicalChartDataset>[2]);
+    expect(response.data.timeframe).toBe(timeframe);
+    expect(response.data.requestedRange).toBe(range);
+    expect(response.data.bars.every((bar) => bar.high >= Math.max(bar.open, bar.close) && bar.low <= Math.min(bar.open, bar.close))).toBe(true);
+    expect(response.data.coverage?.barCount).toBe(response.data.bars.length);
+    expect(response.data.calculationBars!.length).toBeGreaterThanOrEqual(response.data.bars.length);
+    expect(mocks.technicalHistory.mock.calls[0][2]).toBe(timeframe === "4h" ? "1h" : timeframe === "1D" ? "1d" : timeframe === "1W" ? "1wk" : "1h");
   });
-
-  it("keeps ordinary ranges on the low-latency first-available route", async () => {
-    mocks.chart.mockResolvedValue(result("1Y"));
-    await getTechnicalChartDataset("NVDA", "1D", "1Y");
-    expect(mocks.chart).toHaveBeenCalledWith("NVDA", "1Y", "1d");
-    expect(mocks.technicalChart).not.toHaveBeenCalled();
+  it("rejects unsupported minute history without fabricating a daily replacement", async () => {
+    await expect(getTechnicalChartDataset("NVDA", "1m", "1Y")).rejects.toThrow("RANGE_INTERVAL_UNAVAILABLE");
+    expect(mocks.technicalHistory).not.toHaveBeenCalled();
+  });
+  it("uses half-hour constituents for session-aligned hourly equities", async () => {
+    const response = await getTechnicalChartDataset("NVDA", "4h", "1M");
+    expect(mocks.technicalHistory.mock.calls[0][2]).toBe("30m");
+    expect(response.data.bars.every((bar) => [50, 80].includes(bar.volume))).toBe(true);
+  });
+  it("marks actual truncated history as PARTIAL and never claims HTTP success means complete", async () => {
+    const response = await getTechnicalChartDataset("NVDA", "1D", "10Y");
+    expect(response.data.coverage?.coverageStatus).toBe("PARTIAL");
+    expect(response.data.warmup?.status).toBe("LIMITED");
   });
 });

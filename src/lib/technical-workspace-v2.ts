@@ -24,7 +24,7 @@ export const DEFAULT_TECHNICAL_INDICATORS: TechnicalIndicatorConfig[] = [
   { id: "ema-50", kind: "EMA", period: 50, color: "#f4a525", enabled: true },
 ];
 
-const INDICATOR_KINDS: TechnicalIndicatorKind[] = ["SMA", "EMA", "BOLLINGER", "RSI", "MACD", "ATR", "VWAP", "VOLUME"];
+const INDICATOR_KINDS: TechnicalIndicatorKind[] = ["SMA", "SMMA", "EMA", "BOLLINGER", "RSI", "MACD", "ATR", "VWAP", "VOLUME", "SUPERTREND", "ADX", "DONCHIAN", "ATR_STOP"];
 const CHART_TYPES: TechnicalChartType[] = ["candlestick", "line", "area", "heikin-ashi"];
 const LAYOUTS: TechnicalLayout[] = ["single", "two-vertical", "two-horizontal", "four-grid"];
 const DEFAULT_LINKS: TechnicalLinkState = { crosshair: true, symbol: false, timeframe: false };
@@ -38,17 +38,22 @@ export function sanitizeTechnicalNote(value: string) {
   return value.replace(/[<>\u0000-\u001f]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
-function indicatorNeedsPeriod(kind: TechnicalIndicatorKind) { return ["SMA", "EMA", "BOLLINGER", "RSI", "ATR"].includes(kind); }
+function indicatorNeedsPeriod(kind: TechnicalIndicatorKind) { return ["SMA", "SMMA", "EMA", "BOLLINGER", "RSI", "ATR", "SUPERTREND", "ADX", "DONCHIAN", "ATR_STOP"].includes(kind); }
 function validPeriod(value: unknown): value is number { return typeof value === "number" && Number.isInteger(value) && value >= 2 && value <= 250; }
 
 export function sanitizeTechnicalIndicators(value: unknown): TechnicalIndicatorConfig[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap<TechnicalIndicatorConfig>((candidate) => {
     if (!candidate || typeof candidate !== "object") return [];
-    const item = candidate as Partial<TechnicalIndicatorConfig>;
+    const item = { ...candidate as Partial<TechnicalIndicatorConfig> };
+    if (String(item.kind) === "SSMA") item.kind = "SMMA";
     if (typeof item.id !== "string" || !INDICATOR_KINDS.includes(item.kind as TechnicalIndicatorKind) || typeof item.enabled !== "boolean" || typeof item.color !== "string" || !/^#[0-9a-f]{6}$/i.test(item.color)) return [];
     if (indicatorNeedsPeriod(item.kind as TechnicalIndicatorKind) && !validPeriod(item.period)) return [];
-    return [{ id: item.id.slice(0, 80), kind: item.kind as TechnicalIndicatorKind, period: item.period, color: item.color, enabled: item.enabled }];
+    const source = ["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"].includes(item.source ?? "") ? item.source : undefined;
+    const lineWidth = [1, 2, 3, 4].includes(item.lineWidth ?? 0) ? item.lineWidth : undefined;
+    const multiplier = typeof item.multiplier === "number" && Number.isFinite(item.multiplier) && item.multiplier >= .1 && item.multiplier <= 20 ? item.multiplier : undefined;
+    const mode = ["LONG", "SHORT", "AUTO"].includes(item.mode ?? "") ? item.mode : undefined;
+    return [{ id: item.id.slice(0, 80), kind: item.kind as TechnicalIndicatorKind, period: item.period, color: item.color, enabled: item.enabled, ...(source ? { source } : {}), ...(lineWidth ? { lineWidth } : {}), ...(multiplier ? { multiplier } : {}), ...(mode ? { mode } : {}) }];
   }).slice(0, 12);
 }
 

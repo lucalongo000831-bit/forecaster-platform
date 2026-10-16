@@ -8,7 +8,7 @@ export const TECHNICAL_V4_MODEL_VERSION = "technical-v4.0.0" as const;
 export type TechnicalTimeframe = "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1D" | "1W";
 export type TechnicalChartType = "candlestick" | "line" | "area" | "heikin-ashi";
 export type TechnicalPricePolicy = "ADJUSTED_OHLC" | "RAW_OHLC";
-export type TechnicalIndicatorKind = "SMA" | "EMA" | "BOLLINGER" | "RSI" | "MACD" | "ATR" | "VWAP" | "VOLUME";
+export type TechnicalIndicatorKind = "SMA" | "SMMA" | "EMA" | "BOLLINGER" | "RSI" | "MACD" | "ATR" | "VWAP" | "VOLUME" | "SUPERTREND" | "ADX" | "DONCHIAN" | "ATR_STOP";
 
 export interface TechnicalIndicatorConfig {
   id: string;
@@ -16,6 +16,24 @@ export interface TechnicalIndicatorConfig {
   period?: number;
   color: string;
   enabled: boolean;
+  source?: "close" | "open" | "high" | "low" | "hl2" | "hlc3" | "ohlc4";
+  lineWidth?: 1 | 2 | 3 | 4;
+  multiplier?: number;
+  mode?: "LONG" | "SHORT" | "AUTO";
+}
+
+export interface TechnicalHistoryCoverage {
+  requestedFrom: string;
+  requestedTo: string;
+  actualFrom: string | null;
+  actualTo: string | null;
+  interval: TechnicalTimeframe;
+  barCount: number;
+  coverageStatus: "COMPLETE" | "PARTIAL" | "UNAVAILABLE" | "LOADING" | "STALE";
+  provider: string;
+  freshness: string;
+  missingSegments: Array<{ from: string; to: string; reason: string }>;
+  limitations: string[];
 }
 
 export interface TechnicalAvailability {
@@ -43,6 +61,9 @@ export interface TechnicalChartDataset {
   historyEnd?: string | null;
   rangeAvailability?: TechnicalRangeAvailability;
   rangeMessage?: string | null;
+  calculationBars?: MarketChartPoint[];
+  coverage?: TechnicalHistoryCoverage;
+  warmup?: { requestedBars: number; availableBars: number; status: "READY" | "LIMITED"; policy: string };
 }
 
 export interface TechnicalChartResponse {
