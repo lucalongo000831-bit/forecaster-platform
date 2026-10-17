@@ -13,6 +13,16 @@ describe("technical terminal engine", () => {
     expect(applyCanonicalPricePolicy([row], "CRYPTO")).toMatchObject({ policy: "RAW_OHLC", bars: [{ open: 8, close: 10 }] });
   });
 
+  it.each([[10.1, 0.1], [0.1, 1.7]])("preserves exact OHLC inequalities despite adjustment rounding for %s → %s", (price, adjustedClose) => {
+    const row = { ...hourly(1)[0], open: price, high: price, low: price, close: price, adjustedClose };
+    const adjusted = applyCanonicalPricePolicy([row], "EQUITY").bars[0];
+    expect(adjusted.close).toBe(adjustedClose);
+    expect(adjusted.high).toBeGreaterThanOrEqual(Math.max(adjusted.open, adjusted.close));
+    expect(adjusted.low).toBeLessThanOrEqual(Math.min(adjusted.open, adjusted.close));
+    expect(sanitizeTechnicalBars([adjusted])).toHaveLength(1);
+    expect(adjusted.volume).toBe(row.volume);
+  });
+
   it("drops invalid bars and never emits NaN", () => {
     const bad = { ...hourly(1)[0], high: Number.NaN };
     expect(sanitizeTechnicalBars([...hourly(2), bad])).toHaveLength(2);

@@ -27,7 +27,11 @@ export function applyCanonicalPricePolicy(input: MarketChartPoint[], assetClass:
     bars: clean.map((bar) => {
       if (typeof bar.adjustedClose !== "number" || !finite(bar.adjustedClose) || bar.adjustedClose <= 0 || bar.close <= 0) return bar;
       const ratio = bar.adjustedClose / bar.close;
-      return { ...bar, open: bar.open * ratio, high: bar.high * ratio, low: bar.low * ratio, close: bar.adjustedClose };
+      const open = bar.open * ratio;
+      const close = bar.adjustedClose;
+      // The independently rounded adjusted close can differ by one ULP from
+      // close * ratio. Preserve the exact OHLC envelope after back-adjustment.
+      return { ...bar, open, high: Math.max(bar.high * ratio, open, close), low: Math.min(bar.low * ratio, open, close), close };
     }),
   };
 }

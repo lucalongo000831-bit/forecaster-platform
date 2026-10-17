@@ -30,6 +30,8 @@ Primary sources: [Massive aggregate limit semantics](https://www.massive.com/blo
 
 Live acceptance found missing opening-session observations in STLAM.MI hourly data despite a successful provider response. Equity coverage is therefore conservatively PARTIAL until a complete official session/holiday calendar can certify the entire requested window; the diagnostic explains this explicitly. Crypto is continuous: gaps crossing UTC midnight are checked and its boundary tolerance follows the actual interval, never the equity weekend tolerance. This acceptance correction does not change OHLC or indicator formulas.
 
+A strict live MAX audit also detected one NVDA observation (2015-07-16) whose adjusted close exceeded its adjusted high by approximately 1e-16. The source bar was valid: separately rounding `high × (adjustedClose / close)` and the supplied adjusted close introduced a one-ULP envelope violation. After the unchanged adjustment ratio, high/low now include the adjusted open/close via max/min. Two fixtures cover upward and downward rounding; no observation, price source, indicator formula or volume is invented or replaced.
+
 ## Calculations
 
 - SMA(N): rolling sum of N selected-source prices divided by N. First value is at index N−1; no shorter synthetic seed.
@@ -60,8 +62,8 @@ V5 uses a new envelope at `kairo:technical:v5:<symbol>` containing the validated
 
 The Desktop checkout is managed by macOS File Provider. A concurrent development server and default-worker full suite encountered system load above 90 and timeout-only failures in unchanged Seasonality tests. No timeout, Seasonality formula or assertion was weakened. Final verification uses a source-identical snapshot outside the cloud-managed Desktop, with one Vitest worker and a production-mode Next server. Environment files, credentials, Git metadata and numbered duplicate files are not copied. Application files are compared byte-for-byte before final verification (the generated `next-env.d.ts` is restored to its original production import).
 
-- Full unit/integration suite after the coverage correction: 763/763, 134 test files. Coverage regression gate: 37/37.
-- Final full deterministic E2E after the correction: 175/175, desktop/tablet/mobile, production-mode server, 4.9 minutes. Final provider audit: `blockedAttempts: 0`, no provider hosts contacted.
+- Full unit/integration suite after both live corrections: 765/765, 134 test files. Coverage regression gate: 37/37; numeric OHLC/legacy/studies gate: 70/70.
+- Final full deterministic E2E after both corrections: 175/175, desktop/tablet/mobile, production-mode server, 5.0 minutes. Provider-audit assertions pass in every project, with no outbound financial-provider calls.
 - ESLint, independent TypeScript check and Next.js production build: PASS.
 - Source and production client-bundle credential checks: zero matches; environment files remain ignored.
 - Dedicated performance fixture: 10 samples per size, three moving averages plus V5 studies and structure. This is a local calculation benchmark, not a browser FPS or provider-latency claim.
@@ -84,3 +86,7 @@ Draft PR: #31, stacked on the audited V4 branch. The initial V5 Preview was READ
 The initial live acceptance exposed the equity/crypto coverage correction documented above; the corrected Preview must be checked before treating acceptance as complete. A controlled failure of one non-Document Dashboard Fetch on the real Preview recovered through normal navigation: two Dashboard requests, zero logout requests, session retained. Interception was removed immediately. This is distinct from the deterministic error-boundary Retry test; no claim is made that the live prefetch failure itself displayed the boundary.
 
 Machine-readable final unit/E2E reports are generated in ignored `test-results/technical-v5-unit.json` and `test-results/technical-v5-e2e.json`. Live session duration and corrected-deployment acceptance are reported separately; disconnection time is not counted as active observation.
+
+On 2026-10-17 an authenticated session was actively observed from 10:57:21Z, with a fresh server-side Settings check at 11:08:34Z (672 seconds), and continued navigation afterwards. Private watchlists loaded without mutation. Both Multi-Chart panes rendered; the local-only planner fixture produced quantity 20 and 2R, then its test entry/stop/target were cleared. Visual indicator/scale changes made zero new history requests. Desktop/tablet/mobile screenshots are saved as ignored test artifacts.
+
+The SVG-only recovery setup exposed browser annotation-tool errors (`animation` on an undefined style object). They reproduce on the standalone icon document with zero Kairo application scripts loaded; the source is an anonymous injected browser-comment/React bundle. These are recorded separately from application errors, not silently counted as a healthy Kairo exception. The actual Settings and chart tabs have no critical application exceptions.
