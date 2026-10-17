@@ -32,6 +32,10 @@ Live acceptance found missing opening-session observations in STLAM.MI hourly da
 
 A strict live MAX audit also detected one NVDA observation (2015-07-16) whose adjusted close exceeded its adjusted high by approximately 1e-16. The source bar was valid: separately rounding `high × (adjustedClose / close)` and the supplied adjusted close introduced a one-ULP envelope violation. After the unchanged adjustment ratio, high/low now include the adjusted open/close via max/min. Two fixtures cover upward and downward rounding; no observation, price source, indicator formula or volume is invented or replaced.
 
+Final native-period checks found a Yahoo weekly aggregate followed by an overlapping Friday daily quote (same closing price, volume already included in the weekly aggregate). Native daily/weekly normalization keeps the first aggregate in each provider calendar period and excludes overlapping quote tails without summing their volumes. Weekly anchors are fixed calendar rules, not inferred from the first returned observation: Yahoo Monday in the instrument calendar; Massive Sunday in ET ([aggregate boundary specification](https://massive.com/blog/aggs-api-updates), [ET aggregate semantics](https://massive.com/docs/rest/stocks/overview)). IPO/holiday-short first weeks and changes to requested history cannot shift later periods. NVDA 1Y now contains 52 genuine weekly bars, not 53 overlapping observations.
+
+All intraday intervals now pass through the same regular-session/24-hour validator. A fractional calculation pre-roll was also found to phase-shift Massive multiplied-minute aggregates; bounded fetches begin at a UTC day boundary and the service still filters exact requested bounds. Regression fixtures cover 5/15/30-minute alignment. Only the technical-history cache namespace changes (`v5-aligned`), avoiding reuse of previously misaligned source history without a global purge. Continuous crypto fallback uses interval-sized boundary tolerance rather than the equity closure allowance; an overnight-truncated candidate no longer prevents trying another provider.
+
 ## Calculations
 
 - SMA(N): rolling sum of N selected-source prices divided by N. First value is at index N−1; no shorter synthetic seed.
@@ -62,18 +66,20 @@ V5 uses a new envelope at `kairo:technical:v5:<symbol>` containing the validated
 
 The Desktop checkout is managed by macOS File Provider. A concurrent development server and default-worker full suite encountered system load above 90 and timeout-only failures in unchanged Seasonality tests. No timeout, Seasonality formula or assertion was weakened. Final verification uses a source-identical snapshot outside the cloud-managed Desktop, with one Vitest worker and a production-mode Next server. Environment files, credentials, Git metadata and numbered duplicate files are not copied. Application files are compared byte-for-byte before final verification (the generated `next-env.d.ts` is restored to its original production import).
 
-- Full unit/integration suite after both live corrections: 765/765, 134 test files. Coverage regression gate: 37/37; numeric OHLC/legacy/studies gate: 70/70.
-- Final full deterministic E2E after both corrections: 175/175, desktop/tablet/mobile, production-mode server, 5.0 minutes. Provider-audit assertions pass in every project, with no outbound financial-provider calls.
+- Full unit/integration suite after the final corrections: 776/776, 134 test files. Final native-period/session/provider regression gate: 61/61; numeric OHLC/legacy/studies gate: 70/70.
+- Final-source full deterministic E2E: 175/175, zero skipped/flaky/unexpected, desktop/tablet/mobile, production-mode server, 4.6 minutes. Interrupted runs are not counted as passes. Provider-audit assertions verify isolation in every project; the live local audit endpoint also reported zero blocked attempts and an empty outbound-host map.
 - ESLint, independent TypeScript check and Next.js production build: PASS.
 - Source and production client-bundle credential checks: zero matches; environment files remain ignored.
 - Dedicated performance fixture: 10 samples per size, three moving averages plus V5 studies and structure. This is a local calculation benchmark, not a browser FPS or provider-latency claim.
 
 | Bars | Mean ms | p95 ms | Max ms |
 | --- | ---: | ---: | ---: |
-| 1,000 | 7.08 | 14.89 | 14.89 |
-| 2,500 | 18.88 | 33.39 | 33.39 |
-| 5,000 | 30.56 | 37.91 | 37.91 |
-| 10,000 | 65.80 | 195.31 | 195.31 |
+| 1,000 | 4.21 | 5.38 | 5.38 |
+| 2,500 | 7.82 | 8.99 | 8.99 |
+| 5,000 | 15.80 | 16.49 | 16.49 |
+| 10,000 | 35.19 | 37.08 | 37.08 |
+
+The Volume Profile date selectors previously recreated and locale-formatted every option during parent renders. A shared memoized option list and one reusable Intl formatter now retain every selectable timestamp without repeated formatting for unchanged bars. The real local MAX check retains 6,977 options in each selector. Browser-integrated CDP runs are not comparable enough to certify a latency improvement: aggregate script/task counters also include automation/annotation work, with observed command timeouts. No FPS or measured browser-speed improvement is claimed from these counters; independent UI profiling remains part of the final-audit acceptance evidence.
 
 Deterministic browser tests and live Preview acceptance are separate gates. A fixture session marker is not proof of a real authenticated Preview session. No live acceptance result is inferred from local fixtures.
 

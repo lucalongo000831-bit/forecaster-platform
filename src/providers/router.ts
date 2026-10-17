@@ -62,6 +62,13 @@ export function historicalCoverageYears(points: MarketChartPoint[]) {
   return Number.isFinite(first) && Number.isFinite(last) && last >= first ? (last - first) / (365.2425 * 86_400_000) : 0;
 }
 
+export function technicalHistorySpansBounds(points: MarketChartPoint[], symbol: string, interval: string, bounds: { from: string; to: string }) {
+  if (!points.length) return false;
+  const minutes: Record<string, number> = { "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440, "1wk": 10080 };
+  const tolerance = symbol.endsWith("-USD") ? (minutes[interval] ?? 0) * 60_000 * 1.5 : 4 * 86_400_000;
+  return Date.parse(points[0].timestamp) <= Date.parse(bounds.from) + tolerance && Date.parse(points.at(-1)!.timestamp) >= Date.parse(bounds.to) - tolerance;
+}
+
 function mappedSymbol(instrument: ResolvedInstrument, provider: ProviderName) {
   const candidates = instrument.mappings.filter((mapping) => mapping.provider === provider);
   return candidates.find((mapping) => mapping.providerInstrumentId?.startsWith("issuer-alias:"))?.symbol ?? candidates[0]?.symbol ?? instrument.canonicalSymbol;
@@ -170,7 +177,7 @@ export class FinancialProviderRouter {
     const symbol = normalizeSymbol(symbolInput);
     const fixture = deterministicE2EProvider();
     if (fixture) return fixture.chart(symbol, range, interval, bounds);
-    return providerCached(`technical-history:v5:${symbol}:${interval}:${bounds.from}:${bounds.to}:${allowHourlySource}`, { freshSeconds: 60, staleSeconds: 1800 }, async () => {
+    return providerCached(`technical-history:v5-aligned:${symbol}:${interval}:${bounds.from}:${bounds.to}:${allowHourlySource}`, { freshSeconds: 60, staleSeconds: 1800 }, async () => {
       let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
       let lastError: unknown;
       const order = this.marketOrder();
@@ -184,9 +191,8 @@ export class FinancialProviderRouter {
           if (candidate.data.interval !== sourceInterval || !candidate.data.points.length) continue;
           const result = { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
           const start = Date.parse(candidate.data.points[0].timestamp);
-          const end = Date.parse(candidate.data.points.at(-1)!.timestamp);
           if (!best || start < Date.parse(best.data.points[0].timestamp)) best = result;
-          if (candidate.data.historyComplete !== false && start <= Date.parse(bounds.from) + 4 * 86_400_000 && end >= Date.parse(bounds.to) - 4 * 86_400_000) return result;
+          if (candidate.data.historyComplete !== false && technicalHistorySpansBounds(candidate.data.points, symbol, sourceInterval, bounds)) return result;
         } catch (error) {
           lastError = error;
           structuredLog("warn", "provider.technical-history.fallback", { provider: adapter.name, operation: "technical-history", symbol, code: error instanceof ProviderError ? error.code : "UPSTREAM_UNAVAILABLE" });

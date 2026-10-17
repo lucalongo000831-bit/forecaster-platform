@@ -27,6 +27,8 @@ export function resampleSessionBars(input: MarketChartPoint[], targetMinutes: nu
   const groups = new Map<string, { rows: MarketChartPoint[]; start: number; end: number }>();
   const clean = sanitizeTechnicalBars(input);
   for (const bar of clean) {
+    // Quote-like trailing observations are not minute-aligned aggregate bars.
+    if (Date.parse(bar.timestamp) % MINUTE !== 0) continue;
     const clock = sessionClock(bar.timestamp, session.timeZone);
     const close = session.timeZone === "America/New_York" ? US_EQUITY_EARLY_CLOSES[clock.date] ?? session.close : session.close;
     if (clock.minute < session.open || clock.minute >= close) continue;
@@ -50,6 +52,29 @@ export function resampleSessionBars(input: MarketChartPoint[], targetMinutes: nu
     return [{ timestamp: new Date(start).toISOString(), open: rows[0].open, high: Math.max(...rows.map((row) => row.high)), low: Math.min(...rows.map((row) => row.low)), close: rows.at(-1)!.close, volume: rows.reduce((sum, row) => sum + row.volume, 0) }];
   });
   return { bars, missing, session };
+}
+
+/** Native daily/weekly feeds may append an intraperiod quote after the actual
+ * aggregate. Keep the first native aggregate, never sum overlapping volumes.
+ * Calendar anchors are provider-defined, not inferred from a possibly partial
+ * first listing/holiday week; changing requested history cannot move them. */
+export function normalizeNativePeriods(input: MarketChartPoint[], timeframe: "1D" | "1W", symbol: string, exchange: string, provider = "yahoo") {
+  const clean = sanitizeTechnicalBars(input);
+  const session = exchangeSession(symbol, exchange);
+  // Massive native weeks start Sunday in ET; Yahoo weeks use Monday in the
+  // instrument calendar. Retain native OHLCV, never reaggregate overlapping bars.
+  const weeklyTimeZone = provider === "massive" ? "America/New_York" : session.timeZone;
+  const anchorWeekday = provider === "massive" ? 0 : 1;
+  const periods = new Map<number, MarketChartPoint>();
+  let excluded = 0;
+  for (const bar of clean) {
+    const localDate = sessionClock(bar.timestamp, timeframe === "1W" ? weeklyTimeZone : session.timeZone).date;
+    const day = Math.floor(Date.parse(`${localDate}T00:00:00Z`) / DAY);
+    const key = timeframe === "1W" ? Math.floor((day + 4 - anchorWeekday) / 7) : day;
+    if (periods.has(key)) { excluded++; continue; }
+    periods.set(key, bar);
+  }
+  return { bars: [...periods.values()], excluded };
 }
 
 export function requestedHistoryBounds(range: TechnicalHistoricalRange, now: Date, custom?: { from?: string | null; to?: string | null }) {

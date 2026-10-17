@@ -90,4 +90,10 @@ describe("Massive market-data asset semantics", () => {
     mocks.massiveGet.mockResolvedValue({ ...aggregateResponse, next_url: "https://other.example/v2/aggs/ticker/NVDA" });
     await expect(new MassiveMarketDataAdapter().getHistoricalBars("NVDA", "1Y", "1d")).rejects.toThrow("Invalid history pagination");
   });
+  it.each([5, 15, 30])("aligns %im aggregate requests independently of fractional warmup bounds", async (minutes) => {
+    mocks.massiveGet.mockResolvedValue(aggregateResponse);
+    const bounds = { from: "2026-09-18T05:17:46.153Z", to: "2026-10-17T11:27:00.000Z" };
+    await new MassiveMarketDataAdapter().getHistoricalBars("NVDA", "1M", `${minutes}m`, bounds);
+    expect(mocks.massiveGet.mock.calls[0][0]).toBe(`/v2/aggs/ticker/NVDA/range/${minutes}/minute/${Date.parse("2026-09-18T00:00:00Z")}/${Date.parse(bounds.to)}`);
+  });
 });

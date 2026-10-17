@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketChartPoint } from "@/types";
-import { historyCoverage, requestedHistoryBounds, resampleSessionBars } from "./history-v5";
+import { historyCoverage, normalizeNativePeriods, requestedHistoryBounds, resampleSessionBars } from "./history-v5";
 import { resampleFourHourBars } from "./terminal";
 
 const rows = (start: string, count: number, step = 30): MarketChartPoint[] => Array.from({ length: count }, (_, i) => ({ timestamp: new Date(Date.parse(start) + i * step * 60_000).toISOString(), open: 100 + i, high: 102 + i, low: 99 + i, close: 101 + i, volume: 10 }));
@@ -51,5 +51,34 @@ describe("V5 session integrity", () => {
     const source = rows("2026-03-09T00:00Z", 24, 60);
     expect(historyCoverage(source, "1h", { from: source[0].timestamp, to: "2026-03-11T00:00:00Z" }, "yahoo", "CACHED", [], [], true).coverageStatus).toBe("PARTIAL");
     expect(historyCoverage(source, "1h", { from: source[0].timestamp, to: "2026-03-10T00:00:00Z" }, "yahoo", "CACHED", [], [], true).coverageStatus).toBe("COMPLETE");
+  });
+  it("keeps one genuine weekly aggregate and does not add a trailing daily quote volume", () => {
+    const weekly = { ...rows("2026-10-12T04:00Z", 1)[0], volume: 521400300 };
+    const quote = { ...weekly, timestamp: "2026-10-16T20:00:00.000Z", volume: 120302335 };
+    const result = normalizeNativePeriods([weekly, quote], "1W", "NVDA", "NASDAQ");
+    expect(result.bars).toEqual([weekly]); expect(result.excluded).toBe(1);
+    const next = rows("2026-10-19T04:00Z", 1)[0];
+    expect(normalizeNativePeriods([weekly, quote, next], "1W", "NVDA", "NASDAQ").bars).toEqual([weekly, next]);
+  });
+  it("preserves provider weekly anchors and DST without using future data", () => {
+    const first = rows("2026-03-02T05:00Z", 1)[0]; const next = rows("2026-03-09T04:00Z", 1)[0];
+    expect(normalizeNativePeriods([first, next], "1W", "NVDA", "NASDAQ").bars).toEqual([first, next]);
+    const massive = rows("2026-10-11T04:00Z", 1)[0]; const tail = rows("2026-10-16T20:00Z", 1)[0];
+    expect(normalizeNativePeriods([massive, tail], "1W", "NVDA", "US", "massive").bars).toEqual([massive]);
+  });
+  it.each(["1999-01-22T14:30Z", "2026-01-20T14:30Z"])("does not let a partial first week shift later native periods: %s", (start) => {
+    const first = rows(start, 1)[0];
+    const monday = new Date(start); monday.setUTCDate(monday.getUTCDate() + (8 - monday.getUTCDay()) % 7); monday.setUTCHours(5, 0, 0, 0);
+    const next = rows(monday.toISOString(), 1)[0];
+    const tail = { ...next, timestamp: new Date(monday.getTime() + 4 * 86_400_000 + 15 * 3_600_000).toISOString() };
+    const full = normalizeNativePeriods([first, next, tail], "1W", "NVDA", "NASDAQ");
+    expect(full.bars).toEqual([first, next]); expect(full.excluded).toBe(1);
+    expect(normalizeNativePeriods([next, tail], "1W", "NVDA", "NASDAQ").bars).toEqual(full.bars.slice(1));
+  });
+  it("removes daily quote tails and ignores non-aligned intraday ticks", () => {
+    const daily = rows("2026-10-16T13:30Z", 1)[0]; const quote = rows("2026-10-16T20:00Z", 1)[0];
+    expect(normalizeNativePeriods([daily, quote], "1D", "NVDA", "NASDAQ").bars).toEqual([daily]);
+    const source = rows("2026-10-16T13:30Z", 2, 15);
+    expect(resampleSessionBars([...source, { ...source[1], timestamp: "2026-10-16T13:46:35Z" }], 15, 15, "NVDA", "NASDAQ").bars).toEqual(source);
   });
 });

@@ -1,7 +1,7 @@
 import "server-only";
 
 import { applyCanonicalPricePolicy, sanitizeTechnicalBars, TECHNICAL_TIMEFRAMES } from "@/engines/technical";
-import { exchangeSession, historyCoverage, requestedHistoryBounds, resampleSessionBars, TIMEFRAME_MINUTES } from "@/engines/technical/history-v5";
+import { exchangeSession, historyCoverage, normalizeNativePeriods, requestedHistoryBounds, resampleSessionBars, TIMEFRAME_MINUTES } from "@/engines/technical/history-v5";
 import { financialProviderRouter } from "@/providers";
 import type { ProviderResult } from "@/providers/types";
 import { normalizeSymbol } from "@/services/yahoo/symbol-resolver";
@@ -27,13 +27,16 @@ export async function getTechnicalChartDataset(symbolInput: string, timeframe: T
   const interval = timeframe === "4h" ? session.crypto ? "1h" : "30m" : timeframe === "1h" && !session.crypto ? "30m" : timeframe === "1D" ? "1d" : timeframe === "1W" ? "1wk" : timeframe;
   const chart = await financialProviderRouter.technicalHistory(symbol, requestedRange === "CUSTOM" ? "MAX" : requestedRange, interval, { from: calculationFrom, to: bounds.to }, ["1h", "4h"].includes(timeframe));
   const source = sanitizeTechnicalBars(chart.data.points);
-  const resampled = ["1h", "4h"].includes(timeframe) ? resampleSessionBars(source, TIMEFRAME_MINUTES[timeframe], chart.data.interval === "30m" ? 30 : 60, symbol, chart.data.exchange) : { bars: source, missing: [], session };
+  const native = timeframe === "1D" || timeframe === "1W" ? normalizeNativePeriods(source, timeframe, symbol, chart.data.exchange, chart.meta.provider) : null;
+  const sourceMinutes = chart.data.interval === "30m" ? 30 : chart.data.interval === "1h" ? 60 : TIMEFRAME_MINUTES[timeframe];
+  const resampled = intraday ? resampleSessionBars(source, TIMEFRAME_MINUTES[timeframe], sourceMinutes, symbol, chart.data.exchange) : { bars: native!.bars, missing: [], session };
   const canonical = ["1D", "1W"].includes(timeframe) ? applyCanonicalPricePolicy(resampled.bars, session.crypto ? "CRYPTO" : "EQUITY") : { bars: resampled.bars, policy: "RAW_OHLC" as const };
   const bars = canonical.bars.filter((bar) => Date.parse(bar.timestamp) >= Date.parse(bounds.from) && Date.parse(bar.timestamp) <= Date.parse(bounds.to));
   if (!bars.length) throw new AppError("NO_DATA", "No verified candles are available in this interval and historical range. Previous chart retained.", 404);
   const calculationBars = canonical.bars.filter((bar) => Date.parse(bar.timestamp) <= Date.parse(bounds.to));
   const availableBars = calculationBars.filter((bar) => Date.parse(bar.timestamp) < Date.parse(bars[0].timestamp)).length;
   const limitations = [...(chart.data.historyLimitations ?? [])];
+  if (native?.excluded) limitations.push(`${native.excluded} overlapping intraperiod observations excluded from native ${timeframe} history; volume was not double-counted.`);
   if (!session.known) limitations.push("Exchange session calendar is unverified.");
   if (!session.crypto) limitations.push("Returned candles and detected gaps are verified; complete session/holiday coverage is not independently certified.");
   if (requestedRange === "MAX") limitations.push("Maximum returned history; pre-listing completeness is not independently certified.");

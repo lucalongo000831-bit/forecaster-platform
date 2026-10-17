@@ -166,7 +166,10 @@ export class MassiveMarketDataAdapter implements MarketDataProvider {
     const interval = (intervalInput ?? defaultIntervals[range]) as ChartInterval;
     const mapped = intervalMap[interval];
     if (!mapped) throw new ProviderError(this.name, "NOT_FOUND", "Intervallo Massive non supportato.", false, 400);
-    const initialPath = `/v2/aggs/ticker/${encodeURIComponent(massiveSymbol(symbol))}/range/${mapped.multiplier}/${mapped.timespan}/${bounds ? Date.parse(bounds.from) : fromDate(range)}/${bounds ? Date.parse(bounds.to) : new Date().toISOString().slice(0, 10)}`;
+    // A fractional calculation pre-roll must not shift every multiplied minute
+    // bucket. Fetch from a UTC day boundary; the service applies exact bounds.
+    const requestFrom = bounds ? Math.floor(Date.parse(bounds.from) / 86_400_000) * 86_400_000 : fromDate(range);
+    const initialPath = `/v2/aggs/ticker/${encodeURIComponent(massiveSymbol(symbol))}/range/${mapped.multiplier}/${mapped.timespan}/${requestFrom}/${bounds ? Date.parse(bounds.to) : new Date().toISOString().slice(0, 10)}`;
     const results: unknown[] = [];
     let next: string | null = initialPath;
     let historyComplete = true;
