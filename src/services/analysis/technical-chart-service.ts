@@ -35,8 +35,9 @@ export async function getTechnicalChartDataset(symbolInput: string, timeframe: T
   const availableBars = calculationBars.filter((bar) => Date.parse(bar.timestamp) < Date.parse(bars[0].timestamp)).length;
   const limitations = [...(chart.data.historyLimitations ?? [])];
   if (!session.known) limitations.push("Exchange session calendar is unverified.");
+  if (!session.crypto) limitations.push("Returned candles and detected gaps are verified; complete session/holiday coverage is not independently certified.");
   if (requestedRange === "MAX") limitations.push("Maximum returned history; pre-listing completeness is not independently certified.");
-  const coverage = historyCoverage(bars, timeframe, bounds, chart.meta.provider, chart.meta.freshnessType ?? chart.meta.freshness, resampled.missing.filter((gap) => gap.to >= bounds.from), limitations);
+  const coverage = historyCoverage(bars, timeframe, bounds, chart.meta.provider, chart.meta.freshnessType ?? chart.meta.freshness, resampled.missing.filter((gap) => gap.to >= bounds.from), limitations, session.crypto);
   return { meta: chart.meta, data: {
     symbol, currency: chart.data.currency, exchange: chart.data.exchange, timeframe, modelVersion: TECHNICAL_CHART_MODEL_VERSION,
     pricePolicy: canonical.policy, bars, calculationBars, coverage,

@@ -60,15 +60,16 @@ export function requestedHistoryBounds(range: TechnicalHistoricalRange, now: Dat
   return { from: new Date(start).toISOString(), to: new Date(end).toISOString() };
 }
 
-export function historyCoverage(bars: MarketChartPoint[], timeframe: TechnicalTimeframe, bounds: { from: string; to: string }, provider: string, freshness: string, missing: TechnicalHistoryCoverage["missingSegments"] = [], limitations: string[] = []): TechnicalHistoryCoverage {
+export function historyCoverage(bars: MarketChartPoint[], timeframe: TechnicalTimeframe, bounds: { from: string; to: string }, provider: string, freshness: string, missing: TechnicalHistoryCoverage["missingSegments"] = [], limitations: string[] = [], continuousTrading = false): TechnicalHistoryCoverage {
   const actualFrom = bars[0]?.timestamp ?? null; const actualTo = bars.at(-1)?.timestamp ?? null;
-  const tolerance = timeframe === "1W" ? 10 * DAY : 4 * DAY;
+  const tolerance = continuousTrading ? TIMEFRAME_MINUTES[timeframe] * MINUTE * 1.5 : timeframe === "1W" ? 10 * DAY : 4 * DAY;
   const detectableGaps = [...missing];
   for (let index = 1; index < bars.length; index++) {
     const previous = bars[index - 1]; const current = bars[index];
     const elapsed = Date.parse(current.timestamp) - Date.parse(previous.timestamp);
     const sameUtcDay = current.timestamp.slice(0, 10) === previous.timestamp.slice(0, 10);
-    if (elapsed > (timeframe === "1W" ? 14 * DAY : timeframe === "1D" ? 7 * DAY : TIMEFRAME_MINUTES[timeframe] * MINUTE * 1.5) && (sameUtcDay || ["1D", "1W"].includes(timeframe))) detectableGaps.push({ from: previous.timestamp, to: current.timestamp, reason: "Detected gap between verified observations; no prices synthesized." });
+    const maximumGap = continuousTrading ? TIMEFRAME_MINUTES[timeframe] * MINUTE * 1.5 : timeframe === "1W" ? 14 * DAY : timeframe === "1D" ? 7 * DAY : TIMEFRAME_MINUTES[timeframe] * MINUTE * 1.5;
+    if (elapsed > maximumGap && (continuousTrading || sameUtcDay || ["1D", "1W"].includes(timeframe))) detectableGaps.push({ from: previous.timestamp, to: current.timestamp, reason: "Detected gap between verified observations; no prices synthesized." });
   }
   const spansBounds = actualFrom !== null && actualTo !== null && Date.parse(actualFrom) <= Date.parse(bounds.from) + tolerance && Date.parse(actualTo) >= Date.parse(bounds.to) - tolerance;
   return { requestedFrom: bounds.from, requestedTo: bounds.to, actualFrom, actualTo, interval: timeframe, barCount: bars.length, coverageStatus: !bars.length ? "UNAVAILABLE" : freshness === "STALE" ? "STALE" : spansBounds && !detectableGaps.length && !limitations.length ? "COMPLETE" : "PARTIAL", provider, freshness, missingSegments: detectableGaps, limitations };

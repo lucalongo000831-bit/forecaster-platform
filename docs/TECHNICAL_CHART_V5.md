@@ -28,6 +28,8 @@ No daily-to-intraday synthesis. Unsupported intervals retain the previous verifi
 
 Primary sources: [Massive aggregate limit semantics](https://www.massive.com/blog/aggs-api-updates), installed Next.js 16.3 error-boundary documentation, installed Lightweight Charts 5.2 types.
 
+Live acceptance found missing opening-session observations in STLAM.MI hourly data despite a successful provider response. Equity coverage is therefore conservatively PARTIAL until a complete official session/holiday calendar can certify the entire requested window; the diagnostic explains this explicitly. Crypto is continuous: gaps crossing UTC midnight are checked and its boundary tolerance follows the actual interval, never the equity weekend tolerance. This acceptance correction does not change OHLC or indicator formulas.
+
 ## Calculations
 
 - SMA(N): rolling sum of N selected-source prices divided by N. First value is at index N−1; no shorter synthetic seed.
@@ -56,10 +58,10 @@ V5 uses a new envelope at `kairo:technical:v5:<symbol>` containing the validated
 
 ## Verification environment and measurements
 
-The Desktop checkout is managed by macOS File Provider. A concurrent development server and default-worker full suite encountered system load above 90 and timeout-only failures in unchanged Seasonality tests. No timeout, Seasonality formula or assertion was weakened. Final verification uses a source-identical snapshot outside the cloud-managed Desktop, with two Vitest workers and a production-mode Next server. Environment files, credentials, Git metadata and numbered duplicate files are not copied. The 36 edited/new files were compared byte-for-byte before final verification (the generated `next-env.d.ts` is restored to its original production import).
+The Desktop checkout is managed by macOS File Provider. A concurrent development server and default-worker full suite encountered system load above 90 and timeout-only failures in unchanged Seasonality tests. No timeout, Seasonality formula or assertion was weakened. Final verification uses a source-identical snapshot outside the cloud-managed Desktop, with one Vitest worker and a production-mode Next server. Environment files, credentials, Git metadata and numbered duplicate files are not copied. Application files are compared byte-for-byte before final verification (the generated `next-env.d.ts` is restored to its original production import).
 
-- Full unit/integration suite: 761/761, 134 test files.
-- Final full deterministic E2E: 175/175, desktop/tablet/mobile, production-mode server, 8.0 minutes. Final provider audit: `blockedAttempts: 0`, no provider hosts contacted.
+- Full unit/integration suite after the coverage correction: 763/763, 134 test files. Coverage regression gate: 37/37.
+- Final full deterministic E2E after the correction: 175/175, desktop/tablet/mobile, production-mode server, 4.9 minutes. Final provider audit: `blockedAttempts: 0`, no provider hosts contacted.
 - ESLint, independent TypeScript check and Next.js production build: PASS.
 - Source and production client-bundle credential checks: zero matches; environment files remain ignored.
 - Dedicated performance fixture: 10 samples per size, three moving averages plus V5 studies and structure. This is a local calculation benchmark, not a browser FPS or provider-latency claim.
@@ -74,3 +76,11 @@ The Desktop checkout is managed by macOS File Provider. A concurrent development
 Deterministic browser tests and live Preview acceptance are separate gates. A fixture session marker is not proof of a real authenticated Preview session. No live acceptance result is inferred from local fixtures.
 
 The first full browser run exposed a test-only responsive locator defect: the tablet sidebar hides its text label, so the new recovery test never reached the Dashboard fault injection. Tests now open the mobile menu when required and select the actual Dashboard navigation link by its href; this preserves the menu's normal close handler. Both RSC recovery scenarios pass on desktop/tablet/mobile (7/7 including setup), without changing application behavior, raising timeouts or weakening recovery assertions. The subsequent full run passed all 175 tests.
+
+## Live acceptance evidence
+
+Draft PR: #31, stacked on the audited V4 branch. The initial V5 Preview was READY. Authenticated live checks confirmed NVDA 1h/3M (455 bars), 4h/3M (130), 4h/6M (254), 1D/5Y (1,255 visible, 2,081 pre-roll bars for 200-period studies) and MAX (6,977 bars back to 1999-01-22; pre-listing warmup honestly LIMITED). AAPL, MSFT, SPY, QQQ and STLAM.MI hourly/four-hour views were inspected. BTC-USD and ETH-USD 1h/4h use genuine intraday data, explicit provider provenance and non-realtime labels where applicable.
+
+The initial live acceptance exposed the equity/crypto coverage correction documented above; the corrected Preview must be checked before treating acceptance as complete. A controlled failure of one non-Document Dashboard Fetch on the real Preview recovered through normal navigation: two Dashboard requests, zero logout requests, session retained. Interception was removed immediately. This is distinct from the deterministic error-boundary Retry test; no claim is made that the live prefetch failure itself displayed the boundary.
+
+Machine-readable final unit/E2E reports are generated in ignored `test-results/technical-v5-unit.json` and `test-results/technical-v5-e2e.json`. Live session duration and corrected-deployment acceptance are reported separately; disconnection time is not counted as active observation.

@@ -40,6 +40,8 @@ describe("Technical V5 interval/range contract", () => {
     const response = await getTechnicalChartDataset("NVDA", "4h", "1M");
     expect(mocks.technicalHistory.mock.calls[0][2]).toBe("30m");
     expect(response.data.bars.every((bar) => [50, 80].includes(bar.volume))).toBe(true);
+    expect(response.data.coverage?.coverageStatus).toBe("PARTIAL");
+    expect(response.data.rangeMessage).toContain("complete session/holiday coverage is not independently certified");
   });
   it("marks actual truncated history as PARTIAL and never claims HTTP success means complete", async () => {
     const response = await getTechnicalChartDataset("NVDA", "1D", "10Y");

@@ -42,4 +42,14 @@ describe("V5 session integrity", () => {
     expect(historyCoverage(rows("2026-03-09T13:30Z", 2), "1h", bounds, "yahoo", "CACHED", gap).coverageStatus).toBe("PARTIAL");
     expect(historyCoverage(rows("2026-03-09T13:30Z", 2), "1h", bounds, "yahoo", "STALE").coverageStatus).toBe("STALE");
   });
+  it("detects a crypto gap crossing midnight rather than treating it as an exchange closure", () => {
+    const source = [...rows("2026-03-09T22:00Z", 2, 60), ...rows("2026-03-10T02:00Z", 2, 60)];
+    const result = historyCoverage(source, "1h", { from: source[0].timestamp, to: source.at(-1)!.timestamp }, "yahoo", "CACHED", [], [], true);
+    expect(result.coverageStatus).toBe("PARTIAL"); expect(result.missingSegments).toHaveLength(1);
+  });
+  it("requires continuous crypto history to reach interval-sized boundaries, not four-day tolerance", () => {
+    const source = rows("2026-03-09T00:00Z", 24, 60);
+    expect(historyCoverage(source, "1h", { from: source[0].timestamp, to: "2026-03-11T00:00:00Z" }, "yahoo", "CACHED", [], [], true).coverageStatus).toBe("PARTIAL");
+    expect(historyCoverage(source, "1h", { from: source[0].timestamp, to: "2026-03-10T00:00:00Z" }, "yahoo", "CACHED", [], [], true).coverageStatus).toBe("COMPLETE");
+  });
 });
