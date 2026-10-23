@@ -66,20 +66,22 @@ V5 uses a new envelope at `kairo:technical:v5:<symbol>` containing the validated
 
 The Desktop checkout is managed by macOS File Provider. A concurrent development server and default-worker full suite encountered system load above 90 and timeout-only failures in unchanged Seasonality tests. No timeout, Seasonality formula or assertion was weakened. Final verification uses a source-identical snapshot outside the cloud-managed Desktop, with one Vitest worker and a production-mode Next server. Environment files, credentials, Git metadata and numbered duplicate files are not copied. Application files are compared byte-for-byte before final verification (the generated `next-env.d.ts` is restored to its original production import).
 
-- Full unit/integration suite after the final corrections: 776/776, 134 test files. Final native-period/session/provider regression gate: 61/61; numeric OHLC/legacy/studies gate: 70/70.
-- Final-source full deterministic E2E: 175/175, zero skipped/flaky/unexpected, desktop/tablet/mobile, production-mode server, 4.6 minutes. Interrupted runs are not counted as passes. Provider-audit assertions verify isolation in every project; the live local audit endpoint also reported zero blocked attempts and an empty outbound-host map.
+- Full unit/integration suite after the final corrections: 782/782, 135 test files. Final native-period/session/provider regression gate: 61/61; numeric OHLC/legacy/studies gate: 70/70; dense-history equivalence and existing structure point-in-time regression gate: 28/28.
+- Final-source full deterministic E2E after the dense-structure correction: 175/175 on 2026-10-23, zero skipped/flaky/unexpected, desktop/tablet/mobile, production-mode server, 5.5 minutes. Interrupted runs are not counted as passes. Provider-audit assertions verify isolation in every project; the live local audit endpoint also reported zero blocked attempts and an empty outbound-host map.
 - ESLint, independent TypeScript check and Next.js production build: PASS.
 - Source and production client-bundle credential checks: zero matches; environment files remain ignored.
 - Dedicated performance fixture: 10 samples per size, three moving averages plus V5 studies and structure. This is a local calculation benchmark, not a browser FPS or provider-latency claim.
 
 | Bars | Mean ms | p95 ms | Max ms |
 | --- | ---: | ---: | ---: |
-| 1,000 | 4.21 | 5.38 | 5.38 |
-| 2,500 | 7.82 | 8.99 | 8.99 |
-| 5,000 | 15.80 | 16.49 | 16.49 |
-| 10,000 | 35.19 | 37.08 | 37.08 |
+| 1,000 | 4.85 | 7.57 | 7.57 |
+| 2,500 | 9.72 | 12.55 | 12.55 |
+| 5,000 | 21.62 | 25.82 | 25.82 |
+| 10,000 | 46.99 | 54.46 | 54.46 |
 
 The Volume Profile date selectors previously recreated and locale-formatted every option during parent renders. A shared memoized option list and one reusable Intl formatter now retain every selectable timestamp without repeated formatting for unchanged bars. The real local MAX check retains 6,977 options in each selector. Browser-integrated CDP runs are not comparable enough to certify a latency improvement: aggregate script/task counters also include automation/annotation work, with observed command timeouts. No FPS or measured browser-speed improvement is claimed from these counters; independent UI profiling remains part of the final-audit acceptance evidence.
+
+A subsequent function-level CPU profile resolved the main MAX stall: `calculateMarketStructure` repeatedly filtered all previously confirmed swings at every bar, then classified those growing arrays. On the real six-study MAX workspace this function dominated several seconds of main-thread work. Confirmation-index buckets now update bounded windows retaining exactly the last two highs, last two lows and last six swings, ordered by original swing order (not confirmation arrival). Classification, event/confidence formulas, final full swing output and no-lookahead boundaries are unchanged. Six full-result SHA-256 regression fixtures captured before optimization at `a0f8668` prove identical outputs for 1,000/2,500/5,000/10,000 dense bars, unequal pivot widths and an explicit historical prefix. The dense 10,000-bar fixture (5,409 swings) fell from 731.38 ms to 76.85 ms in separate local single-run measurements; this is not an FPS or universal latency claim. Local real-browser MAX switches subsequently rendered all 6,977 bars with six studies without the prior input-command timeout. Final Preview profiling is recorded separately in the acceptance report.
 
 Deterministic browser tests and live Preview acceptance are separate gates. A fixture session marker is not proof of a real authenticated Preview session. No live acceptance result is inferred from local fixtures.
 
