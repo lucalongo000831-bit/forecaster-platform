@@ -148,7 +148,9 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         layout: { background: { type: library.ColorType.Solid, color: "#fff" }, textColor: kairoChartTheme.textSecondary, attributionLogo: true, panes: { separatorColor: kairoChartTheme.grid, separatorHoverColor: kairoChartTheme.primary, enableResize: true }, fontFamily: "var(--font-sans, Inter, ui-sans-serif, system-ui)" },
         grid: { vertLines: { color: kairoChartTheme.grid, style: library.LineStyle.Dotted }, horzLines: { color: kairoChartTheme.grid, style: library.LineStyle.Dotted } },
         crosshair: { mode: library.CrosshairMode.Normal, vertLine: { color: kairoChartTheme.crosshair, style: library.LineStyle.Dashed }, horzLine: { color: kairoChartTheme.crosshair, style: library.LineStyle.Dashed } },
-        timeScale: { borderColor: kairoChartTheme.axis, timeVisible: !["1D", "1W"].includes(dataset.timeframe), secondsVisible: false, rightOffset: 3, barSpacing: 7, minBarSpacing: 1.2 },
+        // Subpixel overview spacing lets Fit all include the full returned
+        // history, including MAX on mobile. Zooming still reveals each candle.
+        timeScale: { borderColor: kairoChartTheme.axis, timeVisible: !["1D", "1W"].includes(dataset.timeframe), secondsVisible: false, rightOffset: 3, barSpacing: 7, minBarSpacing: 0.001 },
         rightPriceScale: { borderColor: kairoChartTheme.axis, scaleMargins: { top: 0.08, bottom: 0.08 } },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
@@ -394,7 +396,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
 
   const definition = drawingTool === "cursor" ? null : drawingDefinition(drawingTool);
   const profileMax = Math.max(1, ...(profile?.bins.map((bin) => bin.volume) ?? [1]));
-  return <div className={`technical-chart-stage ${drawingTool !== "cursor" ? "is-drawing" : ""}`} onClick={(event) => placeDrawingAnchor(event.clientX, event.clientY)} role="img" aria-label={`${dataset.symbol} professional technical chart. ${dataset.bars.length} verified OHLCV bars. ${chartType === "heikin-ashi" ? "Heikin Ashi is derived while studies use real OHLC. " : ""}Indicators: ${indicators.filter((item) => item.enabled).map((item) => item.kind).join(", ") || "none"}.`} data-chart-engine="lightweight-charts" data-chart-ready={ready ? "true" : "false"} data-drawing-tool={drawingTool} data-testid="technical-terminal-chart">
+  return <div className={`technical-chart-stage ${drawingTool !== "cursor" ? "is-drawing" : ""}`} onClick={(event) => placeDrawingAnchor(event.clientX, event.clientY)} role="img" aria-label={`${dataset.symbol} professional technical chart. ${dataset.bars.length} verified OHLCV bars. ${chartType === "heikin-ashi" ? "Heikin Ashi is derived while studies use real OHLC. " : ""}Indicators: ${indicators.filter((item) => item.enabled).map((item) => item.kind).join(", ") || "none"}.`} data-chart-engine="lightweight-charts" data-chart-ready={ready ? "true" : "false"} data-history-first={dataset.bars[0]?.timestamp} data-history-last={dataset.bars.at(-1)?.timestamp} data-visible-from={dataset.bars[visibleRange.from]?.timestamp} data-visible-to={dataset.bars[visibleRange.to]?.timestamp} data-drawing-tool={drawingTool} data-testid="technical-terminal-chart">
     <div ref={hostRef} className="technical-chart-canvas"/>
     {!ready && <div className="technical-chart-loading" role="status">Preparing chart engine…</div>}
     {definition && anchorCount > 0 && <div className="technical-drawing-status" role="status">Anchor {anchorCount}/{definition.anchors} selected · choose next point</div>}

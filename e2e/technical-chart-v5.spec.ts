@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }, info) => {
-  await page.route("**/api/analysis/technical-chart?**", (route) => route.continue({ headers: { ...route.request().headers(), "x-forwarded-for": `198.51.100.${60 + info.title.length % 150}` } }));
+  // Independent responsive projects must not share a rate-limit identity when
+  // this file is run alone; the production limiter itself remains unchanged.
+  const projectOffset = info.project.name.startsWith("desktop") ? 0 : info.project.name.startsWith("tablet") ? 50 : 100;
+  await page.route("**/api/analysis/technical-chart?**", (route) => route.continue({ headers: { ...route.request().headers(), "x-forwarded-for": `198.51.100.${60 + projectOffset + info.title.length % 40}` } }));
 });
 
 test("V5 exact interval/range flow stays atomic, complete or explicitly limited", async ({ page }) => {
@@ -15,6 +18,13 @@ test("V5 exact interval/range flow stays atomic, complete or explicitly limited"
     await expect(panel.locator(".technical-panel-header strong")).toHaveText(`NVDA · ${range} · ${interval}`, { timeout: 30000 });
     await expect(panel.getByTestId("technical-terminal-chart")).toHaveAttribute("data-chart-ready", "true");
   }
+  const chart = panel.getByTestId("technical-terminal-chart");
+  const first = await chart.getAttribute("data-history-first");
+  const last = await chart.getAttribute("data-history-last");
+  expect(first).toBeTruthy(); expect(last).toBeTruthy();
+  await page.getByRole("button", { name: "View", exact: true }).click();
+  await expect(chart).toHaveAttribute("data-visible-from", first!);
+  await expect(chart).toHaveAttribute("data-visible-to", last!);
   expect(errors).toEqual([]);
 });
 
