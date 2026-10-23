@@ -26,6 +26,7 @@ import { finnhubCompanyAdapter } from "./finnhub/company-adapter";
 import { yahooFinanceClient } from "@/services/yahoo/yahoo-finance-client";
 import { deterministicE2EProvider } from "./testing/deterministic-e2e-provider";
 import { canonicalizeSearchInstrument } from "@/lib/instrument-identity";
+import { sanitizeTechnicalBars } from "@/engines/technical/terminal";
 import type {
   FundamentalsProvider,
   MarketDataProvider,
@@ -59,6 +60,13 @@ export function historicalCoverageYears(points: MarketChartPoint[]) {
   const first = Date.parse(points[0]!.timestamp);
   const last = Date.parse(points.at(-1)!.timestamp);
   return Number.isFinite(first) && Number.isFinite(last) && last >= first ? (last - first) / (365.2425 * 86_400_000) : 0;
+}
+
+export function technicalHistorySpansBounds(points: MarketChartPoint[], symbol: string, interval: string, bounds: { from: string; to: string }) {
+  if (!points.length) return false;
+  const minutes: Record<string, number> = { "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440, "1wk": 10080 };
+  const tolerance = symbol.endsWith("-USD") ? (minutes[interval] ?? 0) * 60_000 * 1.5 : 4 * 86_400_000;
+  return Date.parse(points[0].timestamp) <= Date.parse(bounds.from) + tolerance && Date.parse(points.at(-1)!.timestamp) >= Date.parse(bounds.to) - tolerance;
 }
 
 function mappedSymbol(instrument: ResolvedInstrument, provider: ProviderName) {
@@ -161,6 +169,37 @@ export class FinancialProviderRouter {
       }
       if (best) return best;
       throw lastError ?? new ProviderError("yahoo", "NOT_FOUND", "Storico sufficiente non disponibile per Technical V4.", false, 404);
+    });
+  }
+
+  /** V5 bounds-aware history uses the existing adapter order/cache/LKG/single-flight. */
+  technicalHistory(symbolInput: string, range: ChartRange, interval: string, bounds: { from: string; to: string }, allowHourlySource = false) {
+    const symbol = normalizeSymbol(symbolInput);
+    const fixture = deterministicE2EProvider();
+    if (fixture) return fixture.chart(symbol, range, interval, bounds);
+    return providerCached(`technical-history:v5-aligned:${symbol}:${interval}:${bounds.from}:${bounds.to}:${allowHourlySource}`, { freshSeconds: 60, staleSeconds: 1800 }, async () => {
+      let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
+      let lastError: unknown;
+      const order = this.marketOrder();
+      for (let index = 0; index < order.length; index++) {
+        const adapter = order[index];
+        if (!adapter.supportsHistoryBounds || !adapter.isConfigured() || !adapter.supportsSymbol(symbol)) continue;
+        try {
+          const sourceInterval = allowHourlySource && interval === "30m" && adapter.name === "yahoo" ? "1h" : interval;
+          const raw = await adapter.getHistoricalBars(symbol, range, sourceInterval, bounds);
+          const candidate = { ...raw, data: { ...raw.data, points: sanitizeTechnicalBars(raw.data.points) } };
+          if (candidate.data.interval !== sourceInterval || !candidate.data.points.length) continue;
+          const result = { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
+          const start = Date.parse(candidate.data.points[0].timestamp);
+          if (!best || start < Date.parse(best.data.points[0].timestamp)) best = result;
+          if (candidate.data.historyComplete !== false && technicalHistorySpansBounds(candidate.data.points, symbol, sourceInterval, bounds)) return result;
+        } catch (error) {
+          lastError = error;
+          structuredLog("warn", "provider.technical-history.fallback", { provider: adapter.name, operation: "technical-history", symbol, code: error instanceof ProviderError ? error.code : "UPSTREAM_UNAVAILABLE" });
+        }
+      }
+      if (best) return best;
+      throw lastError ?? new ProviderError("yahoo", "NOT_FOUND", "Verified history is unavailable for this interval and range.", false, 404);
     });
   }
 

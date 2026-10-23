@@ -37,6 +37,8 @@ export interface MarketChartPoint {
 }
 
 export interface MarketChartDto {
+  historyComplete?: boolean;
+  historyLimitations?: string[];
   symbol: string;
   currency: string;
   exchange: string;

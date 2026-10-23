@@ -70,4 +70,30 @@ describe("Massive market-data asset semantics", () => {
     await expect(adapter.getQuote("NVDA")).rejects.toMatchObject({ code: "UNAUTHORIZED", status: 401 });
     expect(mocks.massiveGet).toHaveBeenCalledTimes(1);
   });
+
+  it.each([1001, 2501, 5001, 10001])("paginates %i observations, merges overlaps and sorts without truncation", async (count) => {
+    const source = Array.from({ length: count }, (_, index) => ({ o: 100, h: 102, l: 99, c: 101, v: 10, t: Date.UTC(2000, 0, 1) + index * 60_000 }));
+    mocks.massiveGet.mockReset();
+    mocks.massiveGet.mockResolvedValueOnce({ status: "DELAYED", results: source.slice(0, Math.floor(count / 2) + 1), next_url: "https://api.massive.com/v2/aggs/ticker/NVDA?cursor=two" }).mockResolvedValueOnce({ status: "DELAYED", results: source.slice(Math.floor(count / 2)) });
+    const response = await new MassiveMarketDataAdapter().getHistoricalBars("NVDA", "1Y", "1m");
+    expect(response.data.points).toHaveLength(count);
+    expect(response.data.historyComplete).toBe(true);
+    expect(response.meta.freshnessType).toBe("DELAYED");
+    expect(mocks.massiveGet).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks a repeated pagination cursor incomplete and refuses foreign cursor hosts", async () => {
+    mocks.massiveGet.mockReset();
+    mocks.massiveGet.mockResolvedValue({ ...aggregateResponse, next_url: "https://api.massive.com/v2/aggs/ticker/NVDA?cursor=repeat" });
+    const result = await new MassiveMarketDataAdapter().getHistoricalBars("NVDA", "1Y", "1d");
+    expect(result.data.historyComplete).toBe(false); expect(result.meta.quality).toBe("partial");
+    mocks.massiveGet.mockResolvedValue({ ...aggregateResponse, next_url: "https://other.example/v2/aggs/ticker/NVDA" });
+    await expect(new MassiveMarketDataAdapter().getHistoricalBars("NVDA", "1Y", "1d")).rejects.toThrow("Invalid history pagination");
+  });
+  it.each([5, 15, 30])("aligns %im aggregate requests independently of fractional warmup bounds", async (minutes) => {
+    mocks.massiveGet.mockResolvedValue(aggregateResponse);
+    const bounds = { from: "2026-09-18T05:17:46.153Z", to: "2026-10-17T11:27:00.000Z" };
+    await new MassiveMarketDataAdapter().getHistoricalBars("NVDA", "1M", `${minutes}m`, bounds);
+    expect(mocks.massiveGet.mock.calls[0][0]).toBe(`/v2/aggs/ticker/NVDA/range/${minutes}/minute/${Date.parse("2026-09-18T00:00:00Z")}/${Date.parse(bounds.to)}`);
+  });
 });

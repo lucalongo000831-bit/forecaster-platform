@@ -211,6 +211,7 @@ export interface MarketStatus {
   nextClose: string | null;
 }
 
+export interface HistoryBounds { from: string; to: string; }
 export interface MarketDataProvider {
   readonly name: ProviderName;
   isConfigured(): boolean;
@@ -218,7 +219,8 @@ export interface MarketDataProvider {
   searchInstruments(query: string): Promise<ProviderResult<SearchInstrument[]>>;
   getQuote(symbol: string): Promise<ProviderResult<MarketQuoteDto>>;
   getQuotes(symbols: string[]): Promise<ProviderResult<MarketQuoteDto[]>>;
-  getHistoricalBars(symbol: string, range: MarketChartDto["range"], interval?: string | null): Promise<ProviderResult<MarketChartDto>>;
+  readonly supportsHistoryBounds?: boolean;
+  getHistoricalBars(symbol: string, range: MarketChartDto["range"], interval?: string | null, bounds?: HistoryBounds): Promise<ProviderResult<MarketChartDto>>;
   getMarketStatus(market?: string): Promise<ProviderResult<MarketStatus>>;
 }
 

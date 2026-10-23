@@ -5,6 +5,8 @@ import type { IChartApi, IPriceLine, ISeriesApi, ISeriesMarkersPluginApi, Logica
 import { anchoredVwap, calculateIndicatorSeries, calculateVolumeProfile, drawingDefinition, fibonacciExtension, fibonacciRetracement, heikinAshi, horizontalRayDrawingSegment, normalizeSeriesAtCommonStart, rectangleDrawingSegments } from "@/engines/technical";
 import type { MarketStructureResult, MtfTechnicalLevel, PositionPlannerResult, RangedVolumeProfileResult, TechnicalChartDataset, TechnicalChartType, TechnicalDivergence, TechnicalDrawing, TechnicalDrawingPoint, TechnicalDrawingTool, TechnicalIndicatorConfig, TechnicalLevel, TechnicalSessionAnalytics, TechnicalStructureV4Result } from "@/types";
 import { kairoChartTheme } from "../chart-theme";
+import { atrTrailingStop, directionalMovement, donchianChannels, movingAverageOnVisibleHistory, supertrend } from "@/engines/technical/studies-v5";
+import type { V5PriceScale } from "@/lib/technical-workspace-v5";
 
 export type { TechnicalDrawing } from "@/types";
 type AnySeries = ISeriesApi<SeriesType>;
@@ -22,7 +24,7 @@ function pricePrecision(bars: TechnicalChartDataset["bars"]) {
 }
 function priceLabel(value: number, precision: number) { return value.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision }); }
 
-export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, marketStructure = null, advancedStructure = null, positionPlan = null, structureDensity = "MAJOR", mtfLevels = [], divergences = [], rangedProfiles = [], sessionAnalytics = null, panelId = "panel-1", viewportKey = "default", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView }: {
+export function TechnicalTerminalChart({ dataset, comparisons, chartType, indicators, drawings, drawingTool, drawingText = "Research note", selectedDrawingId = null, autoLevels = [], showVolumeProfile = false, marketStructure = null, advancedStructure = null, positionPlan = null, structureDensity = "MAJOR", mtfLevels = [], divergences = [], rangedProfiles = [], sessionAnalytics = null, panelId = "panel-1", viewportKey = "default", linkedCrosshair = null, onCrosshairTime, onCreateDrawing, onResetView, priceScale = "LINEAR", onNavigationControls }: {
   dataset: TechnicalChartDataset;
   comparisons: TechnicalChartDataset[];
   chartType: TechnicalChartType;
@@ -47,6 +49,8 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   onCrosshairTime?: (panelId: string, timestamp: string | null) => void;
   onCreateDrawing: (drawing: TechnicalDrawing) => void;
   onResetView?: (reset: () => void) => void;
+  priceScale?: V5PriceScale;
+  onNavigationControls?: (control: (action: "LATEST" | "DATE" | "FIT_VISIBLE", date?: string) => boolean) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -66,6 +70,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const drawingToolRef = useRef(drawingTool);
   const drawingTextRef = useRef(drawingText);
   const resetViewCallbackRef = useRef(onResetView);
+  const navigationCallbackRef = useRef(onNavigationControls);
   const comparisonsRef = useRef(comparisons);
   const autoLevelsRef = useRef(autoLevels);
   const [ready, setReady] = useState(false);
@@ -73,6 +78,20 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const [visibleRange, setVisibleRange] = useState({ from: 0, to: Math.max(0, dataset.bars.length - 1) });
   const [tooltip, setTooltip] = useState<{ left: number; label: string; values: string[] } | null>(null);
   const calculated = useMemo(() => calculateIndicatorSeries(dataset.bars), [dataset.bars]);
+  const studySeries = useMemo(() => {
+    const input = dataset.calculationBars ?? dataset.bars;
+    const indexes = new Map(input.map((bar, index) => [bar.timestamp, index]));
+    const project = (values: Array<number | null>) => dataset.bars.map((bar) => values[indexes.get(bar.timestamp) ?? -1] ?? null);
+    return new Map(indicators.map((config) => {
+      let series: Record<string, Array<number | null>> = {};
+      if (["SMA", "SMMA", "EMA"].includes(config.kind)) series = { main: movingAverageOnVisibleHistory(input, dataset.bars, config) };
+      if (config.kind === "SUPERTREND") { const value = supertrend(input, config.period ?? 10, config.multiplier ?? 3); series = { bullish: project(value.bullish), bearish: project(value.bearish) }; }
+      if (config.kind === "ADX") { const value = directionalMovement(input, config.period ?? 14); series = { adx: project(value.adx), positive: project(value.positive), negative: project(value.negative) }; }
+      if (config.kind === "DONCHIAN") { const value = donchianChannels(input, config.period ?? 20); series = { upper: project(value.upper), middle: project(value.middle), lower: project(value.lower) }; }
+      if (config.kind === "ATR_STOP") series = { main: project(atrTrailingStop(input, config.period ?? 14, config.multiplier ?? 3, config.mode)) };
+      return [config.id, series];
+    }));
+  }, [dataset.bars, dataset.calculationBars, indicators]);
   const displayBars = useMemo(() => chartType === "heikin-ashi" ? heikinAshi(dataset.bars) : dataset.bars, [chartType, dataset.bars]);
   const profile = useMemo(() => showVolumeProfile ? calculateVolumeProfile(dataset.bars.slice(visibleRange.from, visibleRange.to + 1)) : null, [dataset.bars, showVolumeProfile, visibleRange]);
   const comparisonSignature = comparisons.map((comparison) => `${comparison.symbol}:${comparison.timeframe}:${comparison.asOf ?? comparison.bars.length}`).join("|");
@@ -82,6 +101,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   useEffect(() => { crosshairCallbackRef.current = onCrosshairTime; }, [onCrosshairTime]);
   useEffect(() => { drawingTextRef.current = drawingText; }, [drawingText]);
   useEffect(() => { resetViewCallbackRef.current = onResetView; }, [onResetView]);
+  useEffect(() => { navigationCallbackRef.current = onNavigationControls; }, [onNavigationControls]);
   useEffect(() => { comparisonsRef.current = comparisons; }, [comparisons]);
   useEffect(() => { autoLevelsRef.current = autoLevels; }, [autoLevels]);
   useLayoutEffect(() => { drawingToolRef.current = drawingTool; }, [drawingTool]);
@@ -128,7 +148,9 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         layout: { background: { type: library.ColorType.Solid, color: "#fff" }, textColor: kairoChartTheme.textSecondary, attributionLogo: true, panes: { separatorColor: kairoChartTheme.grid, separatorHoverColor: kairoChartTheme.primary, enableResize: true }, fontFamily: "var(--font-sans, Inter, ui-sans-serif, system-ui)" },
         grid: { vertLines: { color: kairoChartTheme.grid, style: library.LineStyle.Dotted }, horzLines: { color: kairoChartTheme.grid, style: library.LineStyle.Dotted } },
         crosshair: { mode: library.CrosshairMode.Normal, vertLine: { color: kairoChartTheme.crosshair, style: library.LineStyle.Dashed }, horzLine: { color: kairoChartTheme.crosshair, style: library.LineStyle.Dashed } },
-        timeScale: { borderColor: kairoChartTheme.axis, timeVisible: !["1D", "1W"].includes(dataset.timeframe), secondsVisible: false, rightOffset: 3, barSpacing: 7, minBarSpacing: 1.2 },
+        // Subpixel overview spacing lets Fit all include the full returned
+        // history, including MAX on mobile. Zooming still reveals each candle.
+        timeScale: { borderColor: kairoChartTheme.axis, timeVisible: !["1D", "1W"].includes(dataset.timeframe), secondsVisible: false, rightOffset: 3, barSpacing: 7, minBarSpacing: 0.001 },
         rightPriceScale: { borderColor: kairoChartTheme.axis, scaleMargins: { top: 0.08, bottom: 0.08 } },
         handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
         handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
@@ -151,14 +173,18 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       registry.push({ label: chartType === "heikin-ashi" ? `${dataset.symbol} · Heikin Ashi derived` : dataset.symbol, series: primary });
       const addLine = (label: string, values: Array<number | null>, color: string, targetPane = 0, options: Record<string, unknown> = {}) => {
         const series = chart!.addSeries(library.LineSeries, { color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, ...options }, targetPane) as AnySeries;
-        series.setData(values.flatMap((value, index) => value === null || !Number.isFinite(value) ? [] : [{ time: time(dataset.bars[index].timestamp), value }]) as never[]);
+        series.setData(values.map((value, index) => value === null || !Number.isFinite(value) ? { time: time(dataset.bars[index].timestamp) } : { time: time(dataset.bars[index].timestamp), value }) as never[]);
         registry.push({ label, series });
         return series;
       };
       const enabled = indicators.filter((indicator) => indicator.enabled);
       for (const indicator of enabled) {
-        if (indicator.kind === "SMA") addLine(`SMA ${indicator.period}`, calculated.sma(indicator.period ?? 20), indicator.color);
-        if (indicator.kind === "EMA") addLine(`EMA ${indicator.period}`, calculated.ema(indicator.period ?? 20), indicator.color);
+        const values = studySeries.get(indicator.id) ?? {};
+        const style = { lineWidth: indicator.lineWidth ?? 2 };
+        if (["SMA", "SMMA", "EMA"].includes(indicator.kind)) addLine(`${indicator.kind} ${indicator.period}`, values.main, indicator.color, 0, style);
+        if (indicator.kind === "SUPERTREND") { addLine("Supertrend bullish", values.bullish, indicator.color, 0, style); addLine("Supertrend bearish", values.bearish, kairoChartTheme.bearish, 0, style); }
+        if (indicator.kind === "DONCHIAN") for (const key of ["upper", "middle", "lower"]) addLine(`Donchian ${key}`, values[key], indicator.color, 0, style);
+        if (indicator.kind === "ATR_STOP") addLine(`ATR stop ${indicator.mode ?? "AUTO"}`, values.main, indicator.color, 0, style);
         if (indicator.kind === "VWAP" && !["1D", "1W"].includes(dataset.timeframe)) addLine("VWAP", calculated.vwap(), indicator.color);
         if (indicator.kind === "BOLLINGER") {
           const bands = calculated.bollinger(indicator.period ?? 20);
@@ -175,6 +201,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
         pane += 1;
       }
       for (const indicator of enabled) {
+        if (indicator.kind === "ADX") { const values = studySeries.get(indicator.id)!; addLine("ADX", values.adx, indicator.color, pane, { lineWidth: indicator.lineWidth ?? 2 }); addLine("+DI", values.positive, kairoChartTheme.bullish, pane); addLine("−DI", values.negative, kairoChartTheme.bearish, pane); pane++; }
         if (indicator.kind === "RSI") {
           const rsi = addLine(`RSI ${indicator.period ?? 14}`, calculated.rsi(indicator.period ?? 14), indicator.color, pane, { priceFormat: { type: "price", precision: 1, minMove: .1 } });
           rsi.createPriceLine({ price: 70, color: kairoChartTheme.bearish, lineWidth: 1, lineStyle: library.LineStyle.Dashed, axisLabelVisible: true, title: "70" });
@@ -237,6 +264,15 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       if (viewportKeyRef.current === viewportKey && preservedRangeRef.current) chart.timeScale().setVisibleLogicalRange(preservedRangeRef.current);
       else { viewportKeyRef.current = viewportKey; preservedRangeRef.current = null; chart.timeScale().fitContent(); }
       resetViewCallbackRef.current?.(() => chart?.timeScale().fitContent());
+      navigationCallbackRef.current?.((action, date) => {
+        if (!chart) return false;
+        if (action === "LATEST") { chart.timeScale().scrollToRealTime(); return true; }
+        if (action === "FIT_VISIBLE") { chart.priceScale("right").applyOptions({ autoScale: true }); return true; }
+        if (!date || date < dataset.bars[0].timestamp.slice(0, 10) || date > dataset.bars.at(-1)!.timestamp.slice(0, 10)) return false;
+        const index = dataset.bars.findIndex((bar) => bar.timestamp.slice(0, 10) >= date);
+        if (index < 0) return false;
+        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, index - 50), to: Math.min(dataset.bars.length - 1, index + 50) }); return true;
+      });
       const panes = chart.panes();
       if (panes[1]) panes[1].setHeight(95);
       for (let index = 2; index < panes.length; index += 1) panes[index].setHeight(115);
@@ -260,7 +296,13 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       markerPluginRef.current = null;
       setReady(false);
     };
-  }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId, viewportKey]);
+  }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId, viewportKey, studySeries]);
+
+  useEffect(() => {
+    const library = libraryRef.current;
+    if (!ready || !library || !chartRef.current) return;
+    chartRef.current.priceScale("right").applyOptions({ mode: priceScale === "LOGARITHMIC" ? library.PriceScaleMode.Logarithmic : priceScale === "PERCENTAGE" ? library.PriceScaleMode.Percentage : library.PriceScaleMode.Normal });
+  }, [priceScale, ready]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -354,7 +396,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
 
   const definition = drawingTool === "cursor" ? null : drawingDefinition(drawingTool);
   const profileMax = Math.max(1, ...(profile?.bins.map((bin) => bin.volume) ?? [1]));
-  return <div className={`technical-chart-stage ${drawingTool !== "cursor" ? "is-drawing" : ""}`} onClick={(event) => placeDrawingAnchor(event.clientX, event.clientY)} role="img" aria-label={`${dataset.symbol} professional technical chart. ${dataset.bars.length} verified OHLCV bars. ${chartType === "heikin-ashi" ? "Heikin Ashi is derived while studies use real OHLC. " : ""}Indicators: ${indicators.filter((item) => item.enabled).map((item) => item.kind).join(", ") || "none"}.`} data-chart-engine="lightweight-charts" data-chart-ready={ready ? "true" : "false"} data-drawing-tool={drawingTool} data-testid="technical-terminal-chart">
+  return <div className={`technical-chart-stage ${drawingTool !== "cursor" ? "is-drawing" : ""}`} onClick={(event) => placeDrawingAnchor(event.clientX, event.clientY)} role="img" aria-label={`${dataset.symbol} professional technical chart. ${dataset.bars.length} verified OHLCV bars. ${chartType === "heikin-ashi" ? "Heikin Ashi is derived while studies use real OHLC. " : ""}Indicators: ${indicators.filter((item) => item.enabled).map((item) => item.kind).join(", ") || "none"}.`} data-chart-engine="lightweight-charts" data-chart-ready={ready ? "true" : "false"} data-history-first={dataset.bars[0]?.timestamp} data-history-last={dataset.bars.at(-1)?.timestamp} data-visible-from={dataset.bars[visibleRange.from]?.timestamp} data-visible-to={dataset.bars[visibleRange.to]?.timestamp} data-drawing-tool={drawingTool} data-testid="technical-terminal-chart">
     <div ref={hostRef} className="technical-chart-canvas"/>
     {!ready && <div className="technical-chart-loading" role="status">Preparing chart engine…</div>}
     {definition && anchorCount > 0 && <div className="technical-drawing-status" role="status">Anchor {anchorCount}/{definition.anchors} selected · choose next point</div>}

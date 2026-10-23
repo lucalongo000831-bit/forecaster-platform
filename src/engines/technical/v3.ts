@@ -163,10 +163,31 @@ export function calculateMarketStructure(input: MarketChartPoint[], options: { a
   const atr = calculateIndicatorSeries(bars).atr(14);
   const events: MarketStructureResult["events"] = [];
   const broken = new Set<string>();
+  type OrderedSwing = { order: number; swing: MarketStructureSwing };
+  type ConfirmedWindow = { count: number; rows: OrderedSwing[]; swings: MarketStructureSwing[] };
+  const allWindow: ConfirmedWindow = { count: 0, rows: [], swings: [] };
+  const majorWindow: ConfirmedWindow = { count: 0, rows: [], swings: [] };
+  const pending = new Map<number, OrderedSwing[]>();
+  swings.forEach((swing, order) => {
+    const confirmed = pending.get(swing.confirmationIndex) ?? [];
+    confirmed.push({ order, swing }); pending.set(swing.confirmationIndex, confirmed);
+  });
+  // Classification uses only the last two highs/lows and last six swings.
+  // Keep those exact observations in source order, even when a wider major
+  // pivot confirms after a newer minor pivot. No per-candle full-history scan.
+  const confirm = (window: ConfirmedWindow, row: OrderedSwing) => {
+    window.count++;
+    const ordered = [...window.rows, row].sort((left, right) => left.order - right.order);
+    const retained = new Set([...ordered.slice(-6), ...ordered.filter((item) => item.swing.kind === "HIGH").slice(-2), ...ordered.filter((item) => item.swing.kind === "LOW").slice(-2)].map((item) => item.order));
+    window.rows = ordered.filter((item) => retained.has(item.order));
+    window.swings = window.rows.map((item) => item.swing);
+  };
   for (let barIndex = 1; barIndex < bars.length; barIndex += 1) {
-    const availableAll = swings.filter((swing) => swing.confirmationIndex <= barIndex);
-    const availableMajor = availableAll.filter((swing) => swing.hierarchy === "MAJOR");
-    const available = availableMajor.length >= 4 ? availableMajor : availableAll;
+    for (const row of pending.get(barIndex) ?? []) {
+      confirm(allWindow, row);
+      if (row.swing.hierarchy === "MAJOR") confirm(majorWindow, row);
+    }
+    const available = majorWindow.count >= 4 ? majorWindow.swings : allWindow.swings;
     const latestHigh = available.filter((swing) => swing.kind === "HIGH").at(-1);
     const latestLow = available.filter((swing) => swing.kind === "LOW").at(-1);
     if (!latestHigh || !latestLow) continue;

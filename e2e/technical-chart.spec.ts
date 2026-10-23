@@ -111,7 +111,7 @@ test("technical preferences reject corrupt state and reset only after confirmati
   await page.getByRole("button", { name: "Confirm reset local workspace" }).click();
   await expect(page.getByText("EMA 20", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("kairo:technical-chart:v1:NVDA"))).toBe("{not-json");
-  expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v3:NVDA"))).toContain('"version":3');
+  expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v5:NVDA"))).toContain('"version":5');
 });
 
 test("Technical V2 derives locally, persists advanced drawings and reuses multi-chart requests", async ({ page }) => {
@@ -200,10 +200,10 @@ test("Technical V3 migrates valid V1 state and preserves legacy drawings", async
   await expect(page.getByText("RSI 14", { exact: true })).toBeVisible();
   await expect(page.getByText(/^Level 120\.00$/)).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("kairo:technical-chart:v1:NVDA"))).toContain('"version":1');
-  expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v3:NVDA"))).toContain('"version":3');
+  expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v5:NVDA"))).toContain('"version":5');
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByText(/^Level 120\.00$/)).toHaveCount(1);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("kairo:technical:v3:NVDA") ?? "{}").drawings["NVDA:4h"])).toHaveLength(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("kairo:technical:v5:NVDA") ?? "{}").workspace.drawings["NVDA:4h"])).toHaveLength(1);
 });
 
 test("Technical V3 overlays, profiles and structure template derive locally without provider refetch", async ({ page }) => {
@@ -243,7 +243,7 @@ test("Technical V3 migration is idempotent and preserves the original V2 key", a
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.getByText("Level 120.00", { exact: true })).toHaveCount(1);
   expect(await page.evaluate(() => localStorage.getItem("kairo:technical:v2:NVDA"))).toBe(originalV2);
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("kairo:technical:v3:NVDA") ?? "{}").drawings["NVDA:1D"])).toHaveLength(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("kairo:technical:v5:NVDA") ?? "{}").workspace.drawings["NVDA:1D"])).toHaveLength(1);
 });
 
 test("Technical V3 uses honest crypto session semantics and typed server alert authentication", async ({ page }) => {

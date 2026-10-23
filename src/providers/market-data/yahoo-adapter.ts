@@ -7,6 +7,7 @@ import { providerResult } from "../metadata";
 import type { MarketDataProvider, MarketStatus, ProviderResult } from "../types";
 
 export class YahooMarketDataAdapter implements MarketDataProvider {
+  readonly supportsHistoryBounds = true;
   readonly name = "yahoo" as const;
 
   isConfigured() {
@@ -44,8 +45,8 @@ export class YahooMarketDataAdapter implements MarketDataProvider {
     });
   }
 
-  async getHistoricalBars(symbol: string, range: Parameters<MarketDataProvider["getHistoricalBars"]>[1], interval?: string | null) {
-    const data = await yahooFinanceClient.chart(symbol, range, interval);
+  async getHistoricalBars(symbol: string, range: Parameters<MarketDataProvider["getHistoricalBars"]>[1], interval?: string | null, bounds?: import("../types").HistoryBounds) {
+    const data = await yahooFinanceClient.chart(symbol, range, interval, bounds);
     return providerResult(this.name, data, {
       sourceTimestamp: data.asOf,
       freshness: data.isDelayed ? "delayed" : "cached",

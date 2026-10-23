@@ -1,12 +1,12 @@
 import type { ChartRange, MarketChartPoint, TechnicalHistoricalRange, TechnicalTimeframe } from "@/types";
 
 export const TECHNICAL_RANGE_INTERVAL_COMPATIBILITY: Record<TechnicalTimeframe, ChartRange[]> = {
-  "1m": ["1D"], "5m": ["1D", "5D"], "15m": ["1D", "5D", "1M"], "30m": ["1D", "5D", "1M"],
-  "1h": ["1D", "5D", "1M", "3M"], "4h": ["1M", "3M"],
+  "1m": ["1D", "5D"], "5m": ["1D", "5D", "1M"], "15m": ["1D", "5D", "1M"], "30m": ["1D", "5D", "1M"],
+  "1h": ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y"], "4h": ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y"],
   "1D": ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y", "MAX"],
   "1W": ["3M", "6M", "YTD", "1Y", "3Y", "5Y", "10Y", "MAX"],
 };
-export function isTechnicalRangeCompatible(range: TechnicalHistoricalRange, timeframe: TechnicalTimeframe) { return range === "CUSTOM" ? ["1D", "1W"].includes(timeframe) : TECHNICAL_RANGE_INTERVAL_COMPATIBILITY[timeframe].includes(range); }
+export function isTechnicalRangeCompatible(range: TechnicalHistoricalRange, timeframe: TechnicalTimeframe) { return range === "CUSTOM" || TECHNICAL_RANGE_INTERVAL_COMPATIBILITY[timeframe].includes(range); }
 export function filterTechnicalRange(bars: MarketChartPoint[], range: TechnicalHistoricalRange, now = new Date(), custom?: { from: string | null; to: string | null }) {
   if (range === "MAX") return [...bars];
   const end = range === "CUSTOM" && custom?.to ? Date.parse(`${custom.to}T23:59:59.999Z`) : now.getTime();

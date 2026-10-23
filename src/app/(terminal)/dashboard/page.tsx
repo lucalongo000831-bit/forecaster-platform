@@ -12,6 +12,8 @@ import { listPortfolios, listWatchlists } from "@/services/account";
 import { getMarketCalendar } from "@/services/calendar/calendar-service";
 import { DashboardAutoRefresh } from "@/components/financial/dashboard-auto-refresh";
 import { getGlobalRiskCurrent } from "@/services/global-risk";
+import { isDeterministicE2EProviderEnabled } from "@/providers/testing/deterministic-e2e-provider";
+import { headers } from "next/headers";
 
 function GlobalRiskFallback() {
   return <div className="gr-dashboard-widget unknown" aria-busy="true"><span className="gr-dashboard-icon"><Globe2/></span><div><span className="page-kicker">Global risk</span><strong>Updating monitor</strong><small>Loading the latest verified risk snapshot…</small></div><ArrowRight/></div>;
@@ -60,7 +62,9 @@ async function DashboardContent({ now, userPromise }: { now: number; userPromise
 </>;
 }
 
-export default function DashboardPage(){
+export default async function DashboardPage(){
+  // Isolated fault injection is disabled on Vercel and outside the explicit E2E process.
+  if (isDeterministicE2EProviderEnabled() && (await headers()).get("x-kairo-e2e-dashboard-failure") === "true") throw new Error("Deterministic transient Dashboard RSC failure");
   const now = new Date().getTime();
   const userPromise = getCurrentUser().catch(() => null);
   return <div className="container-shell page-stack dashboard-page"><DashboardAutoRefresh refreshVersion={now}/>
