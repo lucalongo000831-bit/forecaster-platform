@@ -29,13 +29,14 @@ export async function getTechnicalChartDataset(symbolInput: string, timeframe: T
   const source = sanitizeTechnicalBars(chart.data.points);
   const native = timeframe === "1D" || timeframe === "1W" ? normalizeNativePeriods(source, timeframe, symbol, chart.data.exchange, chart.meta.provider) : null;
   const sourceMinutes = chart.data.interval === "30m" ? 30 : chart.data.interval === "1h" ? 60 : TIMEFRAME_MINUTES[timeframe];
-  const resampled = intraday ? resampleSessionBars(source, TIMEFRAME_MINUTES[timeframe], sourceMinutes, symbol, chart.data.exchange) : { bars: native!.bars, missing: [], session };
+  const resampled = intraday ? resampleSessionBars(source, TIMEFRAME_MINUTES[timeframe], sourceMinutes, symbol, chart.data.exchange, Date.parse(bounds.to)) : { bars: native!.bars, missing: [], session };
   const canonical = ["1D", "1W"].includes(timeframe) ? applyCanonicalPricePolicy(resampled.bars, session.crypto ? "CRYPTO" : "EQUITY") : { bars: resampled.bars, policy: "RAW_OHLC" as const };
   const bars = canonical.bars.filter((bar) => Date.parse(bar.timestamp) >= Date.parse(bounds.from) && Date.parse(bar.timestamp) <= Date.parse(bounds.to));
   if (!bars.length) throw new AppError("NO_DATA", "No verified candles are available in this interval and historical range. Previous chart retained.", 404);
   const calculationBars = canonical.bars.filter((bar) => Date.parse(bar.timestamp) <= Date.parse(bounds.to));
   const availableBars = calculationBars.filter((bar) => Date.parse(bar.timestamp) < Date.parse(bars[0].timestamp)).length;
   const limitations = [...(chart.data.historyLimitations ?? [])];
+  if (native && session.crypto && Date.parse(bars.at(-1)!.timestamp) + TIMEFRAME_MINUTES[timeframe] * 60_000 > Date.parse(bounds.to)) limitations.push(`Latest native ${timeframe} observation may still be forming; its OHLCV are provisional, not a confirmed closing candle.`);
   if (native?.excluded) limitations.push(`${native.excluded} overlapping intraperiod observations excluded from native ${timeframe} history; volume was not double-counted.`);
   if (!session.known) limitations.push("Exchange session calendar is unverified.");
   if (!session.crypto) limitations.push("Returned candles and detected gaps are verified; complete session/holiday coverage is not independently certified.");

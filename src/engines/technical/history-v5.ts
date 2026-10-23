@@ -22,7 +22,7 @@ export function sessionClock(timestamp: string, timeZone: string) {
 
 /** Aggregate only observed constituents. Short session-end buckets are valid;
  * a missing constituent inside a bucket invalidates it and is reported. */
-export function resampleSessionBars(input: MarketChartPoint[], targetMinutes: number, sourceMinutes: number, symbol: string, exchange: string) {
+export function resampleSessionBars(input: MarketChartPoint[], targetMinutes: number, sourceMinutes: number, symbol: string, exchange: string, asOf = Infinity) {
   const session = exchangeSession(symbol, exchange);
   const groups = new Map<string, { rows: MarketChartPoint[]; start: number; end: number }>();
   const clean = sanitizeTechnicalBars(input);
@@ -45,7 +45,7 @@ export function resampleSessionBars(input: MarketChartPoint[], targetMinutes: nu
   const bars = [...groups.values()].flatMap(({ rows, start, end }) => {
     const expected = Math.ceil((end - start) / (sourceMinutes * MINUTE));
     const contiguous = rows.every((row, index) => Date.parse(row.timestamp) === start + index * sourceMinutes * MINUTE);
-    if (!contiguous || rows.length !== expected) {
+    if (!contiguous || rows.length !== expected || end > asOf) {
       missing.push({ from: new Date(start).toISOString(), to: new Date(end).toISOString(), reason: "Missing source constituents or unfinished session bucket" });
       return [];
     }
@@ -61,9 +61,10 @@ export function resampleSessionBars(input: MarketChartPoint[], targetMinutes: nu
 export function normalizeNativePeriods(input: MarketChartPoint[], timeframe: "1D" | "1W", symbol: string, exchange: string, provider = "yahoo") {
   const clean = sanitizeTechnicalBars(input);
   const session = exchangeSession(symbol, exchange);
-  // Massive native weeks start Sunday in ET; Yahoo weeks use Monday in the
-  // instrument calendar. Retain native OHLCV, never reaggregate overlapping bars.
-  const weeklyTimeZone = provider === "massive" ? "America/New_York" : session.timeZone;
+  // Massive weeks start Sunday: equities use ET, crypto uses UTC (provider
+  // asset-class contract). Yahoo uses Monday in the instrument calendar.
+  // Retain native OHLCV, never reaggregate overlapping bars.
+  const weeklyTimeZone = provider === "massive" && !session.crypto ? "America/New_York" : session.timeZone;
   const anchorWeekday = provider === "massive" ? 0 : 1;
   const periods = new Map<number, MarketChartPoint>();
   let excluded = 0;

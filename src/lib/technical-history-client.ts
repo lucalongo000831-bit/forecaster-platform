@@ -3,7 +3,23 @@ import type { TechnicalChartResponse, TechnicalRangeSelection, TechnicalTimefram
 type Pending = { controller: AbortController; promise: Promise<TechnicalChartResponse>; users: number };
 const cache = new Map<string, { value: TechnicalChartResponse; expires: number }>();
 const pending = new Map<string, Pending>();
+function validBars(rows: unknown): boolean {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  let previous = -Infinity;
+  return rows.every((row) => {
+    if (!row || typeof row !== "object") return false;
+    const stamp = typeof row.timestamp === "string" ? Date.parse(row.timestamp) : NaN;
+    const valid = Number.isFinite(stamp) && stamp % 1000 === 0 && stamp > previous && [row.open, row.high, row.low, row.close, row.volume].every((n) => typeof n === "number" && Number.isFinite(n)) && [row.open, row.high, row.low, row.close].every((n) => n > 0) && row.volume >= 0 && row.low <= Math.min(row.open, row.close) && row.high >= Math.max(row.open, row.close);
+    previous = stamp;
+    return valid;
+  });
+}
 export function technicalRequestKey(symbol: string, timeframe: TechnicalTimeframe, selection: TechnicalRangeSelection) { return `${symbol.toUpperCase()}:${timeframe}:${selection.range}:${selection.from ?? ""}:${selection.to ?? ""}`; }
+/** Bounded per-workspace snapshots, in last-use order. The separately retained
+ * verified panel snapshot remains available even after its request is evicted. */
+export function retainTechnicalDatasets(current: Record<string, TechnicalChartResponse>, key: string, value: TechnicalChartResponse) {
+  return Object.fromEntries([...Object.entries(current).filter(([saved]) => saved !== key), [key, value]].slice(-32));
+}
 
 /** Subscribers share one transport; removing the final subscriber cancels it.
  * Responses remain bound to symbol/interval/range/warmup, never arrival order. */
@@ -32,6 +48,8 @@ export async function requestTechnicalHistory(symbol: string, timeframe: Technic
             throw error;
           }
           if (body.data.symbol !== symbol.toUpperCase() || body.data.timeframe !== timeframe || !Array.isArray(body.data.bars) || !body.data.bars.length) throw Object.assign(new Error("History response does not match the selected asset and interval."), { noRetry: true });
+          if (!validBars(body.data.bars) || (body.data.calculationBars !== undefined && !validBars(body.data.calculationBars))) throw Object.assign(new Error("Invalid verified history received. Previous verified chart retained."), { noRetry: true });
+          if (body.data.requestedRange !== selection.range) throw Object.assign(new Error("History response does not match the selected historical range. Previous verified chart retained."), { noRetry: true });
           controller.signal.throwIfAborted();
           cache.set(key, { value: body, expires: Date.now() + 60_000 });
           if (cache.size > 16) cache.delete(cache.keys().next().value!);

@@ -36,10 +36,15 @@ function liquidity(structure: MarketStructureResult, bars: MarketChartPoint[], a
       const seed = swings[index]!;
       if (coveredSwingIds.has(seed.id)) continue;
       const tolerance = Math.max(seed.price * 0.0015, (atr[seed.confirmationIndex] ?? 0) * 0.25);
-      const match = swings.slice(index + 1).find((swing) => Math.abs(swing.price - seed.price) <= tolerance);
+      let match: typeof seed | undefined;
+      for (let next = index + 1; next < swings.length; next++) {
+        if (Math.abs(swings[next].price - seed.price) <= tolerance) { match = swings[next]; break; }
+      }
       if (!match) continue;
       const cluster = [seed, match];
-      swings.slice(index).filter((swing) => Math.abs(swing.price - seed.price) <= tolerance).forEach((swing) => coveredSwingIds.add(swing.id));
+      for (let next = index; next < swings.length; next++) {
+        if (Math.abs(swings[next].price - seed.price) <= tolerance) coveredSwingIds.add(swings[next].id);
+      }
       const low = Math.min(...cluster.map((swing) => swing.price)); const high = Math.max(...cluster.map((swing) => swing.price));
       const confirmed = cluster.map((swing) => swing.confirmationTimestamp).sort().at(-1)!;
       const zone: TechnicalLiquidityZone = { id: `liq-${kind.toLowerCase()}-${seed.id}`, side: kind === "HIGH" ? "BUY_SIDE" : "SELL_SIDE", low: low - tolerance * 0.15, high: high + tolerance * 0.15, touches: cluster.length, createdAt: seed.timestamp, availableAt: confirmed, status: "ACTIVE" };
@@ -48,8 +53,7 @@ function liquidity(structure: MarketStructureResult, bars: MarketChartPoint[], a
   }
   const sweeps: TechnicalLiquiditySweep[] = [];
   for (const zone of zones) {
-    const after = bars.filter((bar) => bar.timestamp > zone.availableAt);
-    const swept = after.find((bar) => zone.side === "BUY_SIDE" ? bar.high > zone.high && bar.close < zone.high : bar.low < zone.low && bar.close > zone.low);
+    const swept = bars.find((bar) => bar.timestamp > zone.availableAt && (zone.side === "BUY_SIDE" ? bar.high > zone.high && bar.close < zone.high : bar.low < zone.low && bar.close > zone.low));
     if (!swept) continue;
     zone.status = "SWEPT";
     sweeps.push({ id: `sweep-${zone.id}-${swept.timestamp}`, zoneId: zone.id, side: zone.side, direction: zone.side === "BUY_SIDE" ? "BEARISH" : "BULLISH", timestamp: swept.timestamp, price: zone.side === "BUY_SIDE" ? swept.high : swept.low, availableAt: swept.timestamp });
@@ -72,17 +76,41 @@ function displacements(bars: MarketChartPoint[], atr: Array<number | null>): Tec
 
 function fairValueGaps(bars: MarketChartPoint[]): TechnicalFairValueGap[] {
   const gaps: TechnicalFairValueGap[] = [];
+  // Range extrema preserve the original maximum fill calculation. A small
+  // segment tree finds the FIRST filling observation without rescanning/copying
+  // every suffix for every gap (quadratic work on long, trending histories).
+  let size = 1; while (size < bars.length) size *= 2;
+  const lows = new Float64Array(2 * size).fill(Infinity);
+  const highs = new Float64Array(2 * size).fill(-Infinity);
+  const suffixLow = new Float64Array(bars.length + 1).fill(Infinity);
+  const suffixHigh = new Float64Array(bars.length + 1).fill(-Infinity);
+  for (let index = bars.length - 1; index >= 0; index--) {
+    lows[size + index] = bars[index].low; highs[size + index] = bars[index].high;
+    suffixLow[index] = Math.min(bars[index].low, suffixLow[index + 1]);
+    suffixHigh[index] = Math.max(bars[index].high, suffixHigh[index + 1]);
+  }
+  for (let node = size - 1; node > 0; node--) {
+    lows[node] = Math.min(lows[node * 2], lows[node * 2 + 1]);
+    highs[node] = Math.max(highs[node * 2], highs[node * 2 + 1]);
+  }
   for (let index = 2; index < bars.length; index += 1) {
     const first = bars[index - 2]!; const third = bars[index]!;
     const direction = first.high < third.low ? "BULLISH" : first.low > third.high ? "BEARISH" : null;
     if (!direction) continue;
     const low = direction === "BULLISH" ? first.high : third.high; const high = direction === "BULLISH" ? third.low : first.low;
-    let best = 0; let filledAt: string | null = null;
-    for (const bar of bars.slice(index + 1)) {
-      const progress = direction === "BULLISH" ? (high - bar.low) / (high - low) : (bar.high - low) / (high - low);
-      best = Math.max(best, Math.min(1, Math.max(0, progress)));
-      if (best >= 1) { filledAt = bar.timestamp; break; }
-    }
+    const progress = (extreme: number) => Math.min(1, Math.max(0, direction === "BULLISH" ? (high - extreme) / (high - low) : (extreme - low) / (high - low)));
+    const best = index + 1 < bars.length ? progress(direction === "BULLISH" ? suffixLow[index + 1] : suffixHigh[index + 1]) : 0;
+    const firstFill = (node: number, left: number, right: number): number => {
+      if (right <= index || progress(direction === "BULLISH" ? lows[node] : highs[node]) < 1) return -1;
+      if (left === right) return left < bars.length ? left : -1;
+      const middle = Math.floor((left + right) / 2);
+      const first = firstFill(node * 2, left, middle);
+      return first !== -1 ? first : firstFill(node * 2 + 1, middle + 1, right);
+    };
+    // Use the original floating-point progress predicate, not a replacement
+    // price comparison, so one-ULP boundary behavior remains identical too.
+    const filledIndex = best >= 1 ? firstFill(1, 0, size - 1) : -1;
+    const filledAt = filledIndex >= 0 ? bars[filledIndex].timestamp : null;
     gaps.push({ id: `fvg-${direction.toLowerCase()}-${third.timestamp}`, direction, low, high, createdAt: third.timestamp, availableAt: third.timestamp, status: best >= 1 ? "FILLED" : best > 0 ? "PARTIAL" : "OPEN", filledPercent: Math.round(best * 100), filledAt });
   }
   return gaps;
@@ -93,10 +121,12 @@ export function calculateTechnicalStructureV4(bars: MarketChartPoint[], supplied
   if (bars.length < 20) return empty;
   const structure = supplied ?? calculateMarketStructure(bars); const atr = rollingAtr(bars);
   const { zones, sweeps } = liquidity(structure, bars, atr); const displacementRows = displacements(bars, atr); const gaps = fairValueGaps(bars);
+  const closes = new Map<string, number>();
+  for (const bar of bars) if (!closes.has(bar.timestamp)) closes.set(bar.timestamp, bar.close);
   const timeline: TechnicalStructureTimelineEvent[] = [
     ...structure.events.map((event) => ({ id: event.id, type: event.type, direction: event.direction, timestamp: event.timestamp, price: event.price, description: `${event.type} ${event.direction.toLowerCase()} confirmed by close.`, availableAt: event.availableAt })),
     ...sweeps.map((event) => ({ id: event.id, type: "LIQUIDITY_SWEEP" as const, direction: event.direction, timestamp: event.timestamp, price: event.price, description: `${event.side.replace("_", " ")} liquidity sweep.`, availableAt: event.availableAt })),
-    ...displacementRows.map((event) => ({ id: event.id, type: "DISPLACEMENT" as const, direction: event.direction, timestamp: event.timestamp, price: bars.find((bar) => bar.timestamp === event.timestamp)!.close, description: `Displacement score ${event.score}/100.`, availableAt: event.availableAt })),
+    ...displacementRows.map((event) => ({ id: event.id, type: "DISPLACEMENT" as const, direction: event.direction, timestamp: event.timestamp, price: closes.get(event.timestamp)!, description: `Displacement score ${event.score}/100.`, availableAt: event.availableAt })),
     ...gaps.flatMap((gap) => [{ id: gap.id, type: "FVG_CREATED" as const, direction: gap.direction, timestamp: gap.createdAt, price: (gap.low + gap.high) / 2, description: `${gap.direction} fair value gap created.`, availableAt: gap.availableAt }, ...(gap.filledAt ? [{ id: `${gap.id}-filled`, type: "FVG_FILLED" as const, direction: gap.direction, timestamp: gap.filledAt, price: (gap.low + gap.high) / 2, description: "Fair value gap fully filled.", availableAt: gap.filledAt }] : [])]),
   ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   return { status: "AVAILABLE", reason: null, swingQuality: swingQuality(structure, bars, atr), liquidityZones: zones, sweeps, displacements: displacementRows, fairValueGaps: gaps, timeline, modelVersion: "technical-structure-v4.0.0" };
