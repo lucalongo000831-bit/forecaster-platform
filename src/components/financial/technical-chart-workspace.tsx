@@ -5,7 +5,7 @@ import { AreaChart, BarChart3, CandlestickChart, ChevronDown, Eraser, Expand, Gr
 import type { MtfTechnicalLevel, PositionPlannerInput, RangedVolumeProfileResult, TechnicalChartResponse, TechnicalDrawing, TechnicalDrawingTool, TechnicalHistoricalRange, TechnicalLayout, TechnicalPanelRangeState, TechnicalPanelState, TechnicalRangeSelection, TechnicalTemplateV4, TechnicalTimeframe, TechnicalWorkspaceV4 } from "@/types";
 import { TECHNICAL_ALERT_CONDITIONS, TECHNICAL_ALERT_REGISTRY, TECHNICAL_DRAWING_REGISTRY, TECHNICAL_TIMEFRAMES, calculateAnchoredVolumeProfile, calculateCrossAssetContext, calculateFixedRangeVolumeProfile, calculateMarketStructure, calculateMtfStructure, calculateMtfTechnicalLevels, calculatePositionPlan, calculateSessionAnalytics, calculateTechnicalConfluenceV2, calculateTechnicalConfluenceV4, calculateTechnicalDivergences, calculateTechnicalLevels, calculateTechnicalStructureV4, calculateVolumeProfile, defaultTechnicalBenchmark, type TechnicalAlertConditionId } from "@/engines/technical";
 import { TechnicalTerminalChart } from "@/components/charts/technical/technical-terminal-chart";
-import { requestTechnicalHistory, technicalRequestKey } from "@/lib/technical-history-client";
+import { requestTechnicalHistory, retainTechnicalDatasets, technicalRequestKey } from "@/lib/technical-history-client";
 import { IndicatorManagerV5 } from "./indicator-manager-v5";
 import { DEFAULT_V5_PREFERENCES, parseTechnicalWorkspaceV5, technicalV5StorageKey, type V5Preferences } from "@/lib/technical-workspace-v5";
 import { MAX_CUSTOM_TECHNICAL_TEMPLATES, sanitizeTechnicalNote, technicalDrawingKey, technicalV1StorageKey, technicalV2StorageKey } from "@/lib/technical-workspace-v2";
@@ -130,14 +130,15 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
     const selection = workspace.panelRanges[panel.id] ?? { range: "1Y" as const, from: null, to: null };
     const response = datasets[datasetRequestKey(panel.symbol, panel.timeframe, selection)] ?? (verifiedPanels[panel.id]?.data.symbol === panel.symbol ? verifiedPanels[panel.id] : null);
     if (!response) return [];
-    const structure = calculateMarketStructure(response.data.bars);
+    const isActiveDataset = response === activeDataset;
+    const structure = isActiveDataset && activeStructure ? activeStructure : calculateMarketStructure(response.data.bars);
     return [[panel.id, {
-      levels: workspace.features.autoSupportResistance ? calculateTechnicalLevels(response.data.bars) : [],
+      levels: workspace.features.autoSupportResistance ? isActiveDataset ? activeLevels : calculateTechnicalLevels(response.data.bars) : [],
       structure: workspace.features.marketStructure ? structure : null,
-      divergences: workspace.features.divergences ? calculateTechnicalDivergences(response.data.bars).divergences : [],
-      advanced: workspace.features.liquidity || workspace.features.fairValueGaps || workspace.features.displacement ? calculateTechnicalStructureV4(response.data.bars, structure) : null,
+      divergences: workspace.features.divergences ? isActiveDataset && activeDivergences ? activeDivergences.divergences : calculateTechnicalDivergences(response.data.bars).divergences : [],
+      advanced: workspace.features.liquidity || workspace.features.fairValueGaps || workspace.features.displacement ? isActiveDataset && activeAdvancedStructure ? activeAdvancedStructure : calculateTechnicalStructureV4(response.data.bars, structure) : null,
     }]];
-  })), [datasets, verifiedPanels, visiblePanels, workspace.features.autoSupportResistance, workspace.features.displacement, workspace.features.divergences, workspace.features.fairValueGaps, workspace.features.liquidity, workspace.features.marketStructure, workspace.panelRanges]);
+  })), [activeAdvancedStructure, activeDataset, activeDivergences, activeLevels, activeStructure, datasets, verifiedPanels, visiblePanels, workspace.features.autoSupportResistance, workspace.features.displacement, workspace.features.divergences, workspace.features.fairValueGaps, workspace.features.liquidity, workspace.features.marketStructure, workspace.panelRanges]);
 
   const loadKeys = useMemo(() => {
     const requested = visiblePanels.flatMap((panel) => { const selection = workspace.panelRanges[panel.id] ?? { range: "1Y" as const, from: null, to: null }; return [{ symbol: panel.symbol, timeframe: panel.timeframe, selection }, ...panel.comparisons.map((comparison) => ({ symbol: comparison, timeframe: panel.timeframe, selection }))]; });
@@ -152,7 +153,10 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
   const loadPlan = JSON.stringify(loadKeys.map((item) => {
     const panels = visiblePanels.filter((panel) => panel.symbol === item.symbol && panel.timeframe === item.timeframe && datasetRequestKey(panel.symbol, panel.timeframe, workspace.panelRanges[panel.id] ?? defaultPanelRange(panel.timeframe)) === datasetRequestKey(item.symbol, item.timeframe, item.selection));
     const warmup = Math.max(500, ...panels.flatMap((panel) => panel.indicators.filter((row) => row.enabled).map((row) => (row.period ?? 26) * 10)));
-    return { ...item, warmup, panelIds: panels.map((panel) => panel.id) };
+    // Availability/reason are response diagnostics, not request identity.
+    // Including them restarted a failed request when its own error rendered,
+    // cancelling the retry and issuing an extra transport.
+    return { ...item, selection: { range: item.selection.range, from: item.selection.from, to: item.selection.to }, warmup, panelIds: panels.map((panel) => panel.id) };
   }));
   const load = useCallback(async (force = false) => {
     const id = ++generation.current;
@@ -166,7 +170,7 @@ export function TechnicalChartWorkspace({ symbol }: { symbol: string }) {
       try {
         const response = await requestTechnicalHistory(item.symbol, item.timeframe, item.selection, controller.signal, item.warmup, force);
         if (generation.current !== id || controller.signal.aborted) return;
-        setDatasets((current) => ({ ...current, [key]: response }));
+        setDatasets((current) => retainTechnicalDatasets(current, key, response));
         if (item.panelIds.length) setVerifiedPanels((current) => ({ ...current, ...Object.fromEntries(item.panelIds.map((panelId) => [panelId, response])) }));
         setErrors((current) => ({ ...current, [key]: "" }));
         setWorkspace((current) => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestTechnicalHistory } from "./technical-history-client";
 const selection = { range: "1Y" as const, from: null, to: null };
+const candle = { timestamp: "2026-09-24T13:30:00Z", open: 10, high: 12, low: 9, close: 11, volume: 100 };
 afterEach(() => vi.unstubAllGlobals());
 describe("atomic Technical history transport", () => {
   it("shares requests and cancellation does not abort another consumer", async () => {
@@ -13,7 +14,7 @@ describe("atomic Technical history transport", () => {
     first.abort();
     await expect(p1).rejects.toMatchObject({ name: "AbortError" });
     expect(fetchMock.mock.calls).toHaveLength(1);
-    complete(new Response(JSON.stringify({ data: { symbol: "SPY", timeframe: "1D", bars: [{}] }, meta: {} })));
+    complete(new Response(JSON.stringify({ data: { symbol: "SPY", timeframe: "1D", requestedRange: "1Y", bars: [candle] }, meta: {} })));
     expect((await p2).data.symbol).toBe("SPY");
   });
   it("rejects wrong-interval responses without cache poisoning or repeated retry", async () => {

@@ -98,6 +98,10 @@ async function firstAvailable<T>(operation: string, symbol: string | undefined, 
 }
 
 export class FinancialProviderRouter {
+  // Small, expiring containment index over the existing provider cache. It
+  // avoids refetching a full source window when only the display contracts.
+  // Cold instances still use providerCached (Redis/LKG/single-flight).
+  private historyWindows = new Map<string, { bounds: { from: string; to: string }; expires: number; result: Promise<ProviderResult<import("@/types").MarketChartDto>> }>();
   private marketOrder(): MarketDataProvider[] {
     const env = getServerEnvironment();
     return unique([env.MARKET_DATA_PRIMARY_PROVIDER, env.MARKET_DATA_FALLBACK_PROVIDER, "yahoo", "fmp", "eodhd"] as const).map((name) => marketAdapters[name]);
@@ -173,11 +177,23 @@ export class FinancialProviderRouter {
   }
 
   /** V5 bounds-aware history uses the existing adapter order/cache/LKG/single-flight. */
-  technicalHistory(symbolInput: string, range: ChartRange, interval: string, bounds: { from: string; to: string }, allowHourlySource = false) {
+  async technicalHistory(symbolInput: string, range: ChartRange, interval: string, bounds: { from: string; to: string }, allowHourlySource = false) {
     const symbol = normalizeSymbol(symbolInput);
     const fixture = deterministicE2EProvider();
     if (fixture) return fixture.chart(symbol, range, interval, bounds);
-    return providerCached(`technical-history:v5-aligned:${symbol}:${interval}:${bounds.from}:${bounds.to}:${allowHourlySource}`, { freshSeconds: 60, staleSeconds: 1800 }, async () => {
+    const identity = `${symbol}:${interval}:${allowHourlySource}`;
+    for (const [key, window] of this.historyWindows) {
+      if (window.expires <= Date.now()) { this.historyWindows.delete(key); continue; }
+      if (key.startsWith(`${identity}:`) && Date.parse(window.bounds.from) <= Date.parse(bounds.from) && Date.parse(window.bounds.to) >= Date.parse(bounds.to)) {
+        const result = await window.result;
+        if (result.meta.freshnessType === "STALE" || result.meta.freshness === "stale" || Date.parse(result.meta.fetchedAt) + 60_000 <= Date.now()) { this.historyWindows.delete(key); continue; }
+        // Never combine providers or alter their price/volume/adjustment policy.
+        return { ...result, meta: { ...result.meta, freshness: "cached" as const, freshnessType: "CACHED" as const }, data: { ...result.data, range, points: result.data.points.filter((bar) => Date.parse(bar.timestamp) >= Date.parse(bounds.from) && Date.parse(bar.timestamp) <= Date.parse(bounds.to)) } };
+      }
+    }
+    const key = `${identity}:${bounds.from}:${bounds.to}`;
+    const expires = Date.now() + 60_000;
+    const result = providerCached(`technical-history:v5-audited:${symbol}:${interval}:${bounds.from}:${bounds.to}:${allowHourlySource}`, { freshSeconds: 60, staleSeconds: 1800 }, async () => {
       let best: Awaited<ReturnType<MarketDataProvider["getHistoricalBars"]>> | null = null;
       let lastError: unknown;
       const order = this.marketOrder();
@@ -188,7 +204,7 @@ export class FinancialProviderRouter {
           const sourceInterval = allowHourlySource && interval === "30m" && adapter.name === "yahoo" ? "1h" : interval;
           const raw = await adapter.getHistoricalBars(symbol, range, sourceInterval, bounds);
           const candidate = { ...raw, data: { ...raw.data, points: sanitizeTechnicalBars(raw.data.points) } };
-          if (candidate.data.interval !== sourceInterval || !candidate.data.points.length) continue;
+          if (candidate.data.symbol !== symbol || candidate.data.interval !== sourceInterval || !candidate.data.points.length) continue;
           const result = { ...candidate, meta: { ...candidate.meta, isFallback: index > 0 } };
           const start = Date.parse(candidate.data.points[0].timestamp);
           if (!best || start < Date.parse(best.data.points[0].timestamp)) best = result;
@@ -201,6 +217,20 @@ export class FinancialProviderRouter {
       if (best) return best;
       throw lastError ?? new ProviderError("yahoo", "NOT_FOUND", "Verified history is unavailable for this interval and range.", false, 404);
     });
+    const window = { bounds: { ...bounds }, expires, result };
+    this.historyWindows.set(key, window);
+    if (this.historyWindows.size > 16) this.historyWindows.delete(this.historyWindows.keys().next().value!);
+    try {
+      const value = await result;
+      const fetchedAt = Date.parse(value.meta.fetchedAt);
+      if (Number.isFinite(fetchedAt)) window.expires = Math.min(window.expires, fetchedAt + 60_000);
+      // A stale/LKG response must never become a fresh containment hit.
+      if (value.meta.freshnessType === "STALE" || value.meta.freshness === "stale") this.historyWindows.delete(key);
+      return value;
+    } catch (error) {
+      if (this.historyWindows.get(key) === window) this.historyWindows.delete(key);
+      throw error;
+    }
   }
 
   analyticsChart(symbolInput: string, range: ChartRange = "MAX", interval: string | null = "1d") {

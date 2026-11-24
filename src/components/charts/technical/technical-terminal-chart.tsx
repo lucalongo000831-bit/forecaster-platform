@@ -74,6 +74,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
   const comparisonsRef = useRef(comparisons);
   const autoLevelsRef = useRef(autoLevels);
   const [ready, setReady] = useState(false);
+  const [renderRevision, setRenderRevision] = useState(0);
   const [anchorCount, setAnchorCount] = useState(0);
   const [visibleRange, setVisibleRange] = useState({ from: 0, to: Math.max(0, dataset.bars.length - 1) });
   const [tooltip, setTooltip] = useState<{ left: number; label: string; values: string[] } | null>(null);
@@ -142,7 +143,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     void import("lightweight-charts").then((library) => {
       if (disposed || !hostRef.current) return;
       const precision = pricePrecision(dataset.bars);
-      chart = library.createChart(hostRef.current, {
+      chart = chartRef.current ?? library.createChart(hostRef.current, {
         width: hostRef.current.clientWidth,
         height: hostRef.current.clientHeight,
         layout: { background: { type: library.ColorType.Solid, color: "#fff" }, textColor: kairoChartTheme.textSecondary, attributionLogo: true, panes: { separatorColor: kairoChartTheme.grid, separatorHoverColor: kairoChartTheme.primary, enableResize: true }, fontFamily: "var(--font-sans, Inter, ui-sans-serif, system-ui)" },
@@ -157,6 +158,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       });
       chartRef.current = chart;
       libraryRef.current = library;
+      chart.applyOptions({ timeScale: { timeVisible: !["1D", "1W"].includes(dataset.timeframe) } });
       const common = { priceFormat: { type: "price" as const, precision, minMove: 10 ** -precision }, priceLineVisible: false, lastValueVisible: true };
       let primary: AnySeries;
       if (chartType === "candlestick" || chartType === "heikin-ashi") {
@@ -253,6 +255,10 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       chart.subscribeCrosshairMove(crosshairHandler);
       visibleHandler = (range) => {
         if (!range) return;
+        // Expose the actual library domain, not rounded/clamped bar indexes.
+        // A partially clipped first/last candle must not pass Fit All checks.
+        hostRef.current?.setAttribute("data-visible-logical-from", String(range.from));
+        hostRef.current?.setAttribute("data-visible-logical-to", String(range.to));
         if (visibleTimerRef.current) clearTimeout(visibleTimerRef.current);
         visibleTimerRef.current = setTimeout(() => {
           const from = Math.max(0, Math.floor(range.from));
@@ -279,6 +285,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       observer = new ResizeObserver(([entry]) => chart?.resize(Math.max(1, Math.floor(entry.contentRect.width)), Math.max(320, Math.floor(entry.contentRect.height))));
       observer.observe(hostRef.current);
       setReady(true);
+      setRenderRevision((value) => value + 1);
     });
     return () => {
       disposed = true;
@@ -287,9 +294,11 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
       if (chart && crosshairHandler) chart.unsubscribeCrosshairMove(crosshairHandler);
       if (chart && visibleHandler) chart.timeScale().unsubscribeVisibleLogicalRangeChange(visibleHandler);
       preservedRangeRef.current = chart?.timeScale().getVisibleLogicalRange() ?? preservedRangeRef.current;
-      chart?.remove();
-      chartRef.current = null;
-      libraryRef.current = null;
+      markerPluginRef.current?.detach();
+      if (chart && primaryRef.current) for (const line of drawingLinesRef.current) primaryRef.current.removePriceLine(line);
+      if (chart) for (const series of [...drawingSeriesRef.current, ...registry.map((row) => row.series)]) chart.removeSeries(series);
+      // Keep the chart/DOM/observer ownership stable across study edits and
+      // quote/data updates. Only its series and scoped subscriptions change.
       primaryRef.current = null;
       drawingSeriesRef.current = [];
       drawingLinesRef.current = [];
@@ -298,11 +307,17 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     };
   }, [calculated, chartType, comparisonSignature, dataset, displayBars, indicators, panelId, viewportKey, studySeries]);
 
+  useEffect(() => () => {
+    chartRef.current?.remove();
+    chartRef.current = null;
+    libraryRef.current = null;
+  }, []);
+
   useEffect(() => {
     const library = libraryRef.current;
     if (!ready || !library || !chartRef.current) return;
     chartRef.current.priceScale("right").applyOptions({ mode: priceScale === "LOGARITHMIC" ? library.PriceScaleMode.Logarithmic : priceScale === "PERCENTAGE" ? library.PriceScaleMode.Percentage : library.PriceScaleMode.Normal });
-  }, [priceScale, ready]);
+  }, [priceScale, ready, renderRevision]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -374,7 +389,7 @@ export function TechnicalTerminalChart({ dataset, comparisons, chartType, indica
     advancedStructure?.displacements.slice(-8).forEach((event) => markers.push({ time: time(event.timestamp), position: event.direction === "BULLISH" ? "belowBar" : "aboveBar", color: "#f4a525", shape: event.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: "DISP", size: 1 }));
     divergences.slice(-8).forEach((divergence) => markers.push({ time: time(divergence.confirmedAt), position: divergence.direction === "BULLISH" ? "belowBar" : "aboveBar", color: divergence.direction === "BULLISH" ? "#18a879" : "#e05e72", shape: divergence.direction === "BULLISH" ? "arrowUp" : "arrowDown", text: `${divergence.indicator} DIV`, size: 1 }));
     if (markers.length) markerPluginRef.current = library.createSeriesMarkers(primary, markers);
-  }, [advancedStructure, autoLevelsSignature, dataset.bars, divergences, drawings, marketStructure, mtfLevels, positionPlan, rangedProfiles, ready, selectedDrawingId, sessionAnalytics, structureDensity]);
+  }, [advancedStructure, autoLevelsSignature, dataset.bars, divergences, drawings, marketStructure, mtfLevels, positionPlan, rangedProfiles, ready, renderRevision, selectedDrawingId, sessionAnalytics, structureDensity]);
 
   useEffect(() => {
     if (!ready || !linkedCrosshair || linkedCrosshair.sourcePanelId === panelId) return;
